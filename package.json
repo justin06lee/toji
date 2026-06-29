@@ -1,0 +1,113 @@
+{
+  "name": "toji-agent-browser",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Toji: a Chromium-based agent-first browser powered by a local CLI coding agent (Claude Code, Codex, opencode).",
+  "type": "module",
+  "main": "apps/desktop/main.cjs",
+  "packageManager": "bun@1.3.13",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "trustedDependencies": [
+    "electron",
+    "esbuild"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n server,web,electron -c auto \"bun run dev:server\" \"bun run dev:web\" \"bun run dev:electron\"",
+    "dev:web": "vite --host 127.0.0.1 --port 5173",
+    "dev:server": "tsx watch apps/agent-server/src/index.ts",
+    "dev:electron": "wait-on tcp:5173 tcp:8787 && cross-env ELECTRON_START_URL=http://127.0.0.1:5173 electron apps/desktop/main.cjs",
+    "build": "bun run typecheck && bun run build:server && bun run build:web",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:web": "vite build",
+    "preview:web": "vite preview --host 127.0.0.1 --port 5173",
+    "start": "bun run start:server",
+    "start:server": "tsx apps/agent-server/src/index.ts",
+    "start:desktop": "electron apps/desktop/main.cjs",
+    "setup:browsers": "playwright install chromium",
+    "typecheck": "tsc --noEmit",
+    "smoke": "tsx scripts/smoke.ts",
+    "e2e:demo": "tsx scripts/e2e-demo.ts",
+    "start:app": "concurrently -k -n server,desktop -c auto \"bun run start:server\" \"wait-on tcp:8787 && electron apps/desktop/main.cjs\"",
+    "package": "bun run build && electron-builder",
+    "package:dir": "bun run build && electron-builder --dir",
+    "check": "bun run typecheck && bun run smoke && bun run build && bun run e2e:demo"
+  },
+  "build": {
+    "appId": "com.ezzy.toji",
+    "productName": "Toji",
+    "directories": {
+      "output": "release"
+    },
+    "icon": "apps/desktop/build/icon.png",
+    "mac": {
+      "icon": "apps/desktop/build/icon.png",
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg"
+      ]
+    },
+    "dmg": {
+      "title": "Toji",
+      "window": {
+        "width": 540,
+        "height": 380
+      },
+      "contents": [
+        {
+          "x": 150,
+          "y": 200,
+          "type": "file"
+        },
+        {
+          "x": 390,
+          "y": 200,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "files": [
+      "package.json",
+      "apps/desktop/**/*",
+      "dist/renderer/**/*",
+      "dist/server/**/*",
+      ".env.local",
+      ".env"
+    ],
+    "asar": false
+  },
+  "dependencies": {
+    "@fontsource/poppins": "^5.2.7",
+    "@vitejs/plugin-react": "6.0.3",
+    "cors": "2.8.6",
+    "dotenv": "17.4.2",
+    "express": "5.2.1",
+    "lucide-react": "1.21.0",
+    "motion": "^12.42.0",
+    "playwright": "1.61.1",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "ws": "8.21.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.1",
+    "@types/cors": "2.8.19",
+    "@types/express": "5.0.6",
+    "@types/node": "26.0.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@types/ws": "8.18.1",
+    "concurrently": "10.0.3",
+    "cross-env": "10.1.0",
+    "electron": "42.5.0",
+    "electron-builder": "^26.0.0",
+    "tailwindcss": "^4.3.1",
+    "tsx": "4.22.4",
+    "typescript": "6.0.3",
+    "vite": "8.1.0",
+    "wait-on": "9.0.10"
+  }
+}

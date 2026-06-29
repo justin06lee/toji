@@ -1,0 +1,13 @@
+node_modules
+.env
+.env.local
+dist
+release
+.DS_Store
+.playwright
+screenshots
+*.log
+coverage
+.cache
+
+.toji-data

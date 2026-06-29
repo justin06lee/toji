@@ -1,0 +1,39 @@
+@import 'tailwindcss';
+
+/* Dark mode is driven by a `.dark` class on <html> (toggled in App). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', ui-sans-serif, sans-serif;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  /* Base text color so portal'd popups (Settings, menus) rendered into <body> —
+     outside the app's themed wrapper — still read correctly in each theme. */
+  color: #171717; /* neutral-900 */
+}
+.dark body {
+  color: #fafafa; /* neutral-50 */
+}
+
+/* Hidden-but-functional scrollbars */
+* { scrollbar-width: none; }
+*::-webkit-scrollbar { display: none; }
+
+/* Drag region for the custom title bar */
+.drag { -webkit-app-region: drag; }
+.no-drag { -webkit-app-region: no-drag; }
+
+/* Indeterminate page-loading bar */
+@keyframes toji-load {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(420%); }
+}
