@@ -1204,7 +1204,9 @@ export function App() {
     return (
       <div className="flex h-screen flex-col bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
         {windowDragHandle}
-        <header className="drag shrink-0 border-b border-black/[0.07] px-3 pt-2.5 pb-2.5 dark:border-white/10">{addressRow}</header>
+        <header className="drag shrink-0 border-b border-black/[0.07] px-3 pt-5 pb-2.5 dark:border-white/10">
+          <div className={isMac ? 'pl-[70px]' : ''}>{addressRow}</div>
+        </header>
         <div className="flex min-h-0 flex-1">
           {sidebarOpen && (
             <Sidebar

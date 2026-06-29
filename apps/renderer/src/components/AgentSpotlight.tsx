@@ -1,6 +1,7 @@
 import { ArrowUp, Minus, MousePointer2, Plus, Square } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { motion } from 'motion/react';
 
 export interface AgentLogEntry {
   role: 'you' | 'agent' | 'system';
@@ -41,13 +42,19 @@ export function AgentSpotlight({ target, running, log, maxSteps, noLimit, onMaxS
   }, [onClose]);
 
   return createPortal(
-    <div
+    <motion.div
       className="fixed inset-0 z-[120] flex items-center justify-center bg-black/25 p-6 backdrop-blur-[2px]"
       onMouseDown={onClose}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.18, ease: 'easeOut' }}
     >
-      <div
+      <motion.div
         className="no-drag w-[min(640px,92vw)] overflow-hidden rounded-2xl border border-black/10 bg-white/95 shadow-2xl backdrop-blur-xl dark:border-white/12 dark:bg-neutral-900/95"
         onMouseDown={(e) => e.stopPropagation()}
+        initial={{ opacity: 0, scale: 0.96, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 280, damping: 30 }}
       >
         {log.length > 0 && (
           <div ref={logRef} className="max-h-[42vh] space-y-2 overflow-y-auto border-b border-black/[0.06] px-4 py-4 dark:border-white/[0.08]">
@@ -136,8 +143,8 @@ export function AgentSpotlight({ target, running, log, maxSteps, noLimit, onMaxS
           </button>
           {noLimit && <span className="text-amber-500">⚠ may run long — Stop to halt</span>}
         </div>
-      </div>
-    </div>,
+      </motion.div>
+    </motion.div>,
     document.body
   );
 }

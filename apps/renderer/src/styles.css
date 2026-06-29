@@ -32,39 +32,62 @@ body {
 .drag { -webkit-app-region: drag; }
 .no-drag { -webkit-app-region: no-drag; }
 
-/* Hover-reveal window drag handle: a thin draggable strip pinned to the very top
-   of the window. Hovering near the top slides a small grip pill down as an
-   affordance for grabbing/moving the window, so the omnibox can sit flush at top. */
+/* Hover-reveal window drag handle: a draggable strip pinned to the very top of the
+   window. Hovering anywhere along the top reveals a downward "notch" with a dot-grid
+   grip — a grabber to move the window, so the omnibox can sit near the top without a
+   static title bar. The whole strip is draggable, not just the notch. */
 .drag-strip {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  height: 11px;
+  height: 20px;
   z-index: 80;
   -webkit-app-region: drag;
   display: flex;
   justify-content: center;
   align-items: flex-start;
 }
-.drag-grip {
-  margin-top: 2px;
-  width: 44px;
-  height: 4px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.22);
-  opacity: 0;
-  transform: translateY(-6px);
-  transition: opacity 0.16s ease, transform 0.16s ease;
+.drag-notch {
   pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 18px 7px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-top: none;
+  border-radius: 0 0 13px 13px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+  opacity: 0;
+  transform: translateY(-100%);
+  transition: opacity 0.18s ease, transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.drag-strip:hover .drag-grip {
+.dark .drag-notch {
+  background: #171717;
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.drag-strip:hover .drag-notch {
   opacity: 1;
   transform: translateY(0);
 }
-.dark .drag-grip { background: rgba(255, 255, 255, 0.3); }
+/* The dot-grid grip (the ⠿ "drag dots" pattern). */
+.drag-grip {
+  display: grid;
+  grid-template-columns: repeat(3, 3px);
+  grid-auto-rows: 3px;
+  gap: 3px;
+}
+.drag-grip i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.32);
+}
+.dark .drag-grip i { background: rgba(255, 255, 255, 0.42); }
 @media (prefers-reduced-motion: reduce) {
-  .drag-grip { transition: none; }
+  .drag-notch { transition: opacity 0.18s ease; }
 }
 
 /* Indeterminate page-loading bar */
