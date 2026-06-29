@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronRight, PanelLeftClose, Plus, X } from 'lucide-react';
 import { useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { hostOf } from '../lib/nav';
 import { GROUP_COLORS, type BrowserTab, type TabGroup } from '../types';
 
 const ICON = `${import.meta.env.BASE_URL}toji-round.png`;
@@ -18,14 +19,6 @@ interface SidebarProps {
   onTabHover?: (tabId: string, el: HTMLElement) => void;
   onTabHoverEnd?: () => void;
   onTabContextMenu: (tabId: string, x: number, y: number) => void;
-}
-
-function hostOf(url: string) {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '');
-  } catch {
-    return url;
-  }
 }
 
 function tabLabel(tab: BrowserTab) {

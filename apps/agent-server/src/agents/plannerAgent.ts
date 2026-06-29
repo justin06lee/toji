@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import type { PredictionResult, ResearchMode, ResearchPlan, ResearchPlanStep } from '../types.js';
+import { fallbackIfEmpty } from '../lib/text.js';
 import { completeJSON } from './model.js';
 
 function stepsFor(searchQueries: string[], mode: ResearchMode, maxTabs: number): ResearchPlanStep[] {
@@ -104,22 +105,22 @@ export async function buildResearchPlan(query: string, prediction: PredictionRes
       temperature: 0.12,
       maxTokens: 1200
     });
-    const searchQueries = Array.isArray(planned.searchQueries) && planned.searchQueries.length > 0 ? planned.searchQueries.slice(0, config.maxSearchQueries) : fallback.searchQueries;
+    const searchQueries = fallbackIfEmpty(planned.searchQueries, fallback.searchQueries).slice(0, config.maxSearchQueries);
     return {
       ...fallback,
       ...planned,
       goal: planned.goal || fallback.goal,
       depth: planned.depth === 'spark' || planned.depth === 'quick' || planned.depth === 'standard' || planned.depth === 'deep' ? planned.depth : fallback.depth,
       searchQueries,
-      questions: Array.isArray(planned.questions) && planned.questions.length > 0 ? planned.questions : fallback.questions,
-      sourceStrategy: Array.isArray(planned.sourceStrategy) && planned.sourceStrategy.length > 0 ? planned.sourceStrategy : fallback.sourceStrategy,
-      riskControls: Array.isArray(planned.riskControls) && planned.riskControls.length > 0 ? planned.riskControls : fallback.riskControls,
-      expectedOutput: Array.isArray(planned.expectedOutput) && planned.expectedOutput.length > 0 ? planned.expectedOutput : fallback.expectedOutput,
-      expectedOutputs: Array.isArray(planned.expectedOutputs) && planned.expectedOutputs.length > 0 ? planned.expectedOutputs : fallback.expectedOutputs,
-      stopConditions: Array.isArray(planned.stopConditions) && planned.stopConditions.length > 0 ? planned.stopConditions : fallback.stopConditions,
+      questions: fallbackIfEmpty(planned.questions, fallback.questions),
+      sourceStrategy: fallbackIfEmpty(planned.sourceStrategy, fallback.sourceStrategy),
+      riskControls: fallbackIfEmpty(planned.riskControls, fallback.riskControls),
+      expectedOutput: fallbackIfEmpty(planned.expectedOutput, fallback.expectedOutput),
+      expectedOutputs: fallbackIfEmpty(planned.expectedOutputs, fallback.expectedOutputs),
+      stopConditions: fallbackIfEmpty(planned.stopConditions, fallback.stopConditions),
       maxDepth: Number(planned.maxDepth ?? fallback.maxDepth),
       stance: planned.stance ?? fallback.stance,
-      steps: Array.isArray(planned.steps) && planned.steps.length > 0 ? planned.steps : stepsFor(searchQueries, mode, mode === 'speculative' ? Math.min(2, fallback.steps[1]?.budgetTabs ?? 1) : fallback.steps[1]?.budgetTabs ?? config.maxAgentTabs)
+      steps: fallbackIfEmpty(planned.steps, stepsFor(searchQueries, mode, mode === 'speculative' ? Math.min(2, fallback.steps[1]?.budgetTabs ?? 1) : fallback.steps[1]?.budgetTabs ?? config.maxAgentTabs))
     };
   } catch (error) {
     console.warn('[toji] buildResearchPlan model call failed, using heuristic plan:', error instanceof Error ? error.message : error);
