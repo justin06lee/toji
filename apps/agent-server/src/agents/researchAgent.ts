@@ -502,8 +502,7 @@ export class ResearchOrchestrator {
     try {
       const activeContext = await browser.newContext({
         viewport: { width: 1365, height: 768 },
-        userAgent: config.userAgent,
-        ignoreHTTPSErrors: true
+        userAgent: config.userAgent
       });
       context = activeContext;
       const queue = searchResults.slice(0, maxTabs);
