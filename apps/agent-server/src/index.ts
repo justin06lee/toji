@@ -17,10 +17,34 @@ import { gatherPageSources } from './agents/search.js';
 import { getCachedPage, putCachedPage } from './lib/pageCache.js';
 import { nextAgentAction, researchHelp } from './agents/webAgent.js';
 import { agentAvailable, liveModelName } from './agents/model.js';
-import { detectAgents, getEffectiveAgent, refreshDetection, setAgentChoice } from './agents/agentRuntime.js';
+import { detectAgents, getEffectiveAgent, isValidAgentCmd, refreshDetection, setAgentChoice } from './agents/agentRuntime.js';
 import type { UserSettings } from './types.js';
 
 const app = express();
+
+// Simple in-memory rate limiter for expensive endpoints.
+// Prevents abuse from rogue local processes or DNS rebinding attacks.
+function rateLimit(windowMs: number, maxRequests: number) {
+  const hits = new Map<string, number[]>();
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const key = req.ip ?? 'unknown';
+    const now = Date.now();
+    const timestamps = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
+    if (timestamps.length >= maxRequests) {
+      return res.status(429).json({ error: 'Too many requests. Please slow down.' });
+    }
+    timestamps.push(now);
+    hits.set(key, timestamps);
+    // Periodic cleanup to prevent memory leak.
+    if (hits.size > 100) {
+      for (const [k, v] of hits) {
+        if (v.filter((t) => now - t < windowMs).length === 0) hits.delete(k);
+      }
+    }
+    return next();
+  };
+}
+const expensiveRateLimit = rateLimit(10_000, 10); // 10 requests per 10 seconds
 
 // Only the local renderer needs cross-origin access. In the packaged desktop
 // app the renderer is loaded via file:// (which sends `Origin: null`), and in
@@ -64,7 +88,7 @@ const settingsPatchSchema = z
     visualAnalysis: z.boolean().optional(),
     theme: z.enum(['dark', 'system']).optional(),
     agent: z.enum(['auto', 'claude', 'codex', 'opencode', 'off']).optional(),
-    agentCmd: z.string().max(500).optional()
+    agentCmd: z.string().max(500).refine((val) => !val || isValidAgentCmd(val), { message: 'Invalid agent command: contains unsafe characters or references a disallowed binary' }).optional()
   })
   .strict();
 
@@ -169,7 +193,7 @@ app.post('/api/predict', async (req, res, next) => {
 // native parser renders it progressively as it arrives (correct handling of
 // <style> across chunks, no flicker). The response carries a strict CSP so the
 // generated page can use inline styles + images but never run scripts.
-app.get('/api/page/stream', async (req, res) => {
+app.get('/api/page/stream', expensiveRateLimit, async (req, res) => {
   const query = String(req.query.q ?? '').slice(0, 1200).trim();
   const theme = req.query.theme === 'dark' ? 'dark' : 'light';
   const fresh = req.query.fresh === '1';
@@ -216,7 +240,7 @@ app.get('/api/page/stream', async (req, res) => {
 });
 
 // Web agent: given the page's interactive elements + a goal, decide the next action.
-app.post('/api/agent/step', async (req, res, next) => {
+app.post('/api/agent/step', expensiveRateLimit, async (req, res, next) => {
   try {
     const body = z
       .object({
@@ -276,7 +300,7 @@ app.get('/api/page/sources', async (req, res, next) => {
   }
 });
 
-app.post('/api/research/start', async (req, res, next) => {
+app.post('/api/research/start', expensiveRateLimit, async (req, res, next) => {
   try {
     const body = z
       .object({
@@ -294,7 +318,7 @@ app.post('/api/research/start', async (req, res, next) => {
   }
 });
 
-app.post('/api/research/demo', async (req, res, next) => {
+app.post('/api/research/demo', expensiveRateLimit, async (req, res, next) => {
   try {
     if (!config.demoModeEnabled) return res.status(403).json({ error: 'demo mode is disabled' });
     const body = z
