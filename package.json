@@ -26,6 +26,8 @@
     "start:server": "tsx apps/agent-server/src/index.ts",
     "start:desktop": "electron apps/desktop/main.cjs",
     "setup:browsers": "playwright install chromium",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "smoke": "tsx scripts/smoke.ts",
     "e2e:demo": "tsx scripts/e2e-demo.ts",
@@ -108,6 +110,7 @@
     "tsx": "4.22.4",
     "typescript": "6.0.3",
     "vite": "8.1.0",
+    "vitest": "^4.1.9",
     "wait-on": "9.0.10"
   }
 }
