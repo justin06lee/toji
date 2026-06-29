@@ -1,0 +1,90 @@
+import { Check, ChevronDown } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+
+export interface DropdownOption<T extends string> {
+  value: T;
+  label: string;
+  /** Optional short muted text on the right of the row. */
+  hint?: string;
+  /** Optional small status dot color (e.g. availability). */
+  dotColor?: string;
+}
+
+interface DropdownProps<T extends string> {
+  value: T;
+  options: DropdownOption<T>[];
+  onChange: (value: T) => void;
+  disabled?: boolean;
+  placeholder?: string;
+  className?: string;
+}
+
+/** Minimal custom select: a button + popover list. Closes on outside-click / Escape. */
+export function Dropdown<T extends string>({ value, options, onChange, disabled, placeholder, className }: DropdownProps<T>) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selected = options.find((o) => o.value === value);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className={`relative ${className ?? ''}`}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between gap-2 rounded-lg border border-black/10 bg-transparent px-2.5 py-2 text-left text-[13px] outline-none transition hover:border-black/20 focus:border-black/30 disabled:opacity-50 dark:border-white/12 dark:hover:border-white/20 dark:focus:border-white/30"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          {selected?.dotColor && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: selected.dotColor }} />}
+          <span className="truncate">{selected ? selected.label : placeholder ?? 'Select…'}</span>
+        </span>
+        <ChevronDown size={14} className={`shrink-0 text-neutral-400 transition ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 overflow-hidden rounded-lg border border-black/10 bg-white py-1 shadow-lg dark:border-white/12 dark:bg-neutral-900">
+          {options.map((opt) => {
+            const active = opt.value === value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => {
+                  onChange(opt.value);
+                  setOpen(false);
+                }}
+                className={`flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-[13px] transition ${
+                  active ? 'bg-black/[0.05] dark:bg-white/10' : 'hover:bg-black/[0.04] dark:hover:bg-white/[0.07]'
+                }`}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  {opt.dotColor && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: opt.dotColor }} />}
+                  <span className="truncate">{opt.label}</span>
+                </span>
+                <span className="flex shrink-0 items-center gap-1.5">
+                  {opt.hint && <span className="text-[11px] text-neutral-400">{opt.hint}</span>}
+                  {active && <Check size={13} className="text-neutral-500 dark:text-neutral-300" />}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}

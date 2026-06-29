@@ -64,7 +64,9 @@ const settingsPatchSchema = z
     visualAnalysis: z.boolean().optional(),
     theme: z.enum(['dark', 'system']).optional(),
     agent: z.enum(['auto', 'claude', 'codex', 'opencode', 'off']).optional(),
-    agentCmd: z.string().max(500).optional()
+    agentCmd: z.string().max(500).optional(),
+    agentModel: z.string().max(120).optional(),
+    agentThinking: z.enum(['default', 'low', 'medium', 'high']).optional()
   })
   .strict();
 
@@ -132,7 +134,12 @@ app.patch('/api/settings', async (req, res, next) => {
     const nextSettings: UserSettings = { ...current, ...patch };
     await saveSettings(nextSettings);
     // Apply the agent choice immediately so the change takes effect without a restart.
-    setAgentChoice({ agent: nextSettings.agent, agentCmd: nextSettings.agentCmd });
+    setAgentChoice({
+      agent: nextSettings.agent,
+      agentCmd: nextSettings.agentCmd,
+      agentModel: nextSettings.agentModel,
+      agentThinking: nextSettings.agentThinking
+    });
     broadcast({ type: 'settings_update', settings: nextSettings });
     res.json(nextSettings);
   } catch (error) {
@@ -149,7 +156,7 @@ app.get('/api/agents', (_req, res) => {
     detected,
     available: agentAvailable(),
     effective: effective
-      ? { label: effective.label, source: effective.source, command: [effective.cmd, ...effective.args].join(' ') }
+      ? { id: effective.id, label: effective.label, source: effective.source, command: [effective.cmd, ...effective.args].join(' ') }
       : null
   });
 });
@@ -421,7 +428,12 @@ await researchOrchestrator.hydrate();
 detectAgents();
 try {
   const settings = await loadSettings();
-  setAgentChoice({ agent: settings.agent, agentCmd: settings.agentCmd });
+  setAgentChoice({
+    agent: settings.agent,
+    agentCmd: settings.agentCmd,
+    agentModel: settings.agentModel,
+    agentThinking: settings.agentThinking
+  });
 } catch {
   // Defaults (env-seeded) apply if settings can't be read.
 }

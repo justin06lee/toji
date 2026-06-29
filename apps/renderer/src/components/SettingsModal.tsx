@@ -1,9 +1,10 @@
-import { AlertTriangle, Check, Cpu, KeyRound, Loader2, Plus, ShieldCheck, Trash2, X } from 'lucide-react';
+import { Check, Cpu, KeyRound, Loader2, Plus, ShieldCheck, Trash2, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { getAgents, getSettings, saveSettings } from '../lib/api';
 import type { CredentialSet, CredentialStore } from '../lib/credentials';
-import type { AgentChoice, AgentsStatus } from '../types';
+import type { AgentChoice, AgentId, AgentsStatus, ThinkingLevel, UserSettings } from '../types';
+import { Dropdown, type DropdownOption } from './Dropdown';
 
 interface SettingsModalProps {
   open: boolean;
@@ -15,13 +16,38 @@ interface SettingsModalProps {
 let uid = 0;
 const newId = () => `set-${Date.now()}-${(uid += 1)}`;
 
-const AGENT_OPTIONS: { value: AgentChoice | 'custom'; label: string }[] = [
-  { value: 'auto', label: 'Auto-detect (recommended)' },
+type AgentPick = AgentChoice | 'custom';
+
+const AGENT_OPTIONS: { value: AgentPick; label: string }[] = [
+  { value: 'auto', label: 'Auto-detect' },
   { value: 'claude', label: 'Claude Code' },
   { value: 'codex', label: 'Codex' },
   { value: 'opencode', label: 'opencode' },
-  { value: 'custom', label: 'Custom command…' },
-  { value: 'off', label: 'Off (demo mode)' }
+  { value: 'custom', label: 'Custom command' },
+  { value: 'off', label: 'Off' }
+];
+
+const MODELS: Record<AgentId, DropdownOption<string>[]> = {
+  claude: [
+    { value: '', label: 'Default' },
+    { value: 'opus', label: 'Opus' },
+    { value: 'sonnet', label: 'Sonnet' },
+    { value: 'haiku', label: 'Haiku' }
+  ],
+  codex: [
+    { value: '', label: 'Default' },
+    { value: 'gpt-5-codex', label: 'gpt-5-codex' },
+    { value: 'gpt-5', label: 'gpt-5' },
+    { value: 'o3', label: 'o3' }
+  ],
+  opencode: [{ value: '', label: 'Default' }]
+};
+
+const THINKING: DropdownOption<ThinkingLevel>[] = [
+  { value: 'default', label: 'Default' },
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' }
 ];
 
 /** In-UI picker for the CLI coding agent that powers inference. Self-contained:
@@ -31,6 +57,8 @@ function AgentSection({ open }: { open: boolean }) {
   const [status, setStatus] = useState<AgentsStatus | null>(null);
   const [agent, setAgent] = useState<AgentChoice>('auto');
   const [agentCmd, setAgentCmd] = useState('');
+  const [agentModel, setAgentModel] = useState('');
+  const [agentThinking, setAgentThinking] = useState<ThinkingLevel>('default');
   const [cmdDraft, setCmdDraft] = useState('');
   // A custom command is persisted as agent='off' + a non-empty agentCmd. This flag
   // lets the user open the custom row before they've typed/applied a command.
@@ -46,6 +74,8 @@ function AgentSection({ open }: { open: boolean }) {
       const [settings, agents] = await Promise.all([getSettings(), getAgents()]);
       setAgent(settings.agent);
       setAgentCmd(settings.agentCmd ?? '');
+      setAgentModel(settings.agentModel ?? '');
+      setAgentThinking(settings.agentThinking ?? 'default');
       setCmdDraft(settings.agentCmd ?? '');
       setCustomMode(Boolean(settings.agentCmd?.trim()));
       setStatus(agents);
@@ -60,13 +90,16 @@ function AgentSection({ open }: { open: boolean }) {
     if (open) void refresh();
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const apply = async (nextAgent: AgentChoice, nextCmd: string) => {
+  const applyPatch = async (patch: Partial<Pick<UserSettings, 'agent' | 'agentCmd' | 'agentModel' | 'agentThinking'>>) => {
     setSaving(true);
     setError(null);
+    const next = { agent, agentCmd, agentModel, agentThinking, ...patch };
     try {
-      await saveSettings({ agent: nextAgent, agentCmd: nextCmd });
-      setAgent(nextAgent);
-      setAgentCmd(nextCmd);
+      await saveSettings(next);
+      setAgent(next.agent);
+      setAgentCmd(next.agentCmd);
+      setAgentModel(next.agentModel);
+      setAgentThinking(next.agentThinking);
       setStatus(await getAgents());
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to apply agent settings.');
@@ -75,21 +108,44 @@ function AgentSection({ open }: { open: boolean }) {
     }
   };
 
-  const onSelect = (value: AgentChoice | 'custom') => {
+  const onSelectAgent = (value: AgentPick) => {
     if (value === 'custom') {
       setCustomMode(true);
-      // Apply right away only if a command is already typed; else just reveal the row.
-      if (cmdDraft.trim()) void apply('off', cmdDraft.trim());
+      if (cmdDraft.trim()) void applyPatch({ agent: 'off', agentCmd: cmdDraft.trim() });
       return;
     }
     setCustomMode(false);
-    void apply(value, '');
+    // Model presets are per-agent, so reset the model when switching agents.
+    void applyPatch({ agent: value, agentCmd: '', agentModel: '' });
   };
 
-  const detectedFor = (id: string) => status?.detected.find((d) => d.id === id);
-  const noneAvailable = status ? !status.available : false;
+  const dotFor = (id: AgentId): string | undefined => {
+    const det = status?.detected.find((d) => d.id === id);
+    if (!det) return undefined;
+    return det.available ? '#10b981' : '#9ca3af';
+  };
+
   const usingCustom = customMode || Boolean(agentCmd.trim());
-  const selectMode: AgentChoice | 'custom' = usingCustom ? 'custom' : agent;
+  const pick: AgentPick = usingCustom ? 'custom' : agent;
+  // The agent whose model list applies: explicit choice, or what auto resolved to.
+  const tunedId: AgentId | null = !usingCustom && agent !== 'off' ? (agent === 'auto' ? status?.effective?.id ?? null : agent) : null;
+  const showTuning = tunedId !== null;
+
+  const agentOptions: DropdownOption<AgentPick>[] = AGENT_OPTIONS.map((o) => ({
+    value: o.value,
+    label: o.label,
+    dotColor: o.value === 'claude' || o.value === 'codex' || o.value === 'opencode' ? dotFor(o.value) : undefined
+  }));
+
+  const statusLine = error ? (
+    <span className="text-red-500">{error}</span>
+  ) : agent === 'off' && !usingCustom ? (
+    <span className="text-neutral-400">Demo mode — no agent</span>
+  ) : status?.effective ? (
+    <span className="text-emerald-600 dark:text-emerald-400">Ready</span>
+  ) : (
+    <span className="text-amber-600 dark:text-amber-400">No agent found — install one or set a custom command</span>
+  );
 
   return (
     <div className="mb-5">
@@ -99,40 +155,24 @@ function AgentSection({ open }: { open: boolean }) {
         {(loading || saving) && <Loader2 size={13} className="animate-spin text-neutral-400" />}
       </div>
       <p className="mb-3 text-[12px] leading-5 text-neutral-500">
-        Toji runs your own local coding agent for inference — no API keys. Pick one you have installed; Auto-detect finds it for you.
+        Toji runs your own local coding agent for inference — no API keys.
       </p>
 
-      <div className="rounded-xl border border-black/10 p-3 dark:border-white/10">
-        <select
-          value={usingCustom ? 'custom' : selectMode}
-          onChange={(e) => onSelect(e.target.value as AgentChoice | 'custom')}
-          disabled={saving}
-          className="w-full rounded-lg border border-black/10 bg-transparent px-2.5 py-2 text-[13px] outline-none focus:border-black/30 disabled:opacity-50 dark:border-white/12 dark:focus:border-white/30"
-        >
-          {AGENT_OPTIONS.map((opt) => {
-            const det = detectedFor(opt.value);
-            const suffix = det ? (det.available ? ' — detected' : ' — not found') : '';
-            return (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-                {suffix}
-              </option>
-            );
-          })}
-        </select>
+      <div className="space-y-2 rounded-xl border border-black/10 p-3 dark:border-white/10">
+        <Dropdown<AgentPick> value={pick} options={agentOptions} onChange={onSelectAgent} disabled={saving} />
 
         {usingCustom && (
-          <div className="mt-2 flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <input
               value={cmdDraft}
               onChange={(e) => setCmdDraft(e.target.value)}
-              placeholder="e.g. /opt/homebrew/bin/claude -p --dangerously-skip-permissions"
+              placeholder="claude -p --dangerously-skip-permissions"
               spellCheck={false}
               className="min-w-0 flex-1 rounded-lg border border-black/10 bg-transparent px-2.5 py-1.5 font-mono text-[12px] outline-none focus:border-black/30 dark:border-white/12 dark:focus:border-white/30"
             />
             <button
               type="button"
-              onClick={() => cmdDraft.trim() && void apply('off', cmdDraft.trim())}
+              onClick={() => cmdDraft.trim() && void applyPatch({ agent: 'off', agentCmd: cmdDraft.trim() })}
               disabled={saving || !cmdDraft.trim() || cmdDraft.trim() === agentCmd.trim()}
               className="shrink-0 rounded-lg bg-neutral-900 px-3 py-1.5 text-[12px] font-medium text-white transition enabled:hover:opacity-85 disabled:opacity-40 dark:bg-white dark:text-neutral-900"
             >
@@ -141,26 +181,26 @@ function AgentSection({ open }: { open: boolean }) {
           </div>
         )}
 
-        {/* Live status: what command will actually run, or a warning when nothing is found. */}
-        <div className="mt-2.5 text-[12px]">
-          {error ? (
-            <span className="inline-flex items-center gap-1.5 text-red-500">
-              <AlertTriangle size={13} /> {error}
-            </span>
-          ) : status?.effective ? (
-            <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-              <Check size={13} /> Using <strong className="font-medium">{status.effective.label}</strong>
-              <code className="ml-1 truncate rounded bg-black/[0.06] px-1.5 py-0.5 font-mono text-[11px] dark:bg-white/10">{status.effective.command}</code>
-            </span>
-          ) : noneAvailable && selectMode !== 'off' ? (
-            <span className="inline-flex items-start gap-1.5 text-amber-600 dark:text-amber-400">
-              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-              <span>No coding agent found. Install Claude Code, Codex, or opencode — or choose a Custom command. Toji uses demo output until then.</span>
-            </span>
-          ) : selectMode === 'off' ? (
-            <span className="text-neutral-500">Agent off — Toji uses deterministic demo output.</span>
-          ) : null}
-        </div>
+        {showTuning && tunedId && (
+          <div className="flex gap-2">
+            <label className="flex-1">
+              <span className="mb-1 block text-[11px] text-neutral-400">Model</span>
+              <Dropdown<string>
+                value={agentModel}
+                options={MODELS[tunedId]}
+                onChange={(v) => void applyPatch({ agentModel: v })}
+                disabled={saving}
+                placeholder="Default"
+              />
+            </label>
+            <label className="flex-1">
+              <span className="mb-1 block text-[11px] text-neutral-400">Thinking</span>
+              <Dropdown<ThinkingLevel> value={agentThinking} options={THINKING} onChange={(v) => void applyPatch({ agentThinking: v })} disabled={saving} />
+            </label>
+          </div>
+        )}
+
+        <div className="text-[12px]">{statusLine}</div>
       </div>
     </div>
   );

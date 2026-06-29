@@ -167,7 +167,9 @@ export function defaultSettings(): UserSettings {
     visualAnalysis: config.enableVisualAnalysis,
     theme: 'dark',
     agent: agentChoice.agent,
-    agentCmd: agentChoice.agentCmd
+    agentCmd: agentChoice.agentCmd,
+    agentModel: agentChoice.agentModel,
+    agentThinking: agentChoice.agentThinking
   };
 }
 

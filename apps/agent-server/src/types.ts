@@ -281,6 +281,10 @@ export interface UserSettings {
   agent: 'auto' | 'claude' | 'codex' | 'opencode' | 'off';
   /** Optional full command override (wins over `agent`); prompt piped on stdin. */
   agentCmd: string;
+  /** Model passed to the selected agent's --model flag. '' = the agent's default. */
+  agentModel: string;
+  /** Reasoning/thinking effort for the selected agent. 'default' = omit the flag. */
+  agentThinking: 'default' | 'low' | 'medium' | 'high';
 }
 
 export interface AppConfig {

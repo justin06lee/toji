@@ -32,6 +32,41 @@ body {
 .drag { -webkit-app-region: drag; }
 .no-drag { -webkit-app-region: no-drag; }
 
+/* Hover-reveal window drag handle: a thin draggable strip pinned to the very top
+   of the window. Hovering near the top slides a small grip pill down as an
+   affordance for grabbing/moving the window, so the omnibox can sit flush at top. */
+.drag-strip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 11px;
+  z-index: 80;
+  -webkit-app-region: drag;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+.drag-grip {
+  margin-top: 2px;
+  width: 44px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.22);
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+  pointer-events: none;
+}
+.drag-strip:hover .drag-grip {
+  opacity: 1;
+  transform: translateY(0);
+}
+.dark .drag-grip { background: rgba(255, 255, 255, 0.3); }
+@media (prefers-reduced-motion: reduce) {
+  .drag-grip { transition: none; }
+}
+
 /* Indeterminate page-loading bar */
 @keyframes toji-load {
   0% { transform: translateX(-110%); }
