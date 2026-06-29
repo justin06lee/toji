@@ -1,5 +1,5 @@
 import type { LinkCandidate, OverviewCard, SearchResult, SourceCredibility, SourceMapItem, SourceNote, SourceSignal, SynthesisFinding, SynthesisResult, SynthesisSection } from '../types.js';
-import { compactText, firstSentences, normalizeWhitespace, safeHostname } from '../lib/text.js';
+import { compactText, fallbackIfEmpty, firstSentences, isAuthorityMixed, isAuthorityPrimary, isAuthorityStrong, normalizeWhitespace, safeHostname, wordCount } from '../lib/text.js';
 import { completeJSON, completeMultimodalJSON } from './model.js';
 import { config } from '../config.js';
 
@@ -13,11 +13,9 @@ interface ExtractedPage {
 
 function credibilityFor(url: string): SourceCredibility {
   const host = safeHostname(url);
-  if (/\.gov$|\.edu$|who\.int|nih\.gov|sec\.gov|federalreserve\.gov|census\.gov/i.test(host)) return 'primary';
-  if (/docs\.|developer\.|github\.com|arxiv\.org|nature\.com|science\.org|cerebras\.ai|google\.|microsoft\.com|openai\.com|playwright\.dev|electronjs\.org/i.test(host)) {
-    return 'strong';
-  }
-  if (/medium\.com|substack\.com|reddit\.com|quora\.com/i.test(host)) return 'mixed';
+  if (isAuthorityPrimary(host)) return 'primary';
+  if (isAuthorityStrong(host)) return 'strong';
+  if (isAuthorityMixed(host)) return 'mixed';
   return 'unknown';
 }
 
@@ -46,10 +44,6 @@ function heuristicQuotes(text: string, query: string) {
   return heuristicFacts(text, query)
     .map((sentence) => sentence.slice(0, 240))
     .slice(0, 3);
-}
-
-function wordCount(text: string) {
-  return normalizeWhitespace(text).split(/\s+/).filter(Boolean).length;
 }
 
 function signalsFor(page: ExtractedPage, result: SearchResult): SourceSignal[] {
@@ -167,9 +161,9 @@ export async function summarizeSource(
       tabId,
       title: modelNote.title || fallback.title,
       url: modelNote.url || fallback.url,
-      keyFacts: Array.isArray(modelNote.keyFacts) && modelNote.keyFacts.length > 0 ? modelNote.keyFacts.slice(0, 6) : fallback.keyFacts,
-      quotes: Array.isArray(modelNote.quotes) && modelNote.quotes.length > 0 ? modelNote.quotes.slice(0, 4) : fallback.quotes,
-      signals: Array.isArray(modelNote.signals) && modelNote.signals.length > 0 ? modelNote.signals.slice(0, 8) : fallback.signals,
+      keyFacts: fallbackIfEmpty(modelNote.keyFacts, fallback.keyFacts).slice(0, 6),
+      quotes: fallbackIfEmpty(modelNote.quotes, fallback.quotes).slice(0, 4),
+      signals: fallbackIfEmpty(modelNote.signals, fallback.signals).slice(0, 8),
       credibility: modelNote.credibility ?? fallback.credibility,
       credibilityReason: modelNote.credibilityReason || credibilityReason(modelNote.url || fallback.url, modelNote.credibility ?? fallback.credibility),
       capturedAt: new Date().toISOString(),

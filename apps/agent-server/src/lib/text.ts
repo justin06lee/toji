@@ -131,3 +131,34 @@ export function overlapScore(a: string, b: string) {
 export function safeHostname(value: string) {
   return hostname(value);
 }
+
+export function isUrlLike(input: string) {
+  return /^(https?:\/\/)?([\w-]+\.)+[a-z]{2,}(\/.*)?$/i.test(input.trim());
+}
+
+export function canonicalUrl(input: string) {
+  return /^https?:\/\//i.test(input) ? input : `https://${input}`;
+}
+
+export function wordCount(text: string) {
+  return normalizeWhitespace(text).split(/\s+/).filter(Boolean).length;
+}
+
+export function fallbackIfEmpty<T>(value: unknown, fallback: T[] | undefined): T[] {
+  if (Array.isArray(value) && value.length > 0) return value as T[];
+  return fallback ?? [];
+}
+
+const AUTHORITY_PRIMARY_RE = /\.gov$|\.edu$|who\.int|nih\.gov|sec\.gov|fda\.gov|federalreserve\.gov|census\.gov/i;
+const AUTHORITY_STRONG_RE = /docs\.|developer\.|github\.com|arxiv\.org|nature\.com|science\.org|cerebras\.ai|google\.|microsoft\.com|openai\.com|playwright\.dev|electronjs\.org/i;
+const AUTHORITY_MIXED_RE = /medium\.com|substack\.com|reddit\.com|quora\.com/i;
+
+export function isAuthorityPrimary(host: string) {
+  return AUTHORITY_PRIMARY_RE.test(host);
+}
+export function isAuthorityStrong(host: string) {
+  return AUTHORITY_STRONG_RE.test(host);
+}
+export function isAuthorityMixed(host: string) {
+  return AUTHORITY_MIXED_RE.test(host);
+}

@@ -26,6 +26,13 @@ function now() {
   return new Date().toISOString();
 }
 
+function finalizeMetrics(session: ResearchSessionState) {
+  session.metrics.completedAt = now();
+  if (session.metrics.startedAt) {
+    session.metrics.elapsedMs = Date.parse(session.metrics.completedAt) - Date.parse(session.metrics.startedAt);
+  }
+}
+
 /** True for IPv4 addresses that must never be reachable by the headless browser (loopback, link-local, RFC1918, CGNAT, multicast/reserved). Unknown shapes are treated as unsafe. */
 function isPrivateIPv4(ip: string): boolean {
   const parts = ip.split('.').map((part) => Number(part));
@@ -255,8 +262,7 @@ export class ResearchOrchestrator {
       const browser = this.browsers.get(id);
       if (browser) await browser.close().catch(() => undefined);
       session.status = 'cancelled';
-      session.metrics.completedAt = now();
-      if (session.metrics.startedAt) session.metrics.elapsedMs = Date.parse(session.metrics.completedAt) - Date.parse(session.metrics.startedAt);
+      finalizeMetrics(session);
       logAgent(session.id, 'Session cancelled.', 'warn');
     }
     this.cancelPendingSave(id);
@@ -378,8 +384,7 @@ export class ResearchOrchestrator {
     if (browser) await browser.close().catch(() => undefined);
     this.browsers.delete(id);
     session.status = 'cancelled';
-    session.metrics.completedAt = now();
-    if (session.metrics.startedAt) session.metrics.elapsedMs = Date.parse(session.metrics.completedAt) - Date.parse(session.metrics.startedAt);
+    finalizeMetrics(session);
     this.emit(session);
     logAgent(session.id, 'Session cancelled.', 'warn');
     return cloneSession(session);
@@ -442,8 +447,7 @@ export class ResearchOrchestrator {
   private fail(session: ResearchSessionState, error: unknown) {
     session.status = 'error';
     session.error = error instanceof Error ? error.message : String(error);
-    session.metrics.completedAt = now();
-    if (session.metrics.startedAt) session.metrics.elapsedMs = Date.parse(session.metrics.completedAt) - Date.parse(session.metrics.startedAt);
+    finalizeMetrics(session);
     logAgent(session.id, session.error, 'error');
     this.emit(session);
   }
@@ -532,8 +536,7 @@ export class ResearchOrchestrator {
     session.synthesis = await synthesizeAnswer(session.query, session.sources);
     markStep(session.researchPlan, 'synthesize', 'complete');
     session.status = 'complete';
-    session.metrics.completedAt = now();
-    if (session.metrics.startedAt) session.metrics.elapsedMs = Date.parse(session.metrics.completedAt) - Date.parse(session.metrics.startedAt);
+    finalizeMetrics(session);
     this.emit(session);
     logAgent(session.id, 'Research complete.');
   }
@@ -736,8 +739,7 @@ export class ResearchOrchestrator {
     this.emit(session);
     session.synthesis = await synthesizeAnswer(session.query, session.sources);
     session.status = 'complete';
-    session.metrics.completedAt = now();
-    session.metrics.elapsedMs = Date.parse(session.metrics.completedAt) - Date.parse(session.metrics.startedAt);
+    finalizeMetrics(session);
     this.emit(session);
   }
 

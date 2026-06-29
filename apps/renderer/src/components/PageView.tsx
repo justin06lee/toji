@@ -1,5 +1,6 @@
 import { Globe, Link2 } from 'lucide-react';
 import { useState } from 'react';
+import { hostOf } from '../lib/nav';
 import type { PageSource } from '../types';
 
 interface PageViewProps {
@@ -8,14 +9,6 @@ interface PageViewProps {
   sources: PageSource[];
   onReady: () => void;
   onOpenSource: (url: string) => void;
-}
-
-function host(url: string) {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '');
-  } catch {
-    return url;
-  }
 }
 
 /**
@@ -71,8 +64,8 @@ export function PageView({ streamUrl, loading, sources, onReady, onOpenSource }:
                   className="flex cursor-pointer items-center gap-2 rounded-xl border border-black/[0.08] px-3 py-2.5 no-underline transition-colors hover:bg-black/[0.03] dark:border-white/10 dark:hover:bg-white/5"
                 >
                   <Link2 size={12} className="shrink-0 text-neutral-400" />
-                  <span className="flex-1 truncate text-[12.5px] text-neutral-800 dark:text-neutral-200">{source.title || host(source.url)}</span>
-                  <span className="shrink-0 text-[11px] text-neutral-400">{host(source.url)}</span>
+                  <span className="flex-1 truncate text-[12.5px] text-neutral-800 dark:text-neutral-200">{source.title || hostOf(source.url)}</span>
+                  <span className="shrink-0 text-[11px] text-neutral-400">{hostOf(source.url)}</span>
                 </a>
               ))}
             </div>

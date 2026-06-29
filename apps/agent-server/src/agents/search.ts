@@ -1,6 +1,6 @@
 import { config, isBraveSearchEnabled } from '../config.js';
 import type { PageSource, SearchPath, SearchResult } from '../types.js';
-import { keywordSet, normalizeUrl, normalizeWhitespace, overlapScore, safeHostname, stripHtml } from '../lib/text.js';
+import { canonicalUrl, isAuthorityPrimary, isAuthorityStrong, isUrlLike, keywordSet, normalizeUrl, normalizeWhitespace, overlapScore, safeHostname, stripHtml } from '../lib/text.js';
 
 function decodeDuckDuckGoUrl(raw: string) {
   const withoutEntities = raw.replace(/&amp;/g, '&');
@@ -15,9 +15,7 @@ function decodeDuckDuckGoUrl(raw: string) {
 }
 
 function asLikelyUrl(input: string) {
-  const clean = input.trim();
-  if (!/^(https?:\/\/)?([\w-]+\.)+[a-z]{2,}(\/.*)?$/i.test(clean)) return undefined;
-  return /^https?:\/\//i.test(clean) ? clean : `https://${clean}`;
+  return isUrlLike(input) ? canonicalUrl(input.trim()) : undefined;
 }
 
 function scoreResult(result: Omit<SearchResult, 'score'>, planQuery: string, seenHosts = new Set<string>()) {
@@ -29,9 +27,7 @@ function scoreResult(result: Omit<SearchResult, 'score'>, planQuery: string, see
   const lexical = queryTerms.size > 0 ? matches / queryTerms.size : overlapScore(planQuery, `${result.title} ${result.snippet}`);
   const rankBoost = result.rank ? Math.max(0, 1 - (result.rank - 1) * 0.06) : 0.5;
   const diversityBoost = seenHosts.has(host) ? -0.22 : 0.12;
-  const authorityBoost = /\.gov$|\.edu$|nih\.gov|who\.int|sec\.gov|fda\.gov|cerebras\.ai|google\.|microsoft\.com|github\.com|arxiv\.org|nature\.com|science\.org|docs\.|developer\.|playwright\.dev|electronjs\.org/i.test(host)
-    ? 0.18
-    : 0;
+  const authorityBoost = isAuthorityPrimary(host) || isAuthorityStrong(host) ? 0.18 : 0;
   const freshnessBoost = /202[4-9]|latest|new|updated|release|changelog|docs|blog/i.test(`${result.title} ${result.snippet}`) ? 0.05 : 0;
   return Math.max(0, Math.min(1.25, lexical * 0.52 + rankBoost * 0.28 + diversityBoost + authorityBoost + freshnessBoost));
 }
