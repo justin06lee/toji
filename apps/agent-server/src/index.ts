@@ -88,7 +88,9 @@ const settingsPatchSchema = z
     visualAnalysis: z.boolean().optional(),
     theme: z.enum(['dark', 'system']).optional(),
     agent: z.enum(['auto', 'claude', 'codex', 'opencode', 'off']).optional(),
-    agentCmd: z.string().max(500).refine((val) => !val || isValidAgentCmd(val), { message: 'Invalid agent command: contains unsafe characters or references a disallowed binary' }).optional()
+    agentCmd: z.string().max(500).refine((val) => !val || isValidAgentCmd(val), { message: 'Invalid agent command: contains unsafe characters or references a disallowed binary' }).optional(),
+    agentModel: z.string().max(120).optional(),
+    agentThinking: z.enum(['default', 'low', 'medium', 'high']).optional()
   })
   .strict();
 
@@ -156,7 +158,12 @@ app.patch('/api/settings', async (req, res, next) => {
     const nextSettings: UserSettings = { ...current, ...patch };
     await saveSettings(nextSettings);
     // Apply the agent choice immediately so the change takes effect without a restart.
-    setAgentChoice({ agent: nextSettings.agent, agentCmd: nextSettings.agentCmd });
+    setAgentChoice({
+      agent: nextSettings.agent,
+      agentCmd: nextSettings.agentCmd,
+      agentModel: nextSettings.agentModel,
+      agentThinking: nextSettings.agentThinking
+    });
     broadcast({ type: 'settings_update', settings: nextSettings });
     res.json(nextSettings);
   } catch (error) {
@@ -173,7 +180,7 @@ app.get('/api/agents', (_req, res) => {
     detected,
     available: agentAvailable(),
     effective: effective
-      ? { label: effective.label, source: effective.source, command: [effective.cmd, ...effective.args].join(' ') }
+      ? { id: effective.id, label: effective.label, source: effective.source, command: [effective.cmd, ...effective.args].join(' ') }
       : null
   });
 });
@@ -448,8 +455,14 @@ await researchOrchestrator.hydrate();
 detectAgents();
 try {
   const settings = await loadSettings();
-  setAgentChoice({ agent: settings.agent, agentCmd: settings.agentCmd });
+  setAgentChoice({
+    agent: settings.agent,
+    agentCmd: settings.agentCmd,
+    agentModel: settings.agentModel,
+    agentThinking: settings.agentThinking
+  });
 } catch (error) {
+  // Defaults (env-seeded) apply if settings can't be read.
   console.warn('[toji] Failed to load settings at boot, using env defaults:', error instanceof Error ? error.message : error);
 }
 

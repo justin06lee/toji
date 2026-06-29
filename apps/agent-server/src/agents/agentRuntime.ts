@@ -12,6 +12,14 @@ import { config } from '../config.js';
 
 export type AgentId = 'claude' | 'codex' | 'opencode';
 export type AgentChoice = AgentId | 'auto' | 'off';
+export type ThinkingLevel = 'default' | 'low' | 'medium' | 'high';
+
+interface AgentTuning {
+  /** Model passed to the agent's --model flag. '' = the agent's default. */
+  agentModel: string;
+  /** Reasoning effort. 'default' = omit the flag entirely. */
+  agentThinking: ThinkingLevel;
+}
 
 interface AgentPreset {
   id: AgentId;
@@ -74,6 +82,8 @@ export interface EffectiveAgent {
   cmd: string;
   args: string[];
   label: string;
+  /** The resolved preset id, or null for a custom command. Surfaced to the UI. */
+  id: AgentId | null;
   /** How this command was chosen — surfaced in the UI. */
   source: 'custom' | 'preset' | 'auto' | 'env';
 }
@@ -127,7 +137,8 @@ function detectedById(id: AgentId): DetectedAgent | undefined {
 // User-chosen agent settings, set by the server once settings are loaded and again
 // on every settings PATCH. When unset (e.g. a script that bypasses server boot),
 // resolution falls back to the env-derived defaults in `config`.
-let userChoice: { agent: AgentChoice; agentCmd: string } | null = null;
+type Choice = { agent: AgentChoice; agentCmd: string } & AgentTuning;
+let userChoice: Choice | null = null;
 
 /**
  * Validate that a custom agent command looks like a legitimate CLI agent binary
@@ -154,12 +165,17 @@ export function isValidAgentCmd(cmd: string): boolean {
   return true;
 }
 
-export function setAgentChoice(choice: { agent: AgentChoice; agentCmd: string }) {
+export function setAgentChoice(choice: { agent: AgentChoice; agentCmd: string } & Partial<AgentTuning>) {
   const cmd = (choice.agentCmd ?? '').trim();
   if (!isValidAgentCmd(cmd)) {
     throw new Error(`Rejected unsafe agent command: ${cmd.slice(0, 80)}`);
   }
-  userChoice = { agent: choice.agent, agentCmd: cmd };
+  userChoice = {
+    agent: choice.agent,
+    agentCmd: cmd,
+    agentModel: (choice.agentModel ?? '').trim(),
+    agentThinking: choice.agentThinking ?? 'default'
+  };
 }
 
 function splitCommand(command: string): { cmd: string; args: string[] } {
@@ -167,17 +183,40 @@ function splitCommand(command: string): { cmd: string; args: string[] } {
   return { cmd: parts[0], args: parts.slice(1) };
 }
 
-function presetCommand(id: AgentId, source: EffectiveAgent['source']): EffectiveAgent {
-  const preset = PRESETS[id];
-  const found = detectedById(id)?.path;
-  // Use the absolute path when detected (so a packaged GUI with a minimal PATH
-  // still finds it); otherwise fall back to the bare name and rely on PATH.
-  return { cmd: found ?? preset.bin, args: [...preset.args], label: preset.label, source };
+// Map model + thinking onto each agent's verified CLI flags. 'default'/'' = omit.
+function tuningArgs(id: AgentId, tuning: AgentTuning): string[] {
+  const out: string[] = [];
+  const model = tuning.agentModel.trim();
+  const effort = tuning.agentThinking;
+  if (model) out.push('--model', model); // claude/codex/opencode all accept --model
+  if (effort !== 'default') {
+    if (id === 'claude') out.push('--effort', effort);
+    else if (id === 'codex') out.push('-c', `model_reasoning_effort=${effort}`);
+    else if (id === 'opencode') out.push('--variant', effort);
+  }
+  return out;
 }
 
-function firstDetected(): EffectiveAgent | null {
+function presetCommand(id: AgentId, source: EffectiveAgent['source'], tuning: AgentTuning): EffectiveAgent {
+  const preset = PRESETS[id];
+  const found = detectedById(id)?.path;
+  const extra = tuningArgs(id, tuning);
+  // codex's base args end with a trailing '-' (read prompt from stdin); model/effort
+  // flags must come before it, so splice them in ahead of the final arg.
+  let args: string[];
+  if (id === 'codex' && preset.args[preset.args.length - 1] === '-') {
+    args = [...preset.args.slice(0, -1), ...extra, '-'];
+  } else {
+    args = [...preset.args, ...extra];
+  }
+  // Use the absolute path when detected (so a packaged GUI with a minimal PATH
+  // still finds it); otherwise fall back to the bare name and rely on PATH.
+  return { cmd: found ?? preset.bin, args, label: preset.label, id, source };
+}
+
+function firstDetected(tuning: AgentTuning): EffectiveAgent | null {
   for (const id of PRESET_ORDER) {
-    if (detectedById(id)?.available) return presetCommand(id, 'auto');
+    if (detectedById(id)?.available) return presetCommand(id, 'auto', tuning);
   }
   return null;
 }
@@ -188,27 +227,36 @@ function firstDetected(): EffectiveAgent | null {
  * env-seeded defaults (for scripts that never set a UI choice).
  */
 export function getEffectiveAgent(): EffectiveAgent | null {
-  // Env TOJI_AGENT_CMD is a deployment/debug hard-override that always wins.
+  // Env TOJI_AGENT_CMD is a deployment/debug hard-override that always wins. The
+  // user owns the full command, so we never append model/effort flags to it.
   if (process.env.TOJI_AGENT_CMD && process.env.TOJI_AGENT_CMD.trim()) {
     const { cmd, args } = splitCommand(process.env.TOJI_AGENT_CMD.trim());
-    return { cmd, args, label: `custom (${cmd})`, source: 'env' };
+    return { cmd, args, label: `custom (${cmd})`, id: null, source: 'env' };
   }
 
   const choice = userChoice ?? envChoice();
+  const tuning: AgentTuning = { agentModel: choice.agentModel, agentThinking: choice.agentThinking };
 
+  // A custom command is user-controlled; don't append model/effort flags.
   if (choice.agentCmd) {
     const { cmd, args } = splitCommand(choice.agentCmd);
-    return { cmd, args, label: `custom (${cmd})`, source: 'custom' };
+    return { cmd, args, label: `custom (${cmd})`, id: null, source: 'custom' };
   }
   if (choice.agent === 'off') return null;
-  if (choice.agent === 'auto') return firstDetected();
-  return presetCommand(choice.agent, userChoice ? 'preset' : 'env');
+  if (choice.agent === 'auto') return firstDetected(tuning);
+  return presetCommand(choice.agent, userChoice ? 'preset' : 'env', tuning);
 }
 
 /** Env-derived choice, used as the default before the UI sets one. */
-function envChoice(): { agent: AgentChoice; agentCmd: string } {
+function envChoice(): Choice {
   const agent = (['claude', 'codex', 'opencode', 'off'].includes(config.agent) ? config.agent : 'auto') as AgentChoice;
-  return { agent, agentCmd: config.agentCmd };
+  const thinking = (process.env.TOJI_AGENT_THINKING ?? 'default').trim().toLowerCase();
+  return {
+    agent,
+    agentCmd: config.agentCmd,
+    agentModel: (process.env.TOJI_AGENT_MODEL ?? '').trim(),
+    agentThinking: (['low', 'medium', 'high'].includes(thinking) ? thinking : 'default') as ThinkingLevel
+  };
 }
 
 export function agentAvailable(): boolean {
@@ -221,6 +269,6 @@ export function effectiveCommand(): { cmd: string; args: string[] } | null {
 }
 
 /** Default agent choice seed from env, used by storage.defaultSettings(). */
-export function defaultAgentChoice(): { agent: AgentChoice; agentCmd: string } {
+export function defaultAgentChoice(): Choice {
   return envChoice();
 }

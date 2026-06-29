@@ -932,8 +932,17 @@ export function App() {
   const iconBtn =
     'no-drag inline-flex items-center justify-center rounded-full text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-black/5 dark:hover:bg-white/10 transition-colors disabled:opacity-35 disabled:pointer-events-none';
 
+  // A thin always-present drag region pinned to the very top of the window. Hovering
+  // near the top slides a small "grip" pill down to signal you can grab here to move
+  // the window — so the omnibox can sit flush at the top without a static title bar.
+  const windowDragHandle = (
+    <div className="drag-strip group" aria-hidden>
+      <span className="drag-grip" />
+    </div>
+  );
+
   const addressRow = (
-    <div className="flex items-center gap-1">
+    <div className={`flex items-center gap-1 ${isMac ? 'pl-[78px]' : ''}`}>
       <button type="button" aria-label="Back" title="Back  ⌘[" disabled={!activeTab?.canBack} onClick={goBack} className={`${iconBtn} h-9 w-9 border border-black/[0.08] dark:border-white/10`}>
         <ArrowLeft size={15} />
       </button>
@@ -1194,10 +1203,8 @@ export function App() {
   if (layout === 'side') {
     return (
       <div className="flex h-screen flex-col bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
-        {/* Draggable title strip — gives a grab area to move the window (and clears the macOS
-            traffic lights), since the address bar below is full of non-draggable controls. */}
-        <div className="drag h-7 shrink-0" />
-        <header className="drag shrink-0 border-b border-black/[0.07] px-3 pb-2.5 dark:border-white/10">{addressRow}</header>
+        {windowDragHandle}
+        <header className="drag shrink-0 border-b border-black/[0.07] px-3 pt-2.5 pb-2.5 dark:border-white/10">{addressRow}</header>
         <div className="flex min-h-0 flex-1">
           {sidebarOpen && (
             <Sidebar
@@ -1232,8 +1239,11 @@ export function App() {
 
   return (
     <div className="flex h-screen flex-col bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
-      <header className="drag shrink-0 border-b border-black/[0.07] px-3 pt-2 pb-2.5 dark:border-white/10">
-        <div className={`flex h-9 select-none items-center gap-1 overflow-x-auto ${isMac ? 'pl-[72px]' : ''}`}>
+      {windowDragHandle}
+      <header className="drag shrink-0 border-b border-black/[0.07] px-3 pt-2.5 pb-2.5 dark:border-white/10">
+        {/* Omnibox sits flush at the very top; the tab strip lives just beneath it. */}
+        {addressRow}
+        <div className="mt-2 flex h-9 select-none items-center gap-1 overflow-x-auto">
           {tabs.map((tab) => {
             const color = groupColor(tab.groupId);
             return (
@@ -1273,7 +1283,6 @@ export function App() {
             <Plus size={16} />
           </button>
         </div>
-        <div className="mt-2">{addressRow}</div>
       </header>
       {viewport}
       {tabHoverBubble}

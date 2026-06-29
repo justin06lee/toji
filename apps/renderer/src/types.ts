@@ -299,7 +299,9 @@ export type ServerEvent = (
   | { type: 'page_sources'; pageId: string; sources: PageSource[] }
 ) & { at?: string };
 
-export type AgentChoice = 'auto' | 'claude' | 'codex' | 'opencode' | 'off';
+export type AgentId = 'claude' | 'codex' | 'opencode';
+export type AgentChoice = AgentId | 'auto' | 'off';
+export type ThinkingLevel = 'default' | 'low' | 'medium' | 'high';
 
 export interface UserSettings {
   autoSpeculation: boolean;
@@ -310,10 +312,12 @@ export interface UserSettings {
   theme: 'dark' | 'system';
   agent: AgentChoice;
   agentCmd: string;
+  agentModel: string;
+  agentThinking: ThinkingLevel;
 }
 
 export interface DetectedAgent {
-  id: 'claude' | 'codex' | 'opencode';
+  id: AgentId;
   label: string;
   available: boolean;
   path: string | null;
@@ -322,7 +326,7 @@ export interface DetectedAgent {
 export interface AgentsStatus {
   detected: DetectedAgent[];
   available: boolean;
-  effective: { label: string; source: string; command: string } | null;
+  effective: { id: AgentId | null; label: string; source: string; command: string } | null;
 }
 
 export interface AppConfig {
