@@ -121,7 +121,8 @@ export async function buildResearchPlan(query: string, prediction: PredictionRes
       stance: planned.stance ?? fallback.stance,
       steps: Array.isArray(planned.steps) && planned.steps.length > 0 ? planned.steps : stepsFor(searchQueries, mode, mode === 'speculative' ? Math.min(2, fallback.steps[1]?.budgetTabs ?? 1) : fallback.steps[1]?.budgetTabs ?? config.maxAgentTabs)
     };
-  } catch {
+  } catch (error) {
+    console.warn('[toji] buildResearchPlan model call failed, using heuristic plan:', error instanceof Error ? error.message : error);
     return fallback;
   }
 }
