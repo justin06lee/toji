@@ -178,7 +178,10 @@ function boardCells(cells: AgentStepInput['cells']): { refs: string; coords: Rec
  * guidance the agent can act on. General — works for any task, not just one site.
  */
 export async function researchHelp(input: { question: string; goal?: string; url?: string }): Promise<string> {
-  const sources = await gatherPageSources(input.question).catch(() => []);
+  const sources = await gatherPageSources(input.question).catch((error) => {
+    console.warn('[toji] researchHelp source gathering failed:', error instanceof Error ? error.message : error);
+    return [];
+  });
   const sourceText = sources
     .slice(0, 5)
     .map((s, i) => `[${i + 1}] ${s.title}${s.summary ? ` — ${s.summary}` : ''} (${s.url})`)
@@ -192,7 +195,8 @@ export async function researchHelp(input: { question: string; goal?: string; url
       maxTokens: 320
     });
     return (res?.answer || '').toString().slice(0, 700);
-  } catch {
+  } catch (error) {
+    console.warn('[toji] researchHelp agent call failed:', error instanceof Error ? error.message : error);
     return '';
   }
 }
@@ -225,8 +229,8 @@ export async function nextAgentAction(input: AgentStepInput): Promise<AgentStepR
         maxTokens: 320
       });
       return sanitize(raw);
-    } catch {
-      // fall through to text-only reasoning
+    } catch (error) {
+      console.warn('[toji] vision agent step failed, falling back to text-only:', error instanceof Error ? error.message : error);
     }
   }
 

@@ -144,8 +144,9 @@ export async function searchWeb(query: string, limit: number): Promise<SearchRes
   try {
     const parsed = isBraveSearchEnabled ? await searchBrave(query, limit) : await searchDuckDuckGo(query, limit);
     if (parsed.length > 0) return parsed.slice(0, limit);
-  } catch {
+  } catch (error) {
     // Return visible fallback pages so the user can still see a tab doing useful work.
+    console.warn(`[toji] searchWeb failed for "${query.slice(0, 80)}":`, error instanceof Error ? error.message : error);
   }
   return fallbackResults(query, limit);
 }

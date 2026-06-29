@@ -151,7 +151,8 @@ export async function summarizeSource(
             temperature: 0.1,
             maxTokens: 950
           });
-    } catch {
+    } catch (error) {
+      console.warn('[toji] summarizeSource multimodal call failed, retrying text-only:', error instanceof Error ? error.message : error);
       modelNote = await completeJSON<Partial<SourceNote>>({
         system:
           'You summarize one web source for a browser research agent. Extract only evidence relevant to the user query. Be concise and cite no facts not present in the page text.',
@@ -178,7 +179,8 @@ export async function summarizeSource(
       discoveredLinks: fallback.discoveredLinks
     };
     return merged;
-  } catch {
+  } catch (error) {
+    console.warn(`[toji] summarizeSource failed for ${page.url}:`, error instanceof Error ? error.message : error);
     return fallback;
   }
 }
@@ -354,7 +356,8 @@ export async function synthesizeAnswer(query: string, notes: SourceNote[]): Prom
       sourceMap
     };
     return { ...mergedWithoutMarkdown, markdown: renderMarkdown(query, mergedWithoutMarkdown) };
-  } catch {
+  } catch (error) {
+    console.warn('[toji] synthesizeAnswer model call failed, using heuristic synthesis:', error instanceof Error ? error.message : error);
     return fallback;
   }
 }

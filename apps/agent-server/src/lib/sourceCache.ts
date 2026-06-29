@@ -83,6 +83,8 @@ export function putCachedSource(queryFingerprint: string, url: string, note: Sou
       await fs.writeFile(temp, JSON.stringify(state, null, 2));
       await fs.rename(temp, cachePath);
     })
-    .catch(() => undefined);
+    .catch((error) => {
+      console.error('[toji] putCachedSource write failed:', error instanceof Error ? error.message : error);
+    });
   return writeChain;
 }

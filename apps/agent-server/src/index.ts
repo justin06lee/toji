@@ -197,7 +197,10 @@ app.get('/api/page/stream', async (req, res) => {
   const controller = new AbortController();
   req.on('close', () => controller.abort());
   // Ground the page in the same web sources shown in the footer.
-  const sources = await gatherPageSources(query).catch(() => []);
+  const sources = await gatherPageSources(query).catch((error) => {
+    console.warn('[toji] gatherPageSources failed for page stream:', error instanceof Error ? error.message : error);
+    return [];
+  });
   let full = '';
   try {
     for await (const chunk of streamAnswerPage(query, theme, controller.signal, sources)) {
@@ -422,8 +425,8 @@ detectAgents();
 try {
   const settings = await loadSettings();
   setAgentChoice({ agent: settings.agent, agentCmd: settings.agentCmd });
-} catch {
-  // Defaults (env-seeded) apply if settings can't be read.
+} catch (error) {
+  console.warn('[toji] Failed to load settings at boot, using env defaults:', error instanceof Error ? error.message : error);
 }
 
 const server = http.createServer(app);

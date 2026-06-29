@@ -356,7 +356,8 @@ export async function predictIntent(query: string): Promise<PredictionResult> {
     });
 
     return sanitizePrediction(predicted, fallback);
-  } catch {
+  } catch (error) {
+    console.warn('[toji] predictIntent model call failed, using heuristic prediction:', error instanceof Error ? error.message : error);
     return fallback;
   }
 }

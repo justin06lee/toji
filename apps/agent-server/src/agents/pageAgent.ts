@@ -131,8 +131,8 @@ export async function* streamAnswerPage(
         yield delta;
       }
       if (produced > 0) return;
-    } catch {
-      // fall through to the local fallback
+    } catch (error) {
+      console.warn('[toji] streamAnswerPage model error, falling back to local page:', error instanceof Error ? error.message : error);
     }
   }
 
