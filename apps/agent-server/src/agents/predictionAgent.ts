@@ -1,15 +1,7 @@
 import { config } from '../config.js';
 import type { FreshnessMode, PredictionBudget, PredictionResult, PredictionSuggestion, SearchPath, TypingStage, WasteGuard } from '../types.js';
 import { completeJSON } from './model.js';
-import { clamp, fingerprintQuery, normalizeWhitespace, overlapScore } from '../lib/text.js';
-
-function isUrlLike(input: string) {
-  return /^(https?:\/\/)?([\w-]+\.)+[a-z]{2,}(\/.*)?$/i.test(input.trim());
-}
-
-function canonicalUrl(input: string) {
-  return /^https?:\/\//i.test(input) ? input : `https://${input}`;
-}
+import { canonicalUrl, clamp, fallbackIfEmpty, fingerprintQuery, isUrlLike, normalizeWhitespace, overlapScore } from '../lib/text.js';
 
 function inferStage(clean: string, confidence: number): TypingStage {
   if (clean.length < 3) return 'too-early';
@@ -219,7 +211,7 @@ function sanitizePrediction(predicted: Partial<PredictionResult>, fallback: Pred
   merged.budget.maxSearchQueries = Math.max(1, Math.min(config.maxSearchQueries, Number(merged.budget.maxSearchQueries || fallback.budget.maxSearchQueries)));
   merged.budget.parallelTabs = Math.max(1, Math.min(config.maxConcurrentTabs, Number(merged.budget.parallelTabs || fallback.budget.parallelTabs)));
   merged.budget.idlePrewarmMs = Math.max(220, Math.min(1500, Number(merged.budget.idlePrewarmMs || fallback.budget.idlePrewarmMs)));
-  merged.avoidedWork = Array.isArray(merged.avoidedWork) && merged.avoidedWork.length > 0 ? merged.avoidedWork.slice(0, 5) : fallback.avoidedWork;
+  merged.avoidedWork = fallbackIfEmpty(merged.avoidedWork, fallback.avoidedWork).slice(0, 5);
   if (merged.stance === 'commit') merged.stance = 'prewarm';
   merged.typingStage = inferStage(merged.query, merged.confidence);
   merged.wasteGuard = wasteGuardFor(merged.confidence, merged.query, merged.typingStage, merged.budget);
@@ -356,7 +348,8 @@ export async function predictIntent(query: string): Promise<PredictionResult> {
     });
 
     return sanitizePrediction(predicted, fallback);
-  } catch {
+  } catch (error) {
+    console.warn('[toji] predictIntent model call failed, using heuristic prediction:', error instanceof Error ? error.message : error);
     return fallback;
   }
 }

@@ -140,10 +140,39 @@ function detectedById(id: AgentId): DetectedAgent | undefined {
 type Choice = { agent: AgentChoice; agentCmd: string } & AgentTuning;
 let userChoice: Choice | null = null;
 
+/**
+ * Validate that a custom agent command looks like a legitimate CLI agent binary
+ * path rather than an arbitrary shell command. Rejects shell metacharacters,
+ * pipelines, redirections, and commands that don't look like a path to a binary
+ * with optional flags.
+ */
+export function isValidAgentCmd(cmd: string): boolean {
+  const trimmed = cmd.trim();
+  if (!trimmed) return true; // empty means "use preset"
+  // Block shell metacharacters that could be used for command injection.
+  if (/[;|&`$(){}\\<>!\n\r]/.test(trimmed)) return false;
+  // The first token (the binary) must look like a filesystem path or bare name
+  // (letters, digits, hyphens, underscores, dots, forward slashes).
+  const parts = trimmed.split(/\s+/);
+  const binary = parts[0];
+  if (!binary || !/^[a-zA-Z0-9_.\/-]+$/.test(binary)) return false;
+  // Reject obviously dangerous binaries.
+  const dangerousBins = ['rm', 'sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'csh',
+    'python', 'python3', 'perl', 'ruby', 'node', 'curl', 'wget', 'nc', 'ncat',
+    'cat', 'dd', 'chmod', 'chown', 'sudo', 'su', 'kill', 'pkill', 'env', 'xargs'];
+  const binaryBase = binary.split('/').pop()?.toLowerCase() ?? '';
+  if (dangerousBins.includes(binaryBase)) return false;
+  return true;
+}
+
 export function setAgentChoice(choice: { agent: AgentChoice; agentCmd: string } & Partial<AgentTuning>) {
+  const cmd = (choice.agentCmd ?? '').trim();
+  if (!isValidAgentCmd(cmd)) {
+    throw new Error(`Rejected unsafe agent command: ${cmd.slice(0, 80)}`);
+  }
   userChoice = {
     agent: choice.agent,
-    agentCmd: (choice.agentCmd ?? '').trim(),
+    agentCmd: cmd,
     agentModel: (choice.agentModel ?? '').trim(),
     agentThinking: choice.agentThinking ?? 'default'
   };

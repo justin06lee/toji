@@ -57,6 +57,8 @@ export function putCachedPage(theme: string, query: string, html: string) {
       await fs.writeFile(temp, JSON.stringify(state));
       await fs.rename(temp, cachePath);
     })
-    .catch(() => undefined);
+    .catch((error) => {
+      console.error('[toji] putCachedPage write failed:', error instanceof Error ? error.message : error);
+    });
   return writeChain;
 }
