@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import { chromium, type Browser, type BrowserContext, type Frame, type Page } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Frame, type Page, type Request, type Route } from 'playwright';
 import { config } from '../config.js';
 import type { LinkCandidate, ResearchMode, ResearchOptions, ResearchPlan, ResearchSessionState, SearchResult, TabAction, TabState } from '../types.js';
 import { broadcast, logAgent } from '../lib/events.js';
@@ -590,6 +590,30 @@ export class ResearchOrchestrator {
     };
     page.on('framenavigated', onFrameNavigated);
 
+    // page.goto transparently follows 30x redirects at the network layer, so a public
+    // source can bounce the browser into an internal service before the post-goto
+    // re-check below ever sees the landed URL. Intercept every navigation (document)
+    // request and re-run the SSRF guard on each hop — including redirect targets — so an
+    // internal hop is aborted before its request is issued. This is best-effort: the DNS
+    // lookup inside assertSafeUrl is separate from the browser's own resolution, so a
+    // DNS-rebinding attacker who flips the record between the two windows can still slip
+    // through. The complete fix is to route the context through a proxy that enforces
+    // isPrivateAddress on the actual connect target for every hop; this interception
+    // closes the far more practical redirect-based SSRF window without breaking TLS/SNI.
+    const guardNavigation = async (route: Route, request: Request) => {
+      if (request.resourceType() !== 'document') {
+        await route.continue();
+        return;
+      }
+      try {
+        await assertSafeUrl(request.url());
+        await route.continue();
+      } catch {
+        await route.abort('blockedbyclient');
+      }
+    };
+    await page.route('**/*', guardNavigation);
+
     try {
       this.assertNotCancelled(session, controller);
       tab.status = 'navigating';
@@ -599,8 +623,8 @@ export class ResearchOrchestrator {
 
       await assertSafeUrl(result.url);
       await page.goto(result.url, { waitUntil: 'domcontentloaded', timeout: config.requestTimeoutMs });
-      // page.goto transparently follows redirects; re-validate the landed URL so a
-      // public source cannot 30x-redirect the browser into an internal service.
+      // Redirect hops are already vetted by guardNavigation above; re-validate the landed
+      // URL as a best-effort backstop (see note there on the residual rebinding window).
       await assertSafeUrl(page.url());
       tab.title = (await page.title().catch(() => result.title)) || result.title;
       tab.url = page.url();
@@ -664,6 +688,7 @@ export class ResearchOrchestrator {
       this.emit(session);
     } finally {
       page.off('framenavigated', onFrameNavigated);
+      await page.unroute('**/*', guardNavigation).catch(() => undefined);
       await page.close().catch(() => undefined);
     }
   }

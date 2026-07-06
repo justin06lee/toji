@@ -85,6 +85,7 @@
     "@vitejs/plugin-react": "6.0.3",
     "cors": "2.8.6",
     "dotenv": "17.4.2",
+    "electron-chrome-web-store": "0.13.0",
     "express": "5.2.1",
     "lucide-react": "1.21.0",
     "motion": "^12.42.0",

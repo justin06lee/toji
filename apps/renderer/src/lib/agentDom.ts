@@ -27,11 +27,13 @@ export type AgentAction =
 
 /** What the /api/agent/step endpoint returns. */
 export interface AgentStepResult {
-  action: 'click' | 'type' | 'scroll' | 'navigate' | 'clickAt' | 'drag' | 'runJS' | 'research' | 'wait' | 'done';
+  action: 'click' | 'type' | 'scroll' | 'navigate' | 'clickAt' | 'drag' | 'runJS' | 'research' | 'ask' | 'wait' | 'screenshot' | 'uploadFile' | 'remember' | 'done';
   index?: number;
   text?: string;
   url?: string;
   direction?: 'up' | 'down';
+  /** For "ask": a question for the USER; the run pauses until they answer in the spotlight. */
+  question?: string;
   /** For "runJS": JavaScript to evaluate in the page; its return value comes back as an observation. */
   code?: string;
   /** For "research": a question for the research sub-agent; its answer comes back as an observation. */
@@ -54,8 +56,12 @@ export interface AgentStepResult {
   toCell?: string;
   /** For "cell": the numbered grid cell (from the board/canvas overlay) to click. */
   cellId?: number;
+  /** For "uploadFile": which dropped file (its index from the FILES list) to upload. */
+  fileIndex?: number;
   done?: boolean;
   reason?: string;
+  /** The model returned prose/refused instead of a JSON action; the loop counts these to stop a spin. */
+  error?: boolean;
 }
 
 /** Returns an AgentSnapshot of the page's visible, interactive elements (tagged for later actions). */
@@ -79,7 +85,7 @@ export const SNAPSHOT_JS = `(() => {
       i, tag,
       role: el.getAttribute('role') || (tag === 'a' ? 'link' : tag === 'button' ? 'button' : tag === 'input' ? (el.getAttribute('type') || 'text') : tag),
       name,
-      value: (el.value || '').toString().slice(0, 80),
+      value: ((el.type === 'password' || el.autocomplete === 'current-password' || el.autocomplete === 'new-password' || el.autocomplete === 'one-time-code') ? '' : (el.value || '')).toString().slice(0, 80),
       rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }
     });
     if (++i >= 60) break;
@@ -135,7 +141,7 @@ export function marksScript(gridN = 8): string {
     const push = (el, r, role, name, skipBadge) => {
       el.setAttribute('data-toji-ai', String(i));
       tagged.add(el);
-      out.push({ i, tag: el.tagName.toLowerCase(), role, name, value: (el.value || '').toString().slice(0, 80), rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) } });
+      out.push({ i, tag: el.tagName.toLowerCase(), role, name, value: ((el.type === 'password' || el.autocomplete === 'current-password' || el.autocomplete === 'new-password' || el.autocomplete === 'one-time-code') ? '' : (el.value || '')).toString().slice(0, 80), rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) } });
       if (!skipBadge && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth) {
         badge(Math.max(0, Math.round(r.x)), Math.max(0, Math.round(r.y)), String(i), '#2563eb');
       }

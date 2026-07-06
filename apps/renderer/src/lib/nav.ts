@@ -20,9 +20,28 @@ export function toUrl(input: string): string {
   return URL_RE.test(value) ? value : `https://${value}`;
 }
 
-/** A regular web-search results URL for a query. */
-export function webSearchUrl(query: string): string {
-  return `https://duckduckgo.com/?q=${encodeURIComponent(query.trim())}`;
+export type SearchEngineId = 'duckduckgo' | 'google' | 'bing' | 'brave' | 'startpage';
+
+export const SEARCH_ENGINES: { id: SearchEngineId; name: string }[] = [
+  { id: 'duckduckgo', name: 'DuckDuckGo' },
+  { id: 'google', name: 'Google' },
+  { id: 'bing', name: 'Bing' },
+  { id: 'brave', name: 'Brave Search' },
+  { id: 'startpage', name: 'Startpage' }
+];
+
+const ENGINE_URL: Record<SearchEngineId, (q: string) => string> = {
+  duckduckgo: (q) => `https://duckduckgo.com/?q=${q}`,
+  google: (q) => `https://www.google.com/search?q=${q}`,
+  bing: (q) => `https://www.bing.com/search?q=${q}`,
+  brave: (q) => `https://search.brave.com/search?q=${q}`,
+  startpage: (q) => `https://www.startpage.com/sp/search?query=${q}`
+};
+
+/** A regular web-search results URL for a query, using the chosen engine (default DuckDuckGo). */
+export function webSearchUrl(query: string, engine: SearchEngineId = 'duckduckgo'): string {
+  const q = encodeURIComponent(query.trim());
+  return (ENGINE_URL[engine] ?? ENGINE_URL.duckduckgo)(q);
 }
 
 export function hostOf(url: string): string {

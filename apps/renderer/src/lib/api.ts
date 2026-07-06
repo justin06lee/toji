@@ -38,6 +38,77 @@ export function getAgents() {
   return jsonFetch<AgentsStatus>('/api/agents');
 }
 
+// --- Memory management ---
+export interface MemoryFact {
+  id: string;
+  ts: string;
+  text: string;
+  tags: string[];
+  sessionId?: string;
+}
+export function getMemoryFacts() {
+  return jsonFetch<{ facts: MemoryFact[] }>('/api/memory');
+}
+export function deleteMemoryFact(id: string) {
+  return jsonFetch<{ removed: boolean }>(`/api/memory/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+export interface PinnedMemory {
+  memory: string;
+  user: string;
+  caps: { memory: number; user: number };
+}
+export function getPinnedMemory() {
+  return jsonFetch<PinnedMemory>('/api/memory/pinned');
+}
+export function savePinnedMemory(patch: { memory?: string; user?: string }) {
+  return jsonFetch<PinnedMemory>('/api/memory/pinned', { method: 'PUT', body: JSON.stringify(patch) });
+}
+
+// --- Reference documents (persistent files the agent can pull up) ---
+export interface ReferenceDoc {
+  id: string;
+  name: string;
+  mime: string;
+  path: string;
+  size: number;
+  addedAt: string;
+}
+export function getReferences() {
+  return jsonFetch<{ references: ReferenceDoc[] }>('/api/references');
+}
+export function addReference(name: string, mime: string, dataBase64: string) {
+  return jsonFetch<ReferenceDoc>('/api/references', { method: 'POST', body: JSON.stringify({ name, mime, dataBase64 }) });
+}
+export function deleteReference(id: string) {
+  return jsonFetch<{ removed: boolean }>(`/api/references/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+// --- Bookmark import ---
+export interface DetectedBrowser {
+  id: string;
+  name: string;
+  available: boolean;
+}
+export interface Bookmark {
+  id: string;
+  title: string;
+  url: string;
+  folder?: string;
+  addedAt: string;
+}
+export function getImportBrowsers() {
+  return jsonFetch<{ browsers: DetectedBrowser[] }>('/api/import/browsers');
+}
+export function importBookmarks(browser: string) {
+  return jsonFetch<{ found: number; added: number }>('/api/import/bookmarks', { method: 'POST', body: JSON.stringify({ browser }) });
+}
+export function getBookmarks() {
+  return jsonFetch<{ bookmarks: Bookmark[] }>('/api/bookmarks');
+}
+export function deleteBookmark(id: string) {
+  return jsonFetch<{ removed: boolean }>(`/api/bookmarks/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
 export function saveSettings(patch: Partial<UserSettings>) {
   return jsonFetch<UserSettings>('/api/settings', {
     method: 'PATCH',
@@ -68,6 +139,8 @@ export function agentStep(body: {
   viewport?: { w: number; h: number };
   cells?: Array<{ ref: string; cx: number; cy: number }>;
   credentials?: { name: string; keys: string[]; active?: boolean }[];
+  files?: { index: number; name: string; mime?: string }[];
+  memory?: string;
 }) {
   return jsonFetch<AgentStepResult>('/api/agent/step', {
     method: 'POST',
@@ -79,6 +152,30 @@ export function agentResearch(body: { question: string; goal?: string; url?: str
   return jsonFetch<{ answer: string }>('/api/agent/research', {
     method: 'POST',
     body: JSON.stringify(body)
+  });
+}
+
+/** Upload a dropped file to the local server; returns its on-disk path so the agent can read/upload it. */
+export function uploadFile(name: string, mime: string, dataBase64: string) {
+  return jsonFetch<{ path: string; name: string; mime: string }>('/api/files', {
+    method: 'POST',
+    body: JSON.stringify({ name, mime, dataBase64 })
+  });
+}
+
+/** Librarian: compact memory digest relevant to a goal, plus always-on pinned memory. */
+export function librarian(goal: string, sessionId?: string) {
+  return jsonFetch<{ digest: string; pinned: string }>('/api/agent/librarian', {
+    method: 'POST',
+    body: JSON.stringify({ goal, sessionId })
+  });
+}
+
+/** Save a durable memory fact the agent learned. */
+export function addMemory(text: string, tags?: string[], sessionId?: string) {
+  return jsonFetch<{ id: string }>('/api/memory', {
+    method: 'POST',
+    body: JSON.stringify({ text, tags, sessionId })
   });
 }
 

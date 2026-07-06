@@ -117,6 +117,11 @@ function runAgent(
       else finish(() => reject(new Error(`Agent exited ${code ?? 'null'} with no output: ${err.slice(0, 300)}`)));
     });
 
+    // Swallow stdin errors: if the agent fails to spawn or closes stdin early, the
+    // write emits EPIPE/ENOENT on this stream. Without a listener that becomes an
+    // uncaught exception that crashes the server. Success/failure is decided by the
+    // 'close' handler above, so we deliberately do not reject here.
+    child.stdin?.on('error', () => {});
     child.stdin?.write(prompt);
     child.stdin?.end();
   });

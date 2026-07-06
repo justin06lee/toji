@@ -66,6 +66,7 @@ function dedupeResults(results: SearchResult[]) {
 async function searchDuckDuckGo(query: string, limit: number): Promise<SearchResult[]> {
   const endpoint = `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
   const response = await fetch(endpoint, {
+    signal: AbortSignal.timeout(config.requestTimeoutMs),
     headers: {
       'user-agent': config.userAgent,
       accept: 'text/html,application/xhtml+xml'
@@ -80,6 +81,7 @@ async function searchBrave(query: string, limit: number): Promise<SearchResult[]
   url.searchParams.set('q', query);
   url.searchParams.set('count', String(Math.min(20, Math.max(1, limit))));
   const response = await fetch(url, {
+    signal: AbortSignal.timeout(config.requestTimeoutMs),
     headers: {
       accept: 'application/json',
       'x-subscription-token': config.braveSearchApiKey

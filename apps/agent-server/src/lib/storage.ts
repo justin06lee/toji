@@ -184,7 +184,13 @@ export async function loadSettings(): Promise<UserSettings> {
 
 export async function saveSettings(settings: UserSettings) {
   await fs.mkdir(config.dataDir, { recursive: true });
-  const tmp = `${settingsFile}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(settings, null, 2));
-  await fs.rename(tmp, settingsFile);
+  // Unique temp name so overlapping writers never share a temp path.
+  const tmp = `${settingsFile}.${randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(tmp, JSON.stringify(settings, null, 2));
+    await fs.rename(tmp, settingsFile);
+  } catch (error) {
+    await fs.unlink(tmp).catch(() => undefined);
+    throw error;
+  }
 }

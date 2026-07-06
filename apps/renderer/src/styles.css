@@ -41,7 +41,9 @@ body {
   top: 0;
   left: 0;
   right: 0;
-  height: 20px;
+  /* Thin enough to sit inside the header's top padding — it must not cover the
+     toolbar buttons, which now start ~10px from the top. */
+  height: 10px;
   z-index: 80;
   -webkit-app-region: drag;
   display: flex;
@@ -49,7 +51,9 @@ body {
   align-items: flex-start;
 }
 .drag-notch {
-  pointer-events: none;
+  /* Grabbable: dragging the visible notch itself moves the window (it stays visible
+     while hovered because it's a descendant of the strip). */
+  -webkit-app-region: drag;
   display: flex;
   align-items: center;
   justify-content: center;

@@ -277,14 +277,21 @@ export interface UserSettings {
   defaultFreshness: FreshnessMode;
   visualAnalysis: boolean;
   theme: 'dark' | 'system';
-  /** Which CLI coding agent powers inference. 'auto' picks the first detected. */
-  agent: 'auto' | 'claude' | 'codex' | 'opencode' | 'off';
+  /** Which CLI coding agent powers inference. 'auto' picks the first detected;
+   *  'local' uses a self-hosted OpenAI-compatible endpoint instead of a CLI. */
+  agent: 'auto' | 'claude' | 'codex' | 'opencode' | 'local' | 'off';
   /** Optional full command override (wins over `agent`); prompt piped on stdin. */
   agentCmd: string;
   /** Model passed to the selected agent's --model flag. '' = the agent's default. */
   agentModel: string;
   /** Reasoning/thinking effort for the selected agent. 'default' = omit the flag. */
   agentThinking: 'default' | 'low' | 'medium' | 'high';
+  /** Self-hosted model: OpenAI-compatible base URL (e.g. http://127.0.0.1:11434/v1 for Ollama). */
+  localUrl: string;
+  /** Self-hosted model name (e.g. llama3.2). */
+  localModel: string;
+  /** Optional bearer token for the self-hosted endpoint. */
+  localApiKey: string;
 }
 
 export interface AppConfig {

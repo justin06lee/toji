@@ -18,6 +18,13 @@ import { getCachedPage, putCachedPage } from './lib/pageCache.js';
 import { nextAgentAction, researchHelp } from './agents/webAgent.js';
 import { agentAvailable, liveModelName } from './agents/model.js';
 import { detectAgents, getEffectiveAgent, isValidAgentCmd, refreshDetection, setAgentChoice } from './agents/agentRuntime.js';
+import { addFact, listFacts, removeFact, readPinned, writePinned, PINNED_CAPS } from './lib/memory.js';
+import { detectBrowsers, importBookmarks } from './lib/browserImport.js';
+import { listBookmarks, addBookmarks, removeBookmark } from './lib/bookmarks.js';
+import { addReference, listReferences, removeReference } from './lib/references.js';
+import { librarianDigest, pinnedDigest } from './agents/librarianAgent.js';
+import { randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
 import type { UserSettings } from './types.js';
 
 const app = express();
@@ -46,18 +53,19 @@ function rateLimit(windowMs: number, maxRequests: number) {
 }
 const expensiveRateLimit = rateLimit(10_000, 10); // 10 requests per 10 seconds
 
-// Only the local renderer needs cross-origin access. In the packaged desktop
-// app the renderer is loaded via file:// (which sends `Origin: null`), and in
-// dev it is served from a localhost dev server. Reject every other origin so a
-// random website the user has open cannot reach the local agent API.
+// Only the local renderer needs cross-origin access. The packaged desktop app
+// loads the renderer over http://127.0.0.1 and the server serves the static
+// renderer same-origin; in dev it is served from a localhost dev server. Reject
+// every other origin so a random website the user has open cannot reach the
+// local agent API.
 const allowedOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
 app.use(
   cors({
     origin(origin, callback) {
-      // Requests without an Origin header (same-origin, curl, native fetch) and
-      // the file:// renderer (`Origin: null`) are trusted; everything else must
-      // match a loopback origin.
-      if (!origin || origin === 'null' || allowedOriginPattern.test(origin)) {
+      // Requests without an Origin header (same-origin, curl, native fetch) are
+      // trusted; everything else must match a loopback origin. The literal
+      // `Origin: null` (sandboxed iframes, data:/blob: documents) is rejected.
+      if (!origin || allowedOriginPattern.test(origin)) {
         return callback(null, true);
       }
       return callback(null, false);
@@ -185,6 +193,142 @@ app.get('/api/agents', (_req, res) => {
   });
 });
 
+// Store a file the user dropped onto the agent (e.g. a resume). Written to the data
+// dir so the local CLI agent can read it by path, or upload it into a page file-input.
+app.post('/api/files', async (req, res, next) => {
+  try {
+    const body = z
+      .object({ name: z.string().min(1).max(255), mime: z.string().max(200).optional(), dataBase64: z.string().max(40_000_000) })
+      .parse(req.body);
+    const dir = path.join(config.dataDir, 'uploads');
+    await mkdir(dir, { recursive: true });
+    const safe = body.name.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'file';
+    const filePath = path.join(dir, `${randomUUID()}-${safe}`);
+    await writeFile(filePath, Buffer.from(body.dataBase64, 'base64'));
+    res.json({ path: filePath, name: body.name, mime: body.mime ?? '' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Reference documents kept in memory (e.g. a resume) that the agent can read or
+// upload into a page at any time. Persist across sessions.
+app.get('/api/references', async (_req, res, next) => {
+  try {
+    res.json({ references: await listReferences() });
+  } catch (error) {
+    next(error);
+  }
+});
+app.post('/api/references', async (req, res, next) => {
+  try {
+    const body = z.object({ name: z.string().min(1).max(255), mime: z.string().max(200).optional(), dataBase64: z.string().max(40_000_000) }).parse(req.body);
+    res.json(await addReference(body));
+  } catch (error) {
+    next(error);
+  }
+});
+app.delete('/api/references/:id', async (req, res, next) => {
+  try {
+    res.json({ removed: await removeReference(req.params.id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Memory: durable facts the agent remembers across sessions (Hermes-style).
+app.get('/api/memory', async (_req, res, next) => {
+  try {
+    res.json({ facts: await listFacts() });
+  } catch (error) {
+    next(error);
+  }
+});
+app.post('/api/memory', async (req, res, next) => {
+  try {
+    const body = z.object({ text: z.string().min(1).max(2000), tags: z.array(z.string().max(40)).max(20).optional(), sessionId: z.string().max(200).optional() }).parse(req.body);
+    res.json(await addFact(body));
+  } catch (error) {
+    next(error);
+  }
+});
+app.delete('/api/memory/:id', async (req, res, next) => {
+  try {
+    res.json({ removed: await removeFact(req.params.id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Pinned memory: the always-in-context MEMORY.md / USER.md files (editable in Settings).
+app.get('/api/memory/pinned', async (_req, res, next) => {
+  try {
+    const { memory, user } = await readPinned();
+    res.json({ memory, user, caps: PINNED_CAPS });
+  } catch (error) {
+    next(error);
+  }
+});
+app.put('/api/memory/pinned', async (req, res, next) => {
+  try {
+    const body = z.object({ memory: z.string().max(5000).optional(), user: z.string().max(5000).optional() }).parse(req.body);
+    if (body.memory !== undefined) await writePinned('memory', body.memory);
+    if (body.user !== undefined) await writePinned('user', body.user);
+    const { memory, user } = await readPinned();
+    res.json({ memory, user, caps: PINNED_CAPS });
+  } catch (error) {
+    // writePinned throws a friendly message when over the char cap → surface as a 400.
+    if (error instanceof Error && /cap/i.test(error.message)) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
+// Import bookmarks from other installed browsers (Chrome-family JSON; Safari detected only).
+app.get('/api/import/browsers', (_req, res) => {
+  res.json({ browsers: detectBrowsers() });
+});
+app.post('/api/import/bookmarks', async (req, res, next) => {
+  try {
+    const body = z.object({ browser: z.string().min(1).max(40) }).parse(req.body);
+    const items = await importBookmarks(body.browser);
+    const added = await addBookmarks(items);
+    res.json({ found: items.length, added });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Bookmarks store.
+app.get('/api/bookmarks', async (_req, res, next) => {
+  try {
+    res.json({ bookmarks: await listBookmarks() });
+  } catch (error) {
+    next(error);
+  }
+});
+app.delete('/api/bookmarks/:id', async (req, res, next) => {
+  try {
+    res.json({ removed: await removeBookmark(req.params.id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// The "librarian": returns a compact memory digest relevant to a goal, plus the
+// always-on pinned memory, so the main agent gets only what it needs (token-cheap).
+app.post('/api/agent/librarian', async (req, res, next) => {
+  try {
+    const body = z.object({ goal: z.string().max(2000), sessionId: z.string().max(200).optional() }).parse(req.body);
+    const [relevant, pinned] = await Promise.all([librarianDigest(body.goal, { sessionId: body.sessionId }), pinnedDigest()]);
+    res.json({ digest: relevant.digest, pinned });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post('/api/predict', async (req, res, next) => {
   try {
     const body = z.object({ query: z.string().max(1000) }).parse(req.body);
@@ -278,7 +422,12 @@ app.post('/api/agent/step', expensiveRateLimit, async (req, res, next) => {
         credentials: z
           .array(z.object({ name: z.string().max(60), keys: z.array(z.string().max(60)).max(20), active: z.boolean().optional() }))
           .max(20)
-          .optional()
+          .optional(),
+        files: z
+          .array(z.object({ index: z.number(), name: z.string().max(200), mime: z.string().max(120).optional() }))
+          .max(40)
+          .optional(),
+        memory: z.string().max(4000).optional()
       })
       .parse(req.body);
     res.json(await nextAgentAction(body));
@@ -497,6 +646,7 @@ process.on('unhandledRejection', (reason) => {
 process.on('uncaughtException', (err) => {
   if (isAddrInUse(err)) reportPortConflict();
   console.error('[toji] uncaughtException:', err);
+  process.exit(1);
 });
 
 // Backup path: if the listen error does arrive as a server 'error' event, handle it too.

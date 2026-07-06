@@ -9,6 +9,7 @@ interface WebViewProps {
   onTitle: (title: string) => void;
   onLoadingChange: (loading: boolean) => void;
   onHistory?: (canBack: boolean, canForward: boolean) => void;
+  onFavicon?: (url: string | undefined) => void;
   // Register the underlying <webview> element so the web agent can drive it
   // (executeJavaScript / capturePage) even while this tab is inactive.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -22,7 +23,7 @@ interface WebViewProps {
  * the address bar and tab stay in sync; popups are routed into Toji by the main
  * process (web-contents-created → setWindowOpenHandler).
  */
-export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadingChange, onHistory, onRegister }: WebViewProps) {
+export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadingChange, onHistory, onFavicon, onRegister }: WebViewProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ref = useRef<any>(null);
   const registerRef = useRef(onRegister);
@@ -56,6 +57,8 @@ export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadin
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const onTitleUpdated = (e: any) => e?.title && onTitle(e.title);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const onFaviconUpdated = (e: any) => onFavicon?.(Array.isArray(e?.favicons) ? e.favicons[0] : undefined);
     const onDomReady = () => {
       try {
         el.executeJavaScript(SWIPE_NAV_JS);
@@ -75,6 +78,7 @@ export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadin
     el.addEventListener('did-navigate', onNav);
     el.addEventListener('did-navigate-in-page', onNav);
     el.addEventListener('page-title-updated', onTitleUpdated);
+    el.addEventListener('page-favicon-updated', onFaviconUpdated);
     el.addEventListener('dom-ready', onDomReady);
     el.addEventListener('did-fail-load', onFailLoad);
     return () => {
@@ -83,10 +87,11 @@ export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadin
       el.removeEventListener('did-navigate', onNav);
       el.removeEventListener('did-navigate-in-page', onNav);
       el.removeEventListener('page-title-updated', onTitleUpdated);
+      el.removeEventListener('page-favicon-updated', onFaviconUpdated);
       el.removeEventListener('dom-ready', onDomReady);
       el.removeEventListener('did-fail-load', onFailLoad);
     };
-  }, [onHistory, onLoadingChange, onNavigate, onTitle]);
+  }, [onHistory, onLoadingChange, onNavigate, onTitle, onFavicon]);
 
   return (
     <div className="relative flex min-h-0 flex-1">
@@ -95,7 +100,9 @@ export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadin
           <div className="h-full w-1/3 animate-[toji-load_1.1s_ease-in-out_infinite] bg-neutral-900/70 dark:bg-white/70" />
         </div>
       )}
-      <webview ref={ref} src={url} partition={partition} className="flex min-h-0 flex-1 bg-white dark:bg-neutral-950" />
+      {/* backgroundThrottling=false keeps timers/JS running at full speed when this tab is
+          backgrounded, so an agent can keep working on it after you switch tabs. */}
+      <webview ref={ref} src={url} partition={partition} webpreferences="backgroundThrottling=false" className="flex min-h-0 flex-1 bg-white dark:bg-neutral-950" />
     </div>
   );
 }

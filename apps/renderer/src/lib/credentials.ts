@@ -69,6 +69,19 @@ export function credentialDirectory(store: CredentialStore): CredentialInfo[] {
 }
 
 /**
+ * The {{placeholders}} in `text` that do NOT resolve to any saved credential. Non-empty means
+ * the model invented a placeholder (or the vault is empty) — the caller must not type the text.
+ */
+export function unresolvedPlaceholders(text: string, store: CredentialStore): string[] {
+  if (!text || !text.includes('{{')) return [];
+  const missing: string[] = [];
+  for (const m of text.matchAll(/\{\{\s*([^}]+?)\s*\}\}/g)) {
+    if (resolveSecrets(m[0], store) === m[0]) missing.push(m[0]);
+  }
+  return missing;
+}
+
+/**
  * Replace {{key}} (active set) or {{setName:key}} with the real secret value — locally, at
  * type-time only. Unknown placeholders are left as-is so a missing credential is visible. The
  * resolved string is typed into the page but never returned to the model or the network.

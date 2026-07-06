@@ -22,14 +22,20 @@ export interface AgentStepInput {
   cells?: Array<{ ref: string; cx: number; cy: number }>;
   /** Saved credential sets by name + field keys (NEVER values) the agent may fill via {{placeholder}}. */
   credentials?: { name: string; keys: string[]; active?: boolean }[];
+  /** Files the user dropped onto the agent (e.g. a resume) — name + on-disk path the agent may read or upload. */
+  files?: { index: number; name: string; mime?: string }[];
+  /** Compact memory digest (from the librarian) of things worth remembering for this goal. */
+  memory?: string;
 }
 
 export interface AgentStepResult {
-  action: 'click' | 'type' | 'scroll' | 'navigate' | 'clickAt' | 'drag' | 'runJS' | 'research' | 'wait' | 'done';
+  action: 'click' | 'type' | 'scroll' | 'navigate' | 'clickAt' | 'drag' | 'runJS' | 'research' | 'ask' | 'wait' | 'screenshot' | 'uploadFile' | 'remember' | 'done';
   index?: number;
   text?: string;
   url?: string;
   direction?: 'down' | 'up';
+  /** For "ask": a question for the USER; the run pauses and their answer comes back as an observation. */
+  question?: string;
   /** For "runJS": JavaScript to evaluate in the page; its return value comes back as an observation. */
   code?: string;
   /** For "research": a question for the research sub-agent; its answer comes back as an observation. */
@@ -52,18 +58,26 @@ export interface AgentStepResult {
   toCell?: string;
   /** For "cell": the numbered grid cell (red overlay) to click. */
   cellId?: number;
+  /** For "uploadFile": which dropped file (its index from the FILES list) to upload. */
+  fileIndex?: number;
   done?: boolean;
   reason?: string;
+  /** Set when the model returned prose/refused instead of a JSON action (client counts these to stop a spin). */
+  error?: boolean;
 }
 
 // Kept deliberately short: a small model follows a tight prompt better than a long one.
-const ACTIONS = `JSON only: {"action","index","text","url","direction","x","y","fromCell","toCell","fromIndex","toIndex","fromX","fromY","toX","toY","ms","reason"}.
+const ACTIONS = `JSON only: {"action","index","text","url","direction","x","y","fromCell","toCell","fromIndex","toIndex","fromX","fromY","toX","toY","ms","question","reason"}.
 - click(index) — click element by its index. type(index,text) — focus an input and type. scroll(direction "up"|"down").
-  · To sign in, use a SAVED credential. CREDENTIALS lists your login sets by name + field keys (never values), e.g. [{"name":"Primary","keys":["email","password"],"active":true},{"name":"School","keys":["email","password"]}]. Pick the set that best matches the user's request ("my school email" → the "School" set), then type its placeholder: {{key}} uses the ACTIVE set, {{SetName:key}} uses a named set (e.g. {{School:email}}, {{School:password}}). The real value is filled in locally — you never see it. NEVER guess, invent, or ask for a password; only use these {{placeholders}}.
+  · Signing in / filling personal info: FIRST check CREDENTIALS. It lists every saved login set by name + field keys (never values), e.g. [{"name":"Primary","keys":["email","password"],"active":true},{"name":"School","keys":["email","password"]}] — those keys are the ONLY {{placeholders}} that exist. Pick the set that best matches the user's request ("my school email" → the "School" set), then type its placeholder: {{key}} uses the ACTIVE set, {{SetName:key}} uses a named set (e.g. {{School:email}}). The real value is filled in locally — you never see it. If CREDENTIALS is absent/empty or has no matching set/key, do NOT invent a placeholder or type a made-up value — use ask(question) to get what you need from the user. Never fabricate emails, usernames, or personal data; never ask for a password (ask the user to save it as a credential instead).
 - clickAt(x,y) — single click a visual target with no element label, at absolute pixels x,y.
 - drag — press at a source and release at a destination. REQUIRED to MOVE something (a board piece, slider, drag-and-drop; a single click does NOT move a piece). On a LABELED BOARD use square refs: drag(fromCell,toCell) e.g. fromCell "e2", toCell "e4". Otherwise use element indexes drag(fromIndex,toIndex) or pixels drag(fromX,fromY,toX,toY).
 - runJS(code) — evaluate JavaScript in the page and get its return value back as your next observation. Your ESCAPE HATCH: use it to inspect the DOM, find/measure things the labels miss, or read the page's own state (e.g. a <canvas> board with no piece elements — measure its rect and compute square coordinates, then clickAt/drag those). Make the code RETURN a value.
 - research(query) — ask a research sub-agent a question and get concrete step-by-step guidance back as your next observation. Use it when you are STUCK or don't know HOW to do something (e.g. "how do I start a 10-minute game on lichess?", "how to check out as a guest on this site?").
+- ask(question) — pause and ask the USER a question; the run resumes when they answer and their answer arrives as your next observation. Use it whenever you need something only the user knows: which account/option to use, a missing credential or personal detail, a verification code, or a judgment call. Asking is cheap and encouraged — NEVER guess or fabricate personal information instead.
+- screenshot — request a SCREENSHOT of the page for NEXT turn. You reason from the DOM by default (cheaper); only ask for a screenshot when you truly need to SEE pixels (a <canvas>/board, an image/chart, a visual layout the ELEMENTS don't capture, or when labels are ambiguous). Don't request one every turn.
+- uploadFile(fileIndex, index) — upload one of the user's dropped FILES (by its fileIndex) into a file-input element (by its element index). Use this for "attach my resume" / file-upload fields. To FILL text fields from a file's contents instead, read the file (its path is in FILES) and type the values.
+- remember(text) — save a durable note about the user or this task for future sessions (a preference, a credential location hint, a learned site quirk). Keep it short. Don't save secrets or one-off trivia.
 - wait(ms?) — do nothing and re-check; use when it's not your turn or the page is still loading.
 - navigate(url). done — only when the GOAL is fully achieved (say why).`;
 
@@ -74,7 +88,16 @@ const RULES = `Rules:
 - Don't undo progress: never cancel, close, delete, reset, resign, log out, go back, or navigate away unless the GOAL asks.
 - reason < 12 words.`;
 
-const SYSTEM_TEXT = `You operate a real browser tab with a real mouse to achieve the user's GOAL. Each turn you get the page's interactive ELEMENTS; choose ONE next action.
+// Coding CLIs (Claude Code, Codex, …) sometimes hedge — "I don't have browser-control tools" —
+// because they think they must call a tool. They don't: they are the decision core and Toji
+// executes the single JSON action they return. This line kills that failure mode.
+const NO_REFUSAL = `You are the decision core of Toji's built-in browser automation. You do NOT call tools and need NO permissions — Toji executes the ONE JSON action you return, then shows you the new page. You already have full control of this real browser tab. NEVER refuse, apologize, or say you can't control the browser / lack tools / lack access — that is false here. Every turn, output exactly one JSON action. If unsure how, use research or screenshot — never decline.`;
+
+const SYSTEM_TEXT = `${NO_REFUSAL}
+
+You operate a real browser tab with a real mouse to achieve the user's GOAL. Each turn you get the page's interactive ELEMENTS; choose ONE next action. You work from the DOM by DEFAULT (no screenshot) to stay fast and cheap — request a "screenshot" only when you genuinely need to see pixels.
+
+If MEMORY is present, it holds things you've learned about the user/their tasks — use it. If FILES are present, the user dropped them for you (e.g. a resume); read a file's path to use its contents, or uploadFile it into a file-input.
 
 How to read the page (no screenshot — use these instead):
 - Each ELEMENT line is "[index] role name (x,y)" where (x,y) is its exact on-screen pixel center. Prefer click(index) — it's exact. For a visual target with NO element label, use clickAt(x,y), aiming at a listed (x,y) or interpolating between nearby ones.
@@ -84,7 +107,9 @@ ${ACTIONS}
 
 ${RULES}`;
 
-const SYSTEM_VISION = `You operate a real browser tab with a real mouse to achieve the user's GOAL. Each turn you get a SCREENSHOT and the page's ELEMENTS; choose ONE next action.
+const SYSTEM_VISION = `${NO_REFUSAL}
+
+You operate a real browser tab with a real mouse to achieve the user's GOAL. Each turn you get a SCREENSHOT and the page's ELEMENTS; choose ONE next action.
 
 The screenshot is annotated:
 - BLUE numbers mark interactive elements (= their index). Click with click(index) — exact, prefer over pixels.
@@ -103,7 +128,7 @@ function sanitize(raw: AgentStepResult | undefined): AgentStepResult {
   // " clickAt ", "RUNJS", etc.). Crucially, an UNRECOGNIZED action must NOT fall back to "done"
   // — that silently terminates the run. We fall back to "wait" so the loop re-checks instead.
   const canon: Record<string, AgentStepResult['action']> = {
-    click: 'click', type: 'type', scroll: 'scroll', navigate: 'navigate', clickat: 'clickAt', drag: 'drag', runjs: 'runJS', research: 'research', wait: 'wait', done: 'done'
+    click: 'click', type: 'type', scroll: 'scroll', navigate: 'navigate', clickat: 'clickAt', drag: 'drag', runjs: 'runJS', research: 'research', ask: 'ask', wait: 'wait', screenshot: 'screenshot', uploadfile: 'uploadFile', remember: 'remember', done: 'done'
   };
   const rawAction = typeof raw?.action === 'string' ? raw.action.trim().toLowerCase() : '';
   const action = canon[rawAction] ?? 'wait';
@@ -126,7 +151,9 @@ function sanitize(raw: AgentStepResult | undefined): AgentStepResult {
     ms: typeof raw?.ms === 'number' && Number.isFinite(raw.ms) ? raw.ms : undefined,
     code: typeof raw?.code === 'string' ? raw.code.slice(0, 4000) : undefined,
     query: typeof raw?.query === 'string' ? raw.query.slice(0, 300) : undefined,
+    question: typeof raw?.question === 'string' ? raw.question.slice(0, 300) : undefined,
     cellId: typeof raw?.cellId === 'number' && raw.cellId >= 0 ? Math.round(raw.cellId) : undefined,
+    fileIndex: typeof raw?.fileIndex === 'number' && raw.fileIndex >= 0 ? Math.round(raw.fileIndex) : undefined,
     // Only a genuine "done" action ends the run — never a stray done:true beside a real action.
     done: action === 'done',
     reason: typeof raw?.reason === 'string' ? raw.reason.slice(0, 100) : undefined
@@ -212,6 +239,8 @@ export async function nextAgentAction(input: AgentStepInput): Promise<AgentStepR
     // The full set of move targets (text models can't see the screenshot's labeled grid).
     BOARD_CELLS: board?.refs,
     CREDENTIALS: input.credentials && input.credentials.length ? input.credentials : undefined,
+    FILES: input.files && input.files.length ? input.files : undefined,
+    MEMORY: input.memory && input.memory.trim() ? input.memory.trim() : undefined,
     ELEMENTS: compactElements(input.elements),
     history: (input.history ?? []).slice(-6)
   });
@@ -219,15 +248,19 @@ export async function nextAgentAction(input: AgentStepInput): Promise<AgentStepR
   // Vision path: ONLY for models that actually accept image input. Letting the model see the page
   // lets it act on canvases / boards / images with no DOM element. Text-only models (gpt-oss, glm,
   // …) skip this — they get the same grounding as text (element coords + BOARD_CELLS + LIVE_STATE).
+  // A firm nudge appended on a retry: models that reply with prose/refusal on the first pass
+  // usually comply when reminded the ONLY valid output is the JSON action.
+  const RETRY_NUDGE = `${user}\n\nREMINDER: Return ONLY the JSON action object — no prose, no refusal. You DO control this browser; pick the single best next action now.`;
+
   if (input.image && modelSupportsVision()) {
     try {
-      const raw = await completeMultimodalJSON<AgentStepResult>({
-        system: SYSTEM_VISION,
-        userText: user,
-        imageDataUri: input.image,
-        temperature: 0.1,
-        maxTokens: 320
-      });
+      let raw: AgentStepResult;
+      try {
+        raw = await completeMultimodalJSON<AgentStepResult>({ system: SYSTEM_VISION, userText: user, imageDataUri: input.image, temperature: 0.1, maxTokens: 320 });
+      } catch {
+        // One firm retry before giving up on the vision path.
+        raw = await completeMultimodalJSON<AgentStepResult>({ system: SYSTEM_VISION, userText: RETRY_NUDGE, imageDataUri: input.image, temperature: 0.1, maxTokens: 320 });
+      }
       return sanitize(raw);
     } catch (error) {
       console.warn('[toji] vision agent step failed, falling back to text-only:', error instanceof Error ? error.message : error);
@@ -240,15 +273,17 @@ export async function nextAgentAction(input: AgentStepInput): Promise<AgentStepR
   // "wait" step instead of throwing: the client loop pauses and surfaces the reason
   // rather than the route returning a 500.
   try {
-    const raw = await completeJSON<AgentStepResult>({
-      system: SYSTEM_TEXT,
-      user,
-      temperature: 0.1,
-      maxTokens: 300
-    });
+    let raw: AgentStepResult;
+    try {
+      raw = await completeJSON<AgentStepResult>({ system: SYSTEM_TEXT, user, temperature: 0.1, maxTokens: 300 });
+    } catch {
+      // The model returned prose/refused — retry once with a firm reminder to emit JSON only.
+      raw = await completeJSON<AgentStepResult>({ system: SYSTEM_TEXT, user: RETRY_NUDGE, temperature: 0.1, maxTokens: 300 });
+    }
     return sanitize(raw);
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'agent unavailable';
-    return sanitize({ action: 'wait', ms: 1200, reason: reason.slice(0, 100) });
+    // Flag it as an error (not a genuine wait) so the client can count refusals and stop the spin.
+    return { ...sanitize({ action: 'wait', ms: 1200, reason: reason.slice(0, 100) }), error: true };
   }
 }

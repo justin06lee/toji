@@ -326,6 +326,8 @@ export async function synthesizeAnswer(query: string, notes: SourceNote[]): Prom
     const mergedWithoutMarkdown: Omit<SynthesisResult, 'markdown'> = {
       ...fallbackWithoutMarkdown,
       ...answer,
+      headline: typeof answer.headline === 'string' && answer.headline.trim() ? answer.headline : fallbackWithoutMarkdown.headline,
+      summary: typeof answer.summary === 'string' && answer.summary.trim() ? answer.summary : fallbackWithoutMarkdown.summary,
       sections: (() => {
         const sections = sanitizeSections(answer.sections);
         return sections.length > 0 ? sections : fallback.sections;

@@ -1,21 +1,31 @@
-import { ArrowLeft, ArrowRight, Copy, FolderPlus, Globe, Moon, MousePointer2, PanelLeft, PanelLeftClose, PanelLeftOpen, PanelTop, Plus, RefreshCcw, RotateCw, Search, Settings, Sun, X } from 'lucide-react';
-import { motion } from 'motion/react';
+import { ArrowLeft, ArrowRight, Copy, FolderPlus, Globe, Moon, MousePointer2, PanelLeft, PanelTop, Plus, RefreshCcw, RotateCw, Search, Settings, Sun, X } from 'lucide-react';
+import { AnimatePresence, motion, Reorder } from 'motion/react';
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { AgentSpotlight, type AgentLogEntry } from './components/AgentSpotlight';
 import { SettingsModal } from './components/SettingsModal';
-import { credentialDirectory, loadCredentials, resolveSecrets, saveCredentials, type CredentialStore } from './lib/credentials';
+import { credentialDirectory, loadCredentials, resolveSecrets, saveCredentials, unresolvedPlaceholders, type CredentialStore } from './lib/credentials';
+import { InternalPage } from './components/InternalPage';
 import { PageView } from './components/PageView';
 import { Sidebar } from './components/Sidebar';
 import { WebView } from './components/WebView';
-import { agentResearch, agentStep, fetchPageSources, pageStreamUrl } from './lib/api';
+import { addMemory, agentResearch, agentStep, fetchPageSources, getReferences, librarian, pageStreamUrl, uploadFile } from './lib/api';
 import { type AgentCell, CLEAR_MARKS_JS, locateScript, marksScript, PAGE_SIGNATURE_JS, scrollScript, SNAPSHOT_JS } from './lib/agentDom';
-import { hostOf, looksLikeUrl, toUrl, webSearchUrl } from './lib/nav';
+import { hostOf, looksLikeUrl, toUrl, webSearchUrl, type SearchEngineId } from './lib/nav';
 import { GROUP_COLORS, type BrowserTab, type TabGroup } from './types';
 
 interface AgentState {
   running: boolean;
   log: AgentLogEntry[];
+  /** A question the agent is waiting on the user to answer (the run is paused). */
+  ask?: string;
+}
+/** A file the user dropped onto a tab's agent: a stable index, display name, mime, and server path. */
+interface AgentFile {
+  index: number;
+  name: string;
+  mime: string;
+  path: string;
 }
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const DEFAULT_AGENT_MAX_STEPS = 40;
@@ -26,6 +36,16 @@ const isMac = (window as unknown as { toji?: { platform?: string } }).toji?.plat
 const isElectron = Boolean((window as unknown as { toji?: unknown }).toji);
 const ICON = `${import.meta.env.BASE_URL}toji-round.png`;
 
+/** A tab's icon: the site's favicon for web tabs (falling back to the Toji mark), else the Toji mark. */
+function TabFavicon({ tab }: { tab: BrowserTab }) {
+  const [errored, setErrored] = useState(false);
+  useEffect(() => setErrored(false), [tab.favicon]);
+  if (tab.mode === 'web' && tab.favicon && !errored) {
+    return <img src={tab.favicon} alt="" aria-hidden className="h-4 w-4 shrink-0 rounded-[4px]" onError={() => setErrored(true)} />;
+  }
+  return <img src={ICON} alt="" aria-hidden className="h-4 w-4 shrink-0 rounded-[5px]" />;
+}
+
 // Alternates the side each cursor arc bows toward, so repeated moves don't look mechanical.
 let bowSign = 1;
 let counter = 0;
@@ -35,6 +55,7 @@ function makeTab(groupId: string | null = null): BrowserTab {
 }
 
 function tabTitle(tab: BrowserTab) {
+  if (tab.internal) return tab.internal === 'settings' ? 'Settings' : 'Welcome to Toji';
   if (tab.mode === 'web') return tab.title || (tab.url ? hostOf(tab.url) : 'New Tab');
   const q = tab.query.trim();
   if (!q) return 'New Tab';
@@ -48,10 +69,9 @@ export function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('toji-theme') === 'dark' ? 'dark' : 'light'));
   const [layout, setLayout] = useState<'top' | 'side'>(() => (localStorage.getItem('toji-layout') === 'side' ? 'side' : 'top'));
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem('toji-sidebar') !== 'closed');
+  // Transient "peek": hovering the left edge opens the sidebar as an overlay until the mouse leaves.
+  const [sidebarPeek, setSidebarPeek] = useState(false);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tabId: string } | null>(null);
-  const [hoverTab, setHoverTab] = useState<{ tabId: string; rect: DOMRect } | null>(null);
-  const hoverShowTimer = useRef<number | null>(null);
-  const hoverHideTimer = useRef<number | null>(null);
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
   const activeRef = useRef(activeId);
@@ -146,7 +166,7 @@ export function App() {
       const value = raw.trim();
       if (!value) return;
       if (looksLikeUrl(value)) navigateTab(tabId, toUrl(value));
-      else if (opts.web) navigateTab(tabId, webSearchUrl(value));
+      else if (opts.web) navigateTab(tabId, webSearchUrl(value, (localStorage.getItem('toji-search-engine') as SearchEngineId | null) ?? 'duckduckgo'));
       else generatePage(tabId, value);
     },
     [generatePage, navigateTab]
@@ -158,6 +178,25 @@ export function App() {
     setActiveId(tab.id);
     requestAnimationFrame(() => inputRef.current?.focus());
   }, []);
+
+  // Open (or focus) a built-in Toji page — Settings / Welcome — as a tab.
+  const openInternal = useCallback((page: 'settings' | 'welcome') => {
+    const existing = tabsRef.current.find((t) => t.internal === page);
+    if (existing) {
+      setActiveId(existing.id);
+      return;
+    }
+    const tab = makeTab(tabsRef.current.find((t) => t.id === activeRef.current)?.groupId ?? null);
+    tab.internal = page;
+    tab.status = 'ready';
+    setTabs((current) => [...current, tab]);
+    setActiveId(tab.id);
+  }, []);
+
+  // First launch: show the welcome/onboarding page once.
+  useEffect(() => {
+    if (localStorage.getItem('toji-onboarded') !== '1') openInternal('welcome');
+  }, [openInternal]);
 
   // Open an http(s) link (a source or an in-page link) as a new Toji web tab.
   const openWebTab = useCallback((url: string) => {
@@ -191,6 +230,23 @@ export function App() {
       if (id === activeRef.current) setActiveId(next[Math.min(index, next.length - 1)].id);
       const surviving = new Set(next.map((t) => t.groupId).filter(Boolean) as string[]);
       setGroups((gs) => gs.filter((g) => surviving.has(g.id)));
+      // Prune per-tab agent state/refs so long sessions that open and close many tabs
+      // don't leak entries in these keyed maps.
+      // Release an agent paused on a question, or its loop would await the answer forever.
+      agentCancel.current[id] = true;
+      agentAskResolve.current[id]?.(null);
+      delete agentAskResolve.current[id];
+      delete agentCancel.current[id];
+      delete cursorPos.current[id];
+      delete agentRunningRef.current[id];
+      setAgents((a) => {
+        const { [id]: _drop, ...rest } = a;
+        return rest;
+      });
+      setAgentFiles((m) => {
+        const { [id]: _drop, ...rest } = m;
+        return rest;
+      });
     },
     []
   );
@@ -317,7 +373,23 @@ export function App() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const webviewRefs = useRef<Record<string, any>>({});
   const agentCancel = useRef<Record<string, boolean>>({});
+  // Pending "ask the user" resolver per tab: the agent loop awaits it; the spotlight submit (or a
+  // Stop, which resolves null) fulfills it.
+  const agentAskResolve = useRef<Record<string, ((answer: string | null) => void) | undefined>>({});
   const [agents, setAgents] = useState<Record<string, AgentState>>({});
+  // Files the user dropped onto a tab's agent (e.g. a resume): a server path + a stable index.
+  const [agentFiles, setAgentFiles] = useState<Record<string, AgentFile[]>>({});
+  const agentFilesRef = useRef(agentFiles);
+  useEffect(() => {
+    agentFilesRef.current = agentFiles;
+  }, [agentFiles]);
+  // Which tabs currently have a running agent — used to keep them awake/capturable off-screen.
+  const agentRunningRef = useRef<Record<string, boolean>>({});
+  useEffect(() => {
+    const running: Record<string, boolean> = {};
+    for (const [id, st] of Object.entries(agents)) if (st.running) running[id] = true;
+    agentRunningRef.current = running;
+  }, [agents]);
   const [spotlight, setSpotlight] = useState<string | null>(null);
   const [agentCursor, setAgentCursor] = useState<{ x: number; y: number; tick: number } | null>(null);
   // Hide the agent cursor when you switch away from the tab it's acting on.
@@ -377,13 +449,16 @@ export function App() {
   }, [goBack, goForward]);
 
   const logAgent = useCallback((tabId: string, entry: AgentLogEntry) => {
-    setAgents((a) => ({ ...a, [tabId]: { running: a[tabId]?.running ?? true, log: [...(a[tabId]?.log ?? []), entry] } }));
+    setAgents((a) => ({ ...a, [tabId]: { ...a[tabId], running: a[tabId]?.running ?? true, log: [...(a[tabId]?.log ?? []), entry] } }));
   }, []);
 
   const stopAgent = useCallback((tabId: string) => {
     agentCancel.current[tabId] = true;
+    // If the agent is paused on a question, release it so the loop can observe the cancel.
+    agentAskResolve.current[tabId]?.(null);
+    agentAskResolve.current[tabId] = undefined;
     setAgentCursor(null);
-    setAgents((a) => ({ ...a, [tabId]: { running: false, log: a[tabId]?.log ?? [] } }));
+    setAgents((a) => ({ ...a, [tabId]: { running: false, log: a[tabId]?.log ?? [], ask: undefined } }));
   }, []);
 
   // Reset a tab's browsing context (fresh, isolated session) and reload it.
@@ -561,7 +636,8 @@ export function App() {
   // otherwise so the agent falls back to DOM-only reasoning.
   const captureScreenshot = useCallback(async (tabId: string): Promise<string | undefined> => {
     const wv = webviewRefs.current[tabId];
-    if (!wv?.capturePage || tabId !== activeRef.current) return undefined;
+    // Capture the active tab, or any tab with a running agent (those stay painted off-screen).
+    if (!wv?.capturePage || (tabId !== activeRef.current && !agentRunningRef.current[tabId])) return undefined;
     try {
       const img = await wv.capturePage();
       const size = img?.getSize?.();
@@ -614,13 +690,75 @@ export function App() {
     [realClick]
   );
 
+  // Click a snapshot element by its center rect (CDP-native path — the accessibility snapshot
+  // already carries a viewport-relative box, so we click coordinates instead of re-querying the
+  // DOM for a data-toji-ai attribute the CDP snapshot never set).
+  const clickElementByRect = useCallback(
+    async (tabId: string, elements: Array<{ i: number; rect?: { x: number; y: number; w: number; h: number } }>, index: number) => {
+      const el = elements.find((e) => e.i === index);
+      if (!el?.rect) return false;
+      return clickPoint(tabId, Math.round(el.rect.x + el.rect.w / 2), Math.round(el.rect.y + el.rect.h / 2));
+    },
+    [clickPoint]
+  );
+
+  const typeElementByRect = useCallback(
+    async (tabId: string, elements: Array<{ i: number; rect?: { x: number; y: number; w: number; h: number } }>, index: number, text: string) => {
+      const focused = await clickElementByRect(tabId, elements, index);
+      if (!focused) return false;
+      const wv = webviewRefs.current[tabId];
+      if (!wv) return false;
+      await delay(140);
+      // Substitute {{credential}} placeholders locally, at the last moment (never sent to the model).
+      const resolved = resolveSecrets(String(text), credentialsRef.current);
+      try {
+        for (const ch of resolved) wv.sendInputEvent({ type: 'char', keyCode: ch });
+      } catch {
+        return false;
+      }
+      return true;
+    },
+    [clickElementByRect]
+  );
+
   // Run the agent loop on a specific tab. Uses real mouse/keyboard input so it works on
   // complex sites, detects when an action didn't change the page, and stops if stuck.
   const runAgent = useCallback(
     async (tabId: string, goal: string) => {
       agentCancel.current[tabId] = false;
+      // Perception engine (A/B flag). When on, we AUGMENT the DOM scraper with elements from the
+      // page's accessibility tree (webContents.debugger → Accessibility.getFullAXTree) — "use both".
+      // The DOM list always stays the base, so this only adds coverage and can't regress board/visual
+      // play (which relies on the DOM + screenshot path). Default off.
+      const cdpMode = localStorage.getItem('toji-agent-cdp') === '1' && Boolean((window as unknown as { toji?: { axSnapshot?: unknown } }).toji?.axSnapshot);
+      // Vision-first: capture the Set-of-Marks screenshot every step instead of only on demand.
+      const visionFirst = localStorage.getItem('toji-agent-vision') === '1';
       setAgents((a) => ({ ...a, [tabId]: { running: true, log: [...(a[tabId]?.log ?? []), { role: 'you', text: goal }] } }));
       const history: Array<{ action: string; reason?: string }> = [];
+      // Hermes-style memory: ask the librarian once for a compact digest relevant to this goal
+      // (plus always-on pinned memory). Injected into every step so the agent has context without
+      // us pushing the whole memory store. Best-effort — never blocks the run.
+      let memory = '';
+      try {
+        const lib = await librarian(goal, tabId);
+        memory = [lib.pinned, lib.digest].filter((s) => s && s.trim()).join('\n\n').slice(0, 1400);
+      } catch {
+        /* memory is optional */
+      }
+      // Persistent reference documents (e.g. a resume kept in memory) — available to the agent for
+      // the whole run alongside any files dropped on this tab. High indices avoid colliding with
+      // dropped-file indices.
+      let references: AgentFile[] = [];
+      try {
+        const r = await getReferences();
+        references = r.references.map((d, i) => ({ index: 100000 + i, name: d.name, mime: d.mime, path: d.path }));
+      } catch {
+        /* references are optional */
+      }
+      const allFiles = () => [...(agentFilesRef.current[tabId] ?? []), ...references];
+      // DOM-only by default to save tokens; the agent sets this via the "screenshot" action when it
+      // genuinely needs to see pixels. One-shot: captured for the next step, then reset.
+      let wantImage = false;
       let lastSig = '';
       let stuck = 0;
       let waits = 0;
@@ -628,6 +766,7 @@ export function App() {
       let acted = 0; // real (non-wait) actions performed so far
       let doneOverrides = 0; // times we've rejected a premature "done"
       let stepFailures = 0; // consecutive model-call failures
+      let refusals = 0; // consecutive prose/refusal responses (model returned non-JSON)
       // Visual actions (clicking a canvas/board) change pixels but not the DOM, so the
       // signature can't see their effect — don't let them trip the "stuck" detector.
       let lastWasVisual = false;
@@ -649,7 +788,8 @@ export function App() {
               url: 'about:blank',
               title: 'New Tab',
               elements: [],
-              history: [...history, { action: 'note', reason: 'No website is open yet. Use "navigate" with the URL the goal needs to begin.' }]
+              // The server accepts at most 20 history entries — send the most recent ones.
+              history: [...history.slice(-19), { action: 'note', reason: 'No website is open yet. Use "navigate" with the URL the goal needs to begin.' }]
             });
           } catch {
             stepFailures += 1;
@@ -691,14 +831,25 @@ export function App() {
           await delay(100);
         }
         if (agentCancel.current[tabId]) break;
-        const onScreen = tabId === activeRef.current;
         let snap: { url: string; title: string; scrollY: number; maxScroll: number; elements: Array<{ i: number; tag: string; role: string; name: string; value?: string; rect?: { x: number; y: number; w: number; h: number } }>; cells: AgentCell[] };
-        // Vision step on the visible tab: draw the Set-of-Marks overlay (numbered element
-        // badges + a labeled grid on any board/canvas), capture it, then remove it — so the
-        // model picks discrete labels with exact known coordinates instead of guessing pixels.
+        // Vision step: draw the Set-of-Marks overlay (numbered element badges + a labeled grid on
+        // any board/canvas), capture it, then remove it — so the model picks discrete labels with
+        // exact known coordinates instead of guessing pixels.
         let image: string | undefined;
+        // Elements that came ONLY from the accessibility tree (CDP mode) — keyed by the synthetic
+        // index we assign them. They have no data-toji-ai attribute, so we click them by rect.
+        const axExtras: Record<number, { x: number; y: number; w: number; h: number }> = {};
+        // DOM-only by default. Only when the agent asked for a screenshot last turn do we draw the
+        // overlay + capture (one-shot). The tab stays painted even when backgrounded (keepAlive),
+        // so this works whether or not it's the active tab — keeps token cost down.
+        // Vision-first mode forces the rich Set-of-Marks snapshot EVERY step (board grid + element
+        // badges + screenshot), so the model always "sees" the page. Costs more tokens/latency but
+        // grounds far better on visual pages (chess, canvases) — worth it when running a local agent.
+        if (visionFirst && wv.capturePage) wantImage = true;
+        const captureNow = wantImage && Boolean(wv.capturePage);
+        wantImage = false;
         try {
-          if (onScreen && wv.capturePage) {
+          if (captureNow) {
             snap = await wv.executeJavaScript(marksScript(10), true);
             await delay(40); // let the overlay paint before the capture
             image = await captureScreenshot(tabId);
@@ -708,8 +859,40 @@ export function App() {
               /* overlay is re-drawn next step anyway */
             }
           } else {
+            // DOM scraper is ALWAYS the base (keeps clicks, board cells, and everything working).
             const s = await wv.executeJavaScript(SNAPSHOT_JS, true);
             snap = { ...s, cells: [] };
+            // In CDP mode, AUGMENT it with accessibility-tree elements the DOM scraper missed —
+            // "use both". We never replace the DOM list, so CDP can only add coverage, never regress
+            // (board/canvas play still uses the DOM + screenshot path). Extras get high indices and
+            // are clicked by their rect.
+            if (cdpMode) {
+              const wcId = (wv as unknown as { getWebContentsId?: () => number }).getWebContentsId?.();
+              const axBridge = (window as unknown as { toji?: { axSnapshot?: (id: number, max: number) => Promise<{ elements?: typeof snap.elements } | null> } }).toji?.axSnapshot;
+              if (typeof wcId === 'number' && axBridge) {
+                try {
+                  const ax = await axBridge(wcId, 40);
+                  const axEls = ax && Array.isArray(ax.elements) ? ax.elements : [];
+                  const inside = (cx: number, cy: number, r: { x: number; y: number; w: number; h: number }) => cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h;
+                  let nextIdx = 500; // well above DOM indices (capped at 60)
+                  const merged = [...snap.elements];
+                  for (const a of axEls) {
+                    if (!a.rect || nextIdx > 540) continue;
+                    const acx = a.rect.x + a.rect.w / 2;
+                    const acy = a.rect.y + a.rect.h / 2;
+                    // Skip anything a DOM element already covers (avoid duplicate targets).
+                    if (snap.elements.some((e) => e.rect && inside(acx, acy, e.rect))) continue;
+                    if (!a.name) continue; // unnamed extras add noise, not signal
+                    axExtras[nextIdx] = a.rect;
+                    merged.push({ i: nextIdx, tag: a.tag, role: a.role, name: a.name, value: a.value, rect: a.rect });
+                    nextIdx += 1;
+                  }
+                  snap = { ...snap, elements: merged };
+                } catch {
+                  /* AX augmentation is best-effort; DOM base already stands on its own */
+                }
+              }
+            }
           }
         } catch {
           logAgent(tabId, { role: 'system', text: 'Could not read this page.' });
@@ -742,7 +925,7 @@ export function App() {
         }
         let action;
         try {
-          action = await agentStep({ goal, url: snap.url, title: snap.title, scrollY: snap.scrollY, maxScroll: snap.maxScroll, elements: snap.elements, history, image, viewport, cells: snap.cells, credentials: credentialDirectory(credentialsRef.current) });
+          action = await agentStep({ goal, url: snap.url, title: snap.title, scrollY: snap.scrollY, maxScroll: snap.maxScroll, elements: snap.elements, history: history.slice(-20), image, viewport, cells: snap.cells, credentials: credentialDirectory(credentialsRef.current), files: allFiles().map((f) => ({ index: f.index, name: f.name, mime: f.mime })), memory });
           stepFailures = 0;
         } catch {
           // A transient model/network hiccup (rate-limit, timeout) shouldn't kill the run — retry
@@ -758,6 +941,21 @@ export function App() {
           continue;
         }
         if (agentCancel.current[tabId]) break;
+        // The model returned prose/refused ("I don't have browser-control tools") instead of a JSON
+        // action. The server already retried once; don't surface the raw refusal or spin forever —
+        // nudge it via history and give up after a few in a row with a clear message.
+        if (action.error) {
+          refusals += 1;
+          if (refusals >= 3) {
+            logAgent(tabId, { role: 'system', text: 'The agent kept replying with text instead of taking an action — it may be declining the task. Stopping.' });
+            break;
+          }
+          history.push({ action: 'note', reason: 'you replied with prose, not a JSON action — you DO control this browser; return one JSON action' });
+          await delay(500);
+          step -= 1; // a refusal shouldn't consume the action budget
+          continue;
+        }
+        refusals = 0;
         if (action.reason) logAgent(tabId, { role: 'agent', text: action.reason });
         if (action.action === 'done' || action.done) {
           // Reject a "done" before the agent has actually done anything — a weak model often
@@ -815,6 +1013,73 @@ export function App() {
           }
           continue;
         }
+        // ask: the agent needs something only the user knows (which account, a missing credential,
+        // a code, a choice). Pause the run, surface the question in the spotlight, and resume with
+        // the user's answer as an observation.
+        if (action.action === 'ask' && typeof action.question === 'string' && action.question.trim()) {
+          const question = action.question.trim();
+          logAgent(tabId, { role: 'agent', text: question });
+          setAgents((a) => ({ ...a, [tabId]: { ...a[tabId], running: true, log: a[tabId]?.log ?? [], ask: question } }));
+          setSpotlight(tabId); // bring the chat up so the user sees the question
+          const answer = await new Promise<string | null>((resolve) => {
+            agentAskResolve.current[tabId] = resolve;
+          });
+          agentAskResolve.current[tabId] = undefined;
+          setAgents((a) => ({ ...a, [tabId]: { ...a[tabId], running: a[tabId]?.running ?? true, log: a[tabId]?.log ?? [], ask: undefined } }));
+          if (answer === null || agentCancel.current[tabId]) break;
+          history.push({ action: 'asked user', reason: `${question} → ${answer}`.slice(0, 400) });
+          lastWasVisual = true; // pausing for input mustn't trip the stuck detector
+          step -= 1; // asking is free
+          continue;
+        }
+        // screenshot: the agent decided it needs to SEE the page — capture one for next turn.
+        if (action.action === 'screenshot') {
+          wantImage = true;
+          logAgent(tabId, { role: 'agent', text: 'Taking a screenshot…' });
+          history.push({ action: 'note', reason: 'screenshot requested — it will be attached next turn' });
+          lastWasVisual = true;
+          step -= 1; // requesting a screenshot is free
+          if (++waits > 24) {
+            logAgent(tabId, { role: 'system', text: 'Too many non-acting steps — stopping.' });
+            break;
+          }
+          continue;
+        }
+        // remember: persist a durable fact for future sessions (Hermes-style memory).
+        if (action.action === 'remember' && typeof action.text === 'string' && action.text.trim()) {
+          const note = action.text.trim().slice(0, 500);
+          void addMemory(note, undefined, tabId).catch(() => {});
+          memory = `${memory}\n- ${note}`.slice(-1400); // reflect it immediately this run too
+          logAgent(tabId, { role: 'agent', text: `Remembered: ${note.slice(0, 120)}` });
+          history.push({ action: 'remembered', reason: note.slice(0, 80) });
+          lastWasVisual = true;
+          step -= 1; // remembering is free
+          if (++waits > 24) {
+            logAgent(tabId, { role: 'system', text: 'Too many non-acting steps — stopping.' });
+            break;
+          }
+          continue;
+        }
+        // uploadFile: put one of the dropped files into a page file-input (e.g. attach a resume).
+        if (action.action === 'uploadFile') {
+          const files = allFiles();
+          const file = files.find((f) => f.index === action.fileIndex) ?? files[0];
+          const toji = (window as unknown as { toji?: { uploadToFileInput?: (id: number, filePath: string, inputIndex: number) => Promise<boolean> } }).toji;
+          const wcId = (wv as unknown as { getWebContentsId?: () => number }).getWebContentsId?.();
+          let ok = false;
+          if (file && toji?.uploadToFileInput && typeof wcId === 'number') {
+            try {
+              ok = await toji.uploadToFileInput(wcId, file.path, typeof action.index === 'number' ? action.index : 0);
+            } catch {
+              ok = false;
+            }
+          }
+          logAgent(tabId, { role: ok ? 'agent' : 'system', text: ok ? `Uploaded ${file?.name}` : 'Could not upload the file (no file-input found).' });
+          history.push({ action: 'uploadFile', reason: ok ? `uploaded ${file?.name}` : 'upload failed' });
+          await delay(900);
+          acted += 1;
+          continue;
+        }
         // Wait: do nothing and re-check. Poll the page signature so we resume as soon as the
         // opponent moves / the page updates, else pause the full interval. Waiting is "free" —
         // it doesn't consume the action budget — but is capped so it can't loop forever.
@@ -843,18 +1108,40 @@ export function App() {
           }
           continue;
         }
+        // Backstop: never type a {{placeholder}} that doesn't resolve to a saved credential — the
+        // literal text would land in the page (e.g. "{{email}}" typed into Gmail). Bounce it back
+        // to the model with the real credential directory so it asks the user instead.
+        if (action.action === 'type' && unresolvedPlaceholders(action.text || '', credentialsRef.current).length) {
+          const missing = unresolvedPlaceholders(action.text || '', credentialsRef.current);
+          const dir = credentialDirectory(credentialsRef.current);
+          const have = dir.length
+            ? `The ONLY saved credentials are: ${dir.map((d) => `"${d.name}" (keys: ${d.keys.join(', ')})`).join('; ')}`
+            : 'The user has NO saved credentials';
+          logAgent(tabId, { role: 'system', text: `No saved credential matches ${missing.join(', ')} — the agent needs to ask you instead.` });
+          history.push({ action: 'note', reason: `refused to type ${missing.join(', ')}: no such credential. ${have}. Use ask(question) to get what you need from the user.`.slice(0, 400) });
+          lastWasVisual = true; // nothing was executed — don't trip the stuck detector
+          step -= 1; // a blocked action shouldn't burn the budget — the retry is the real step
+          if (++waits > 24) {
+            logAgent(tabId, { role: 'system', text: 'Too many non-acting steps — stopping.' });
+            break;
+          }
+          continue;
+        }
         try {
           if (action.action === 'navigate' && action.url) {
             navigateTab(tabId, toUrl(action.url));
             await delay(2000);
           } else if (action.action === 'type' && typeof action.index === 'number') {
-            await realType(tabId, action.index, action.text || '');
+            // AX-only extras have no DOM attribute → type by rect; DOM elements use the exact path.
+            if (axExtras[action.index]) await typeElementByRect(tabId, snap.elements, action.index, action.text || '');
+            else await realType(tabId, action.index, action.text || '');
             await delay(900);
           } else if (action.action === 'scroll') {
             await wv.executeJavaScript(scrollScript(action.direction === 'up' ? 'up' : 'down'), true);
             await delay(700);
           } else if (action.action === 'click' && typeof action.index === 'number') {
-            await realClick(tabId, action.index);
+            if (axExtras[action.index]) await clickElementByRect(tabId, snap.elements, action.index);
+            else await realClick(tabId, action.index);
             await delay(1100);
           } else if (action.action === 'clickAt' && typeof action.x === 'number' && typeof action.y === 'number') {
             await realClickAt(tabId, action.x, action.y);
@@ -901,24 +1188,8 @@ export function App() {
       }
       setAgents((a) => ({ ...a, [tabId]: { running: false, log: a[tabId]?.log ?? [] } }));
     },
-    [captureScreenshot, clickPoint, logAgent, navigateTab, realClick, realClickAt, realDrag, realType]
+    [captureScreenshot, clickElementByRect, clickPoint, logAgent, navigateTab, realClick, realClickAt, realDrag, realType, typeElementByRect]
   );
-
-  // Tab hover preview ("bubble"): delayed show, brief hide grace so the cursor can
-  // travel into the bubble. Direction (down vs right) is chosen at render by layout.
-  const showTabHover = useCallback((tabId: string, el: HTMLElement) => {
-    if (hoverHideTimer.current) window.clearTimeout(hoverHideTimer.current);
-    if (hoverShowTimer.current) window.clearTimeout(hoverShowTimer.current);
-    const rect = el.getBoundingClientRect();
-    hoverShowTimer.current = window.setTimeout(() => setHoverTab({ tabId, rect }), 300);
-  }, []);
-  const hideTabHover = useCallback(() => {
-    if (hoverShowTimer.current) window.clearTimeout(hoverShowTimer.current);
-    hoverHideTimer.current = window.setTimeout(() => setHoverTab(null), 140);
-  }, []);
-  const keepTabHover = useCallback(() => {
-    if (hoverHideTimer.current) window.clearTimeout(hoverHideTimer.current);
-  }, []);
 
   const toggleTheme = useCallback(() => {
     const next = theme === 'dark' ? 'light' : 'dark';
@@ -935,14 +1206,25 @@ export function App() {
   // A thin always-present drag region pinned to the very top of the window. Hovering
   // near the top slides a small "grip" pill down to signal you can grab here to move
   // the window — so the omnibox can sit flush at the top without a static title bar.
+  // A thin invisible strip along the very top edge: hovering it pops down a little notch
+  // handle (the ⠿ grip), and grabbing either the strip or the notch moves the window.
   const windowDragHandle = (
-    <div className="drag-strip group" aria-hidden>
-      <span className="drag-grip" />
+    <div className="drag-strip" aria-hidden>
+      <span className="drag-notch">
+        <span className="drag-grip">
+          {Array.from({ length: 9 }, (_, i) => (
+            <i key={i} />
+          ))}
+        </span>
+      </span>
     </div>
   );
 
   const addressRow = (
-    <div className={`flex items-center gap-1 ${isMac ? 'pl-[78px]' : ''}`}>
+    // In side-tab mode the omnibox row is the topmost row, so it needs the macOS traffic-light
+    // offset (just enough to sit right beside them); in top-tab mode the TAB STRIP is above
+    // it, so the row sits flush left.
+    <div className={`flex items-center gap-1 ${isMac && layout === 'side' ? 'pl-[72px]' : ''}`}>
       <button type="button" aria-label="Back" title="Back  ⌘[" disabled={!activeTab?.canBack} onClick={goBack} className={`${iconBtn} h-9 w-9 border border-black/[0.08] dark:border-white/10`}>
         <ArrowLeft size={15} />
       </button>
@@ -972,18 +1254,13 @@ export function App() {
           <ArrowRight size={15} />
         </button>
       </form>
-      {layout === 'side' && !sidebarOpen && (
-        <button type="button" aria-label="Show sidebar" title="Show sidebar" onClick={() => setSidebarOpen(true)} className={`${iconBtn} h-9 w-9 border border-black/[0.08] dark:border-white/10`}>
-          <PanelLeftOpen size={14} />
-        </button>
-      )}
       <button type="button" aria-label="Toggle tab layout" title={layout === 'side' ? 'Top tabs' : 'Side tabs'} onClick={() => setLayout((l) => (l === 'side' ? 'top' : 'side'))} className={`${iconBtn} h-9 w-9 border border-black/[0.08] dark:border-white/10`}>
         {layout === 'side' ? <PanelTop size={14} /> : <PanelLeft size={14} />}
       </button>
       <button type="button" aria-label="Toggle theme" onClick={toggleTheme} className={`${iconBtn} h-9 w-9 border border-black/[0.08] dark:border-white/10`}>
         {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
       </button>
-      <button type="button" aria-label="Settings" title="Settings & credentials" onClick={() => setSettingsOpen(true)} className={`${iconBtn} h-9 w-9 border border-black/[0.08] dark:border-white/10`}>
+      <button type="button" aria-label="Settings" title="Settings" onClick={() => openInternal('settings')} className={`${iconBtn} h-9 w-9 border border-black/[0.08] dark:border-white/10`}>
         <Settings size={14} />
       </button>
     </div>
@@ -1022,7 +1299,29 @@ export function App() {
           preserves state — web pages keep their scroll/session, and AI pages aren't
           regenerated. */}
       {tabs.map((tab) => {
-        const visibility = tab.id === activeId ? 'flex' : 'hidden';
+        const isActive = tab.id === activeId;
+        // A tab with a RUNNING agent stays laid out + painted instead of display:none, so the
+        // agent's clicks land (rects stay valid) and its JS keeps running — but at opacity 0
+        // (not just a lower z-index) so it can't show through transparent surfaces like the
+        // New Tab landing. Idle inactive tabs are hidden (asleep) as before.
+        const keepAlive = !isActive && Boolean(agents[tab.id]?.running);
+        const visibility = isActive ? 'flex z-10' : keepAlive ? 'flex z-0 opacity-0 pointer-events-none' : 'hidden';
+        if (tab.internal) {
+          return (
+            <div key={tab.id} className={`absolute inset-0 ${visibility}`}>
+              <InternalPage
+                page={tab.internal}
+                store={credentials}
+                onChange={setCredentials}
+                onOpenUrl={openWebTab}
+                onGetStarted={() => {
+                  localStorage.setItem('toji-onboarded', '1');
+                  closeTab(tab.id);
+                }}
+              />
+            </div>
+          );
+        }
         if (tab.mode === 'web' && tab.url) {
           return (
             <div key={tab.id} className={`absolute inset-0 ${visibility}`}>
@@ -1035,6 +1334,7 @@ export function App() {
                 onTitle={(title) => patchTab(tab.id, { title })}
                 onLoadingChange={(l) => patchTab(tab.id, { status: l ? 'loading' : 'ready' })}
                 onHistory={(canBack, canForward) => patchTab(tab.id, { canBack, canForward })}
+                onFavicon={(favicon) => patchTab(tab.id, { favicon })}
                 onRegister={(el) => registerWebview(tab.id, el)}
               />
             </div>
@@ -1053,48 +1353,31 @@ export function App() {
     </main>
   );
 
-  // A small circular "agent" button that appears on tab hover — below for top tabs,
-  // to the right for sidebar tabs. Clicking it opens the agent spotlight for that tab.
-  const tabHoverBubble =
-    hoverTab &&
-    (() => {
-      const tab = tabs.find((t) => t.id === hoverTab.tabId);
-      if (!tab) return null;
-      const r = hoverTab.rect;
-      const side = layout === 'side';
-      const size = 34;
-      const rawLeft = side ? r.right + 8 : r.left + r.width / 2 - size / 2;
-      const rawTop = side ? r.top + r.height / 2 - size / 2 : r.bottom + 6;
-      const left = Math.max(8, Math.min(rawLeft, window.innerWidth - size - 8));
-      const top = Math.max(8, Math.min(rawTop, window.innerHeight - size - 8));
-      const running = agents[tab.id]?.running;
-      return createPortal(
-        <motion.button
-          type="button"
-          onMouseEnter={keepTabHover}
-          onMouseLeave={hideTabHover}
-          onClick={() => {
-            setHoverTab(null);
-            setSpotlight(tab.id);
-          }}
-          title="Ask the agent to do something on this tab"
-          initial={{ scale: 0.3, opacity: 0, y: side ? 0 : -6, x: side ? -6 : 0 }}
-          animate={{ scale: 1, opacity: 1, y: 0, x: 0 }}
-          transition={{ type: 'spring', stiffness: 520, damping: 20 }}
-          whileHover={{ scale: 1.14, rotate: -6 }}
-          whileTap={{ scale: 0.9 }}
-          className="no-drag fixed z-[90] inline-flex items-center justify-center rounded-full border border-black/10 bg-white text-neutral-700 shadow-lg dark:border-white/12 dark:bg-neutral-800 dark:text-neutral-100"
-          style={{ left, top, width: size, height: size }}
-        >
-          {running ? (
-            <span className="h-3.5 w-3.5 animate-spin rounded-full border-[2px] border-current/30 border-t-current" />
-          ) : (
-            <MousePointer2 size={15} className="-translate-x-px" />
-          )}
-        </motion.button>,
-        document.body
-      );
-    })();
+  // Upload dropped files to the local server (so the CLI agent can read/upload them by path) and
+  // attach them to this tab's agent with a stable index the model can reference.
+  const addAgentFiles = useCallback(async (tabId: string, fileList: FileList | File[]) => {
+    for (const file of Array.from(fileList)) {
+      try {
+        const dataBase64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+          reader.onerror = () => reject(new Error('read failed'));
+          reader.readAsDataURL(file);
+        });
+        const up = await uploadFile(file.name, file.type, dataBase64);
+        setAgentFiles((m) => {
+          const cur = m[tabId] ?? [];
+          const index = cur.length ? Math.max(...cur.map((f) => f.index)) + 1 : 0;
+          return { ...m, [tabId]: [...cur, { index, name: up.name, mime: up.mime, path: up.path }] };
+        });
+      } catch {
+        /* skip files that fail to upload */
+      }
+    }
+  }, []);
+  const removeAgentFile = useCallback((tabId: string, index: number) => {
+    setAgentFiles((m) => ({ ...m, [tabId]: (m[tabId] ?? []).filter((f) => f.index !== index) }));
+  }, []);
 
   const agentSpotlight =
     spotlight &&
@@ -1107,12 +1390,24 @@ export function App() {
         <AgentSpotlight
           target={target}
           running={Boolean(agent?.running)}
+          pendingAsk={agent?.ask}
           log={agent?.log ?? []}
           maxSteps={agentMaxSteps}
           noLimit={agentNoLimit}
           onMaxSteps={setAgentMaxSteps}
           onNoLimit={setAgentNoLimit}
+          files={(agentFiles[tab.id] ?? []).map((f) => ({ index: f.index, name: f.name }))}
+          onDropFiles={(fl) => void addAgentFiles(tab.id, fl)}
+          onRemoveFile={(index) => removeAgentFile(tab.id, index)}
           onSubmit={(goal) => {
+            // If the agent is paused on a question, this submission is the ANSWER — resume the run.
+            const resolveAsk = agentAskResolve.current[tab.id];
+            if (resolveAsk) {
+              logAgent(tab.id, { role: 'you', text: goal });
+              resolveAsk(goal);
+              return; // keep the spotlight open so the user sees the agent continue
+            }
+            if (agents[tab.id]?.running) return; // don't start a second concurrent loop on this tab
             void runAgent(tab.id, goal);
             setSpotlight(null); // hide so you can watch the agent; reopen with right ⌥
           }}
@@ -1200,37 +1495,71 @@ export function App() {
       );
     })();
 
+  // The sidebar element — reused both pinned-open and as the transient edge "peek". While
+  // peeking, the collapse button becomes a PIN: pressing it keeps the sidebar open for good.
+  const sidebarEl = (peek = false) => (
+    <Sidebar
+      tabs={tabs}
+      groups={groups}
+      activeId={activeId}
+      peek={peek}
+      onSelect={setActiveId}
+      onClose={closeTab}
+      onNewTab={openTab}
+      onToggleCollapse={() => {
+        setSidebarOpen(peek);
+        setSidebarPeek(false);
+      }}
+      onToggleGroup={toggleGroup}
+      onRenameGroup={renameGroup}
+      onRemoveGroup={removeGroup}
+      onTabContextMenu={(tabId, x, y) => {
+        setActiveId(tabId);
+        setTabMenu({ x, y, tabId });
+      }}
+      onReorderUngrouped={(ordered) =>
+        setTabs((cur) => {
+          // Drop the reordered ungrouped tabs back into their original slots, leaving grouped tabs put.
+          let k = 0;
+          return cur.map((t) => (t.groupId ? t : ordered[k++] ?? t));
+        })
+      }
+    />
+  );
+
   if (layout === 'side') {
     return (
       <div className="flex h-screen flex-col bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
         {windowDragHandle}
-        <header className="drag shrink-0 border-b border-black/[0.07] px-3 pt-5 pb-2.5 dark:border-white/10">
-          <div className={isMac ? 'pl-[70px]' : ''}>{addressRow}</div>
+        <header className="drag shrink-0 border-b border-black/[0.07] px-3 pt-2.5 pb-2.5 dark:border-white/10">
+          {addressRow}
         </header>
-        <div className="flex min-h-0 flex-1">
-          {sidebarOpen && (
-            <Sidebar
-              tabs={tabs}
-              groups={groups}
-              activeId={activeId}
-              onSelect={setActiveId}
-              onClose={closeTab}
-              onNewTab={openTab}
-              onToggleCollapse={() => setSidebarOpen(false)}
-              onToggleGroup={toggleGroup}
-              onRenameGroup={renameGroup}
-              onRemoveGroup={removeGroup}
-              onTabHover={showTabHover}
-              onTabHoverEnd={hideTabHover}
-              onTabContextMenu={(tabId, x, y) => {
-                setActiveId(tabId);
-                setTabMenu({ x, y, tabId });
-              }}
-            />
-          )}
+        <div className="relative flex min-h-0 flex-1">
+          {sidebarOpen && sidebarEl()}
           {viewport}
+          {!sidebarOpen && (
+            <>
+              {/* Thin left-edge trigger: hover to peek the sidebar open. */}
+              <div className="absolute left-0 top-0 z-[70] h-full w-2" onMouseEnter={() => setSidebarPeek(true)} />
+              <AnimatePresence>
+                {sidebarPeek && (
+                  <motion.div
+                    // Looks exactly like the pinned sidebar (opaque, same border), just sliding
+                    // in from the edge — no floating panel, no shadow.
+                    className="absolute left-0 top-0 z-[75] flex h-full bg-white dark:bg-neutral-950"
+                    onMouseLeave={() => setSidebarPeek(false)}
+                    initial={{ x: -240 }}
+                    animate={{ x: 0 }}
+                    exit={{ x: -240 }}
+                    transition={{ type: 'spring', stiffness: 420, damping: 38 }}
+                  >
+                    {sidebarEl(true)}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </>
+          )}
         </div>
-        {tabHoverBubble}
         {agentSpotlight}
         <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} store={credentials} onChange={setCredentials} />
         {agentCursorEl}
@@ -1243,27 +1572,29 @@ export function App() {
     <div className="flex h-screen flex-col bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
       {windowDragHandle}
       <header className="drag shrink-0 border-b border-black/[0.07] px-3 pt-2.5 pb-2.5 dark:border-white/10">
-        {/* Omnibox sits flush at the very top; the tab strip lives just beneath it. */}
-        {addressRow}
-        <div className="mt-2 flex h-9 select-none items-center gap-1 overflow-x-auto">
+        {/* Tabs sit at the very top (offset past the macOS traffic lights); the omnibox lives
+            just beneath them, flush left since nothing overlaps it there. */}
+        {/* Tabs are drag-reorderable along the X axis only (they live in a horizontal strip). */}
+        <Reorder.Group as="div" axis="x" values={tabs} onReorder={setTabs} className={`flex h-9 select-none items-center gap-1 overflow-x-auto ${isMac ? 'pl-[78px]' : ''}`}>
           {tabs.map((tab) => {
             const color = groupColor(tab.groupId);
             return (
-              <div
+              <Reorder.Item
+                as="div"
                 key={tab.id}
+                value={tab}
                 onClick={() => setActiveId(tab.id)}
-                onMouseEnter={(e) => showTabHover(tab.id, e.currentTarget)}
-                onMouseLeave={hideTabHover}
-                onContextMenu={(e) => {
+                onContextMenu={(e: React.MouseEvent<HTMLDivElement>) => {
                   e.preventDefault();
                   setActiveId(tab.id);
                   setTabMenu({ x: e.clientX, y: e.clientY, tabId: tab.id });
                 }}
-                className={`no-drag group flex h-8 min-w-[120px] max-w-[210px] cursor-pointer items-center gap-2 rounded-xl px-2.5 transition-colors ${
+                whileDrag={{ scale: 1.03, cursor: 'grabbing' }}
+                className={`no-drag group flex h-8 min-w-[120px] max-w-[210px] cursor-grab items-center gap-2 rounded-xl px-2.5 transition-colors ${
                   tab.id === activeId ? 'bg-black/[0.06] dark:bg-white/[0.12]' : 'text-neutral-500 hover:bg-black/[0.035] dark:text-neutral-400 dark:hover:bg-white/[0.06]'
                 }`}
               >
-                {color ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} /> : <img src={ICON} alt="" aria-hidden className="h-4 w-4 shrink-0 rounded-[5px]" />}
+                {color ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} /> : <TabFavicon tab={tab} />}
                 <span className="flex-1 truncate text-[13px]">{tabTitle(tab)}</span>
                 {agents[tab.id]?.running && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-violet-500" title="Agent working" />}
                 {tab.status === 'loading' && <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-[1.5px] border-current/30 border-t-current" />}
@@ -1278,16 +1609,17 @@ export function App() {
                 >
                   <X size={12} />
                 </button>
-              </div>
+              </Reorder.Item>
             );
           })}
           <button type="button" aria-label="New tab" onClick={() => openTab(null)} className={`${iconBtn} h-8 w-8 shrink-0`}>
             <Plus size={16} />
           </button>
-        </div>
+        </Reorder.Group>
+        {/* Same 10px rhythm as the header's top/bottom padding, so all three gaps match. */}
+        <div className="mt-2.5">{addressRow}</div>
       </header>
       {viewport}
-      {tabHoverBubble}
       {agentSpotlight}
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} store={credentials} onChange={setCredentials} />
       {agentCursorEl}

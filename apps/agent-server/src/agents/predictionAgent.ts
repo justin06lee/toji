@@ -204,13 +204,15 @@ function sanitizePrediction(predicted: Partial<PredictionResult>, fallback: Pred
     }
   } as PredictionResult;
 
-  merged.confidence = clamp(Number(merged.confidence ?? fallback.confidence), 0, 1);
-  merged.budget.maxTabs = Math.max(1, Math.min(config.maxAgentTabs, Number(merged.budget.maxTabs || fallback.budget.maxTabs)));
-  merged.budget.maxSources = Math.max(1, Math.min(config.maxAgentTabs + 4, Number(merged.budget.maxSources || fallback.budget.maxSources)));
-  merged.budget.speculativeTabs = Math.max(0, Math.min(config.maxSpeculativeTabs, Number(merged.budget.speculativeTabs || fallback.budget.speculativeTabs)));
-  merged.budget.maxSearchQueries = Math.max(1, Math.min(config.maxSearchQueries, Number(merged.budget.maxSearchQueries || fallback.budget.maxSearchQueries)));
-  merged.budget.parallelTabs = Math.max(1, Math.min(config.maxConcurrentTabs, Number(merged.budget.parallelTabs || fallback.budget.parallelTabs)));
-  merged.budget.idlePrewarmMs = Math.max(220, Math.min(1500, Number(merged.budget.idlePrewarmMs || fallback.budget.idlePrewarmMs)));
+  const num = (v: unknown, d: number | undefined): number =>
+    Number.isFinite(Number(v)) ? Number(v) : (Number.isFinite(Number(d)) ? Number(d) : 0);
+  merged.confidence = clamp(num(merged.confidence, fallback.confidence), 0, 1);
+  merged.budget.maxTabs = Math.max(1, Math.min(config.maxAgentTabs, num(merged.budget.maxTabs, fallback.budget.maxTabs)));
+  merged.budget.maxSources = Math.max(1, Math.min(config.maxAgentTabs + 4, num(merged.budget.maxSources, fallback.budget.maxSources)));
+  merged.budget.speculativeTabs = Math.max(0, Math.min(config.maxSpeculativeTabs, num(merged.budget.speculativeTabs, fallback.budget.speculativeTabs)));
+  merged.budget.maxSearchQueries = Math.max(1, Math.min(config.maxSearchQueries, num(merged.budget.maxSearchQueries, fallback.budget.maxSearchQueries)));
+  merged.budget.parallelTabs = Math.max(1, Math.min(config.maxConcurrentTabs, num(merged.budget.parallelTabs, fallback.budget.parallelTabs)));
+  merged.budget.idlePrewarmMs = Math.max(220, Math.min(1500, num(merged.budget.idlePrewarmMs, fallback.budget.idlePrewarmMs)));
   merged.avoidedWork = fallbackIfEmpty(merged.avoidedWork, fallback.avoidedWork).slice(0, 5);
   if (merged.stance === 'commit') merged.stance = 'prewarm';
   merged.typingStage = inferStage(merged.query, merged.confidence);

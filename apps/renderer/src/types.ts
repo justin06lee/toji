@@ -267,6 +267,9 @@ export interface TabGroup {
 
 export type TabMode = 'page' | 'web';
 
+/** Built-in browser pages (chrome://-style), rendered as React, not a web page. */
+export type InternalPage = 'settings' | 'welcome';
+
 export interface BrowserTab {
   id: string;
   query: string;
@@ -277,10 +280,13 @@ export interface BrowserTab {
   mode: TabMode;
   url: string | null;
   title?: string;
+  favicon?: string;
   reloadKey: number;
   canBack?: boolean;
   canForward?: boolean;
   contextKey: number;
+  /** When set, this tab shows a built-in Toji page instead of a web/AI page. */
+  internal?: InternalPage;
 }
 
 /** Colors used to visually distinguish tab groups (work in light + dark). */

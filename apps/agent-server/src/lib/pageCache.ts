@@ -21,6 +21,11 @@ function cacheKey(theme: string, query: string) {
   return hashString(`page|${theme}|${normalizeWhitespace(query).toLowerCase()}`);
 }
 
+function isFresh(savedAt: string) {
+  const ageMs = Date.now() - Date.parse(savedAt);
+  return ageMs >= 0 && ageMs < config.cacheTtlHours * 60 * 60 * 1000;
+}
+
 async function readCache(): Promise<PageCacheState> {
   try {
     const parsed = JSON.parse(await fs.readFile(cachePath, 'utf8')) as PageCacheState;
@@ -38,7 +43,8 @@ function loadCache(): Promise<PageCacheState> {
 /** Return a previously generated page for this exact (theme, query), if any. */
 export async function getCachedPage(theme: string, query: string): Promise<string | undefined> {
   const state = await loadCache();
-  return state.entries[cacheKey(theme, query)]?.html;
+  const entry = state.entries[cacheKey(theme, query)];
+  return entry && isFresh(entry.savedAt) ? entry.html : undefined;
 }
 
 /** Store a fully generated page. Serialized via a write chain; pruned to the newest MAX_ENTRIES. */

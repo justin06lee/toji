@@ -5,7 +5,8 @@ vi.mock('../config.js', () => ({
   config: {
     userAgent: 'TestAgent/1.0',
     braveSearchApiKey: '',
-    searchProvider: 'duckduckgo'
+    searchProvider: 'duckduckgo',
+    requestTimeoutMs: 18_000
   },
   isBraveSearchEnabled: false
 }));

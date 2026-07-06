@@ -31,5 +31,19 @@ contextBridge.exposeInMainWorld('toji', {
     const handler = () => callback();
     ipcRenderer.on('toji:toggle-agent', handler);
     return () => ipcRenderer.removeListener('toji:toggle-agent', handler);
-  }
+  },
+  // Set a dropped file onto a <input type=file> inside a guest <webview> (the agent
+  // attaching e.g. a resume). Done in the main process via the Chrome DevTools
+  // Protocol because the renderer can't set a file input programmatically.
+  uploadToFileInput: (webContentsId, filePath, inputIndex) =>
+    ipcRenderer.invoke('toji:upload-file-input', { webContentsId, filePath, inputIndex }),
+  // CDP-native page perception for the web agent: reads the guest page's accessibility tree
+  // (roles/names/values + on-screen boxes) from the main process instead of scraping the DOM.
+  axSnapshot: (webContentsId, max) => ipcRenderer.invoke('toji:ax-snapshot', { webContentsId, max }),
+  // Default-browser registration + Chrome extension loading (unpacked + Web Store).
+  setDefaultBrowser: () => ipcRenderer.invoke('toji:set-default-browser'),
+  isDefaultBrowser: () => ipcRenderer.invoke('toji:is-default-browser'),
+  addExtension: () => ipcRenderer.invoke('toji:add-extension'),
+  listExtensions: () => ipcRenderer.invoke('toji:list-extensions'),
+  webStoreAvailable: () => ipcRenderer.invoke('toji:web-store-available')
 });
