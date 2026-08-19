@@ -3,6 +3,7 @@ import { AnimatePresence, motion, Reorder } from 'motion/react';
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { AgentSpotlight, type AgentLogEntry } from './components/AgentSpotlight';
+import { ContainerPicker } from './components/ContainerPicker';
 import { credentialDirectory, loadCredentials, resolveSecrets, saveCredentials, unresolvedPlaceholders, type CredentialStore } from './lib/credentials';
 import { InternalPage } from './components/InternalPage';
 import { PageView } from './components/PageView';
@@ -10,7 +11,17 @@ import { Sidebar } from './components/Sidebar';
 import { WebView } from './components/WebView';
 import { addMemory, agentResearch, agentStep, fetchPageSources, getReferences, librarian, pageStreamUrl, uploadFile } from './lib/api';
 import { eyesAct, eyesAvailable, eyesDiff, eyesLook, eyesObserve, PAGE_SIGNATURE_JS, type EyesElement } from './lib/agentDom';
+import {
+  DEFAULT_CONTAINER_ID,
+  findContainer,
+  loadContainers,
+  partitionFor,
+  saveContainers,
+  tabSessionPartition,
+  type Container
+} from './lib/containers';
 import { hostOf, looksLikeUrl, toUrl, webSearchUrl, type SearchEngineId } from './lib/nav';
+import { bridge, type TorStatus } from './lib/bridge';
 import { GROUP_COLORS, type BrowserTab, type TabGroup } from './types';
 
 interface AgentState {
@@ -48,9 +59,9 @@ function TabFavicon({ tab }: { tab: BrowserTab }) {
 // Alternates the side each cursor arc bows toward, so repeated moves don't look mechanical.
 let bowSign = 1;
 let counter = 0;
-function makeTab(groupId: string | null = null): BrowserTab {
+function makeTab(groupId: string | null = null, containerId: string = DEFAULT_CONTAINER_ID): BrowserTab {
   counter += 1;
-  return { id: `tab-${Date.now()}-${counter}`, query: '', streamUrl: null, status: 'new', sources: [], groupId, mode: 'page', url: null, reloadKey: 0, contextKey: 0 };
+  return { id: `tab-${Date.now()}-${counter}`, query: '', streamUrl: null, status: 'new', sources: [], groupId, mode: 'page', url: null, reloadKey: 0, contextKey: 0, containerId };
 }
 
 function tabTitle(tab: BrowserTab) {
@@ -71,13 +82,35 @@ export function App() {
   // Transient "peek": hovering the left edge opens the sidebar as an overlay until the mouse leaves.
   const [sidebarPeek, setSidebarPeek] = useState(false);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tabId: string } | null>(null);
+  const [containers, setContainers] = useState<Container[]>(loadContainers);
+  // Bumped when a container is cleared, which strands its old partition and hands the
+  // next tab a brand-new store.
+  const [containerEpochs, setContainerEpochs] = useState<Record<string, number>>({});
+  const [torStatus, setTorStatus] = useState<TorStatus>({ ready: false, state: 'off', progress: 0, detail: 'Tor is not running' });
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
   const activeRef = useRef(activeId);
   activeRef.current = activeId;
+  const containersRef = useRef(containers);
+  containersRef.current = containers;
   const inputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    saveContainers(containers);
+    // The main process enforces egress from the partition name alone, but it still
+    // wants the table for labelling and for the Tor circuit pool.
+    bridge().setContainers?.(containers);
+  }, [containers]);
+
+  // Tor runs in the main process; mirror its state so the UI can show what is reachable.
+  useEffect(() => {
+    void bridge().torStatus?.().then(setTorStatus);
+    return bridge().onTorStatus?.(setTorStatus);
+  }, []);
+
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
+  const activeContainer = findContainer(containers, activeTab?.containerId);
+
   const groupColor = (groupId: string | null) => {
     if (!groupId) return null;
     const idx = groups.findIndex((g) => g.id === groupId);
@@ -140,6 +173,30 @@ export function App() {
     setTabs((current) => current.map((tab) => (tab.id === id ? { ...tab, ...(typeof patch === 'function' ? patch(tab) : patch) } : tab)));
   }, []);
 
+  /** The Chromium partition a tab browses in: its container's, or a tab-local throwaway. */
+  const tabPartition = useCallback(
+    (tab: BrowserTab) => {
+      const container = findContainer(containersRef.current, tab.containerId);
+      return tab.contextKey > 0 ? tabSessionPartition(container, tab.contextKey) : partitionFor(container, containerEpochs[container.id] ?? 0);
+    },
+    [containerEpochs]
+  );
+
+  /** Move a tab into another container. Its session changes, so the page reloads. */
+  const setTabContainer = useCallback(
+    (tabId: string, containerId: string) => {
+      patchTab(tabId, (t) => ({ containerId, contextKey: 0, reloadKey: t.reloadKey + 1, status: t.url ? 'loading' : t.status }));
+    },
+    []
+  );
+
+  /** Wipe everything a container has stored, then reload the tabs sitting in it. */
+  const clearContainer = useCallback((containerId: string) => {
+    setContainerEpochs((e) => ({ ...e, [containerId]: (e[containerId] ?? 0) + 1 }));
+    void bridge().clearContainer?.(containerId);
+    setTabs((current) => current.map((t) => (t.containerId === containerId ? { ...t, contextKey: 0, reloadKey: t.reloadKey + 1 } : t)));
+  }, []);
+
   // Navigate a tab to a real web URL (rendered by <webview> inside Toji).
   const navigateTab = useCallback(
     (tabId: string, url: string) => {
@@ -171,8 +228,9 @@ export function App() {
     [generatePage, navigateTab]
   );
 
-  const openTab = useCallback((groupId: string | null = null) => {
-    const tab = makeTab(groupId);
+  const openTab = useCallback((groupId: string | null = null, containerId?: string) => {
+    const from = tabsRef.current.find((t) => t.id === activeRef.current);
+    const tab = makeTab(groupId, containerId ?? from?.containerId ?? DEFAULT_CONTAINER_ID);
     setTabs((current) => [...current, tab]);
     setActiveId(tab.id);
     requestAnimationFrame(() => inputRef.current?.focus());
@@ -185,7 +243,8 @@ export function App() {
       setActiveId(existing.id);
       return;
     }
-    const tab = makeTab(tabsRef.current.find((t) => t.id === activeRef.current)?.groupId ?? null);
+    const from = tabsRef.current.find((t) => t.id === activeRef.current);
+    const tab = makeTab(from?.groupId ?? null, from?.containerId ?? DEFAULT_CONTAINER_ID);
     tab.internal = page;
     tab.status = 'ready';
     setTabs((current) => [...current, tab]);
@@ -199,7 +258,10 @@ export function App() {
 
   // Open an http(s) link (a source or an in-page link) as a new Toji web tab.
   const openWebTab = useCallback((url: string) => {
-    const tab = makeTab(tabsRef.current.find((t) => t.id === activeRef.current)?.groupId ?? null);
+    const from = tabsRef.current.find((t) => t.id === activeRef.current);
+    // A link opened from a page stays in that page's container, so following a link
+    // never silently moves you into a different identity.
+    const tab = makeTab(from?.groupId ?? null, from?.containerId ?? DEFAULT_CONTAINER_ID);
     tab.mode = 'web';
     tab.url = url;
     tab.query = url;
@@ -342,7 +404,7 @@ export function App() {
   const duplicateTab = useCallback((tabId: string) => {
     const src = tabsRef.current.find((t) => t.id === tabId);
     if (!src) return;
-    const dup = makeTab(src.groupId);
+    const dup = makeTab(src.groupId, src.containerId);
     dup.mode = src.mode;
     dup.url = src.url;
     dup.query = src.query;
@@ -1125,6 +1187,15 @@ export function App() {
       <button type="button" aria-label="Reload" disabled={!canReload} onClick={reloadActive} className={`${iconBtn} h-9 w-9 border border-black/[0.08] dark:border-white/10`}>
         <RotateCw size={14} />
       </button>
+      <ContainerPicker
+        containers={containers}
+        active={activeContainer}
+        torReady={torStatus.ready}
+        onSelect={(id) => activeTab && setTabContainer(activeTab.id, id)}
+        onNewTabIn={(id) => openTab(activeTab?.groupId ?? null, id)}
+        onClear={clearContainer}
+        onManage={() => openInternal('settings')}
+      />
       <form onSubmit={onSubmit} className="no-drag flex h-9 flex-1 items-center rounded-full border border-black/[0.09] bg-black/[0.03] pl-3.5 pr-1 transition focus-within:bg-transparent dark:border-white/12 dark:bg-white/[0.04] dark:focus-within:border-white/30">
         <Search size={15} className="shrink-0 text-neutral-400 mr-2.5 mb-0.25" />
         <input
@@ -1204,6 +1275,9 @@ export function App() {
                 page={tab.internal}
                 store={credentials}
                 onChange={setCredentials}
+                containers={containers}
+                onContainersChange={setContainers}
+                onClearContainer={clearContainer}
                 onOpenUrl={openWebTab}
                 onGetStarted={() => {
                   localStorage.setItem('toji-onboarded', '1');
@@ -1217,9 +1291,9 @@ export function App() {
           return (
             <div key={tab.id} className={`absolute inset-0 ${visibility}`}>
               <WebView
-                key={`${tab.id}:${tab.reloadKey}:${tab.contextKey}`}
+                key={`${tab.id}:${tab.reloadKey}:${tab.contextKey}:${tab.containerId}`}
                 url={tab.url}
-                partition={`toji-ctx-${tab.id}-${tab.contextKey}`}
+                partition={tabPartition(tab)}
                 loading={tab.status === 'loading'}
                 onNavigate={(url) => patchTab(tab.id, { url, query: url })}
                 onTitle={(title) => patchTab(tab.id, { title })}
@@ -1468,6 +1542,10 @@ export function App() {
         <Reorder.Group as="div" axis="x" values={tabs} onReorder={setTabs} className={`flex h-9 select-none items-center gap-1 overflow-x-auto ${isMac ? 'pl-[78px]' : ''}`}>
           {tabs.map((tab) => {
             const color = groupColor(tab.groupId);
+            // Firefox-style container hint: a colored underline on any tab that isn't in
+            // the default container, so you can never mistake which identity you're in.
+            const container = findContainer(containers, tab.containerId);
+            const containerAccent = container.id === DEFAULT_CONTAINER_ID ? null : container.color;
             return (
               <Reorder.Item
                 as="div"
@@ -1480,10 +1558,12 @@ export function App() {
                   setTabMenu({ x: e.clientX, y: e.clientY, tabId: tab.id });
                 }}
                 whileDrag={{ scale: 1.03, cursor: 'grabbing' }}
-                className={`no-drag group flex h-8 min-w-[120px] max-w-[210px] cursor-grab items-center gap-2 rounded-xl px-2.5 transition-colors ${
+                title={container.id === DEFAULT_CONTAINER_ID ? undefined : `${tabTitle(tab)} — ${container.name}`}
+                className={`no-drag group relative flex h-8 min-w-[120px] max-w-[210px] cursor-grab items-center gap-2 overflow-hidden rounded-xl px-2.5 transition-colors ${
                   tab.id === activeId ? 'bg-black/[0.06] dark:bg-white/[0.12]' : 'text-neutral-500 hover:bg-black/[0.035] dark:text-neutral-400 dark:hover:bg-white/[0.06]'
                 }`}
               >
+                {containerAccent && <span aria-hidden className="pointer-events-none absolute inset-x-1.5 bottom-0 h-[2px] rounded-full" style={{ background: containerAccent }} />}
                 {color ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} /> : <TabFavicon tab={tab} />}
                 <span className="flex-1 truncate text-[13px]">{tabTitle(tab)}</span>
                 {agents[tab.id]?.running && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500" title="Agent working" />}

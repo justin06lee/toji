@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Menu, ipcMain, shell, nativeImage, webContents, dialog, session } = require('electron');
 const { spawn } = require('node:child_process');
+const { applySessionPolicy, applyWebRtcPolicy, parsePartition } = require('./policy.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -180,16 +181,90 @@ async function enableWebStore(sess) {
 }
 
 function setupExtensions() {
-  if (!webStore) return;
   // Default session powers the app shell (and any Web Store page opened without a partition).
-  void enableWebStore(session.defaultSession);
-  // Each new per-tab partition session gets the shared extensions loaded into it too.
+  if (webStore) void enableWebStore(session.defaultSession);
   app.on('session-created', (sess) => {
     if (sess === session.defaultSession) return;
     partitionSessions.add(sess);
-    void enableWebStore(sess);
+    // Re-apply if we already know this session's partition (see attachContainerPolicy,
+    // which is where a container session's policy is normally installed).
+    applyContainerPolicy(sess);
+    if (webStore) void enableWebStore(sess);
   });
 }
+
+// --- Containers --------------------------------------------------------------
+// Every tab browses inside a container: a named identity with its own Chromium
+// partition, so cookies/storage/cache never cross between them. The container's
+// egress (direct or Tor) is encoded in the partition name, which is what lets the
+// policy be applied here, atomically, at session-creation time. See policy.cjs.
+
+// The Tor controller. Until Tor is wired up this reports "not ready", which makes the
+// kill switch in policy.cjs refuse all traffic from Tor containers — the safe default:
+// they stay offline rather than quietly falling back to the direct connection.
+const tor = { isReady: () => false, socksPortFor: () => null };
+
+// The renderer's container table, for labelling and Tor circuit assignment only —
+// never for deciding egress (that comes from the partition name).
+let containerTable = [];
+ipcMain.on('toji:set-containers', (_event, containers) => {
+  if (Array.isArray(containers)) containerTable = containers;
+});
+
+// Electron gives no public API for a session's own partition name, so remember it
+// when we hand one out and read it back here.
+const sessionPartitions = new WeakMap();
+
+function applyContainerPolicy(sess, partition) {
+  const name = partition || sessionPartitions.get(sess);
+  if (!name) return;
+  sessionPartitions.set(sess, name);
+  const label = applySessionPolicy(sess, name, tor);
+  if (label) appendServerLog(`container policy ${label} (${name})`);
+}
+
+/**
+ * Install container policy on the window that hosts the tabs.
+ *
+ * 'will-attach-webview' is the earliest point at which the partition name is known,
+ * and it fires before the guest webContents exists — so the proxy and kill switch are
+ * always in place before the container can issue its first request. Doing this from
+ * 'session-created' would be too late and too blind: that event carries no partition.
+ */
+function attachContainerPolicy(hostContents) {
+  hostContents.on('will-attach-webview', (_event, _webPreferences, params) => {
+    if (!params || !params.partition) return;
+    applyContainerPolicy(session.fromPartition(params.partition), params.partition);
+  });
+  hostContents.on('did-attach-webview', (_event, guest) => {
+    try {
+      applyWebRtcPolicy(guest, sessionPartitions.get(guest.session));
+    } catch {
+      /* guest may already be gone */
+    }
+  });
+}
+
+// Wipe everything a container has stored. The renderer simultaneously bumps the
+// container's epoch, so live tabs land on a fresh partition rather than this one.
+ipcMain.handle('toji:clear-container', async (_event, containerId) => {
+  let cleared = 0;
+  for (const sess of partitionSessions) {
+    const name = sessionPartitions.get(sess);
+    const policy = name ? parsePartition(name) : null;
+    if (!policy || policy.id !== containerId) continue;
+    try {
+      await sess.clearStorageData();
+      await sess.clearCache();
+      await sess.clearAuthCache();
+      cleared += 1;
+    } catch (error) {
+      appendServerLog(`clear-container ${containerId} failed: ${error && error.message}`);
+    }
+  }
+  appendServerLog(`cleared container ${containerId} (${cleared} session(s))`);
+  return true;
+});
 
 // The data dir the bundled server actually uses (see ensureBundledAgentServer): honors an
 // explicit env override, then a value set in .env/.env.local, then the userData default.
@@ -226,6 +301,7 @@ function createWindow() {
     }
   });
   mainWindow = win;
+  attachContainerPolicy(win.webContents);
 
   // In production the bundled agent server serves the renderer over http:// so it
   // loads correctly (no file:// CSP/CORS issues) and is same-origin with the API.

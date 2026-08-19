@@ -1,4 +1,4 @@
-import { BookMarked, Brain, Check, Compass, Cpu, Download, FileText, KeyRound, Loader2, Paperclip, Plus, Puzzle, Search, ShieldCheck, Star, Trash2, X } from 'lucide-react';
+import { BookMarked, Boxes, Brain, Check, Compass, Cpu, Download, EyeOff, FileText, KeyRound, Loader2, Paperclip, Plus, Puzzle, Route, Search, ShieldCheck, Star, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import {
   addMemory,
@@ -24,18 +24,11 @@ import {
 } from '../lib/api';
 import type { AgentChoice, AgentId, AgentsStatus, InternalPage as InternalPageKind, ThinkingLevel, UserSettings } from '../types';
 import type { CredentialSet, CredentialStore } from '../lib/credentials';
+import { bridge } from '../lib/bridge';
+import { CONTAINER_COLORS, containerId as makeContainerId, type Container, type Egress } from '../lib/containers';
 import { SEARCH_ENGINES, type SearchEngineId } from '../lib/nav';
 import { Dropdown, type DropdownOption } from './Dropdown';
 
-// The preload bridge (optional — only present in the packaged/Electron shell).
-interface TojiBridge {
-  setDefaultBrowser?: () => Promise<boolean>;
-  isDefaultBrowser?: () => Promise<boolean>;
-  addExtension?: () => Promise<{ id: string; name: string } | { error: string } | null>;
-  listExtensions?: () => Promise<{ id: string; name: string }[]>;
-  webStoreAvailable?: () => Promise<boolean>;
-}
-const bridge = (): TojiBridge => (window as unknown as { toji?: TojiBridge }).toji ?? {};
 
 interface InternalPageProps {
   page: InternalPageKind;
@@ -43,13 +36,20 @@ interface InternalPageProps {
   onChange: (store: CredentialStore) => void;
   onOpenUrl: (url: string) => void;
   onGetStarted: () => void;
+  containers: Container[];
+  onContainersChange: (containers: Container[]) => void;
+  onClearContainer: (containerId: string) => void;
 }
 
-export function InternalPage({ page, store, onChange, onOpenUrl, onGetStarted }: InternalPageProps) {
+export function InternalPage({ page, store, onChange, onOpenUrl, onGetStarted, containers, onContainersChange, onClearContainer }: InternalPageProps) {
   return (
     <div className="h-full w-full overflow-y-auto bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
       <div className="mx-auto w-[min(760px,92vw)] px-6 py-12">
-        {page === 'welcome' ? <WelcomeView onOpenUrl={onOpenUrl} onGetStarted={onGetStarted} /> : <SettingsView store={store} onChange={onChange} />}
+        {page === 'welcome' ? (
+          <WelcomeView onOpenUrl={onOpenUrl} onGetStarted={onGetStarted} />
+        ) : (
+          <SettingsView store={store} onChange={onChange} containers={containers} onContainersChange={onContainersChange} onClearContainer={onClearContainer} />
+        )}
       </div>
     </div>
   );
@@ -266,15 +266,148 @@ const ANTHROPIC_MODELS: DropdownOption<string>[] = [
 ];
 type AgentPick = AgentChoice | 'custom';
 
-function SettingsView({ store, onChange }: { store: CredentialStore; onChange: (s: CredentialStore) => void }) {
+function SettingsView({
+  store,
+  onChange,
+  containers,
+  onContainersChange,
+  onClearContainer
+}: {
+  store: CredentialStore;
+  onChange: (s: CredentialStore) => void;
+  containers: Container[];
+  onContainersChange: (containers: Container[]) => void;
+  onClearContainer: (containerId: string) => void;
+}) {
   return (
     <div>
       <h1 className="mb-8 text-2xl font-semibold tracking-tight">Settings</h1>
+      <ContainersSettings containers={containers} onChange={onContainersChange} onClear={onClearContainer} />
       <AgentSettings />
       <SearchSettings />
       <CredentialsSettings store={store} onChange={onChange} />
       <MemorySettings />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Containers
+// ---------------------------------------------------------------------------
+const EGRESS_OPTIONS: DropdownOption<Egress>[] = [
+  { value: 'direct', label: 'Direct', hint: 'normal connection' },
+  { value: 'tor', label: 'Tor', hint: 'onion-routed' }
+];
+
+function ContainersSettings({ containers, onChange, onClear }: { containers: Container[]; onChange: (c: Container[]) => void; onClear: (id: string) => void }) {
+  const [newName, setNewName] = useState('');
+
+  const patch = (id: string, next: Partial<Container>) => onChange(containers.map((c) => (c.id === id ? { ...c, ...next } : c)));
+
+  const add = () => {
+    const name = newName.trim();
+    if (!name) return;
+    onChange([
+      ...containers,
+      {
+        id: makeContainerId(name, containers),
+        name,
+        color: CONTAINER_COLORS[containers.length % CONTAINER_COLORS.length],
+        egress: 'direct',
+        ephemeral: false
+      }
+    ]);
+    setNewName('');
+  };
+
+  return (
+    <Section icon={<Boxes size={15} />} title="Containers">
+      <p className="mb-4 text-[13px] leading-relaxed text-neutral-500 dark:text-neutral-400">
+        Each container is a separate identity with its own cookies, storage and cache. A site you sign into in one container
+        is signed out in every other, and a tracker embedded in both sees two unrelated browsers. Changing a container&rsquo;s
+        connection moves it to a fresh session, so nothing carries across.
+      </p>
+
+      <div className="divide-y divide-black/[0.07] rounded-xl border border-black/10 dark:divide-white/10 dark:border-white/12">
+        {containers.map((container) => (
+          <div key={container.id} className="flex flex-wrap items-center gap-3 p-3">
+            <input
+              type="color"
+              aria-label={`${container.name} color`}
+              value={container.color}
+              onChange={(e) => patch(container.id, { color: e.target.value })}
+              className="h-6 w-6 shrink-0 cursor-pointer rounded-full border-0 bg-transparent p-0"
+            />
+            <input
+              value={container.name}
+              onChange={(e) => patch(container.id, { name: e.target.value })}
+              aria-label="Container name"
+              className="min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-2 py-1 text-[13px] outline-none hover:border-black/10 focus:border-black/30 dark:hover:border-white/12 dark:focus:border-white/30"
+            />
+            <Dropdown
+              value={container.egress}
+              options={EGRESS_OPTIONS}
+              onChange={(egress) => patch(container.id, { egress })}
+              className="w-[150px] shrink-0"
+            />
+            <button
+              type="button"
+              onClick={() => patch(container.id, { ephemeral: !container.ephemeral })}
+              title={container.ephemeral ? 'Ephemeral: discarded when the last tab closes' : 'Persistent: stays signed in across restarts'}
+              className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] transition ${
+                container.ephemeral
+                  ? 'border-black/20 bg-black/[0.05] dark:border-white/25 dark:bg-white/10'
+                  : 'border-black/10 text-neutral-500 hover:border-black/20 dark:border-white/12 dark:text-neutral-400 dark:hover:border-white/25'
+              }`}
+            >
+              <EyeOff size={12} />
+              Ephemeral
+            </button>
+            <button
+              type="button"
+              onClick={() => onClear(container.id)}
+              title={`Erase everything stored in ${container.name}`}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-neutral-400 transition hover:bg-black/[0.06] hover:text-neutral-900 dark:hover:bg-white/10 dark:hover:text-white"
+            >
+              <Trash2 size={13} />
+            </button>
+            <button
+              type="button"
+              disabled={container.builtin}
+              onClick={() => onChange(containers.filter((c) => c.id !== container.id))}
+              title={container.builtin ? 'Built-in containers can be renamed but not removed' : `Delete ${container.name}`}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-neutral-400 transition hover:bg-black/[0.06] hover:text-neutral-900 disabled:pointer-events-none disabled:opacity-25 dark:hover:bg-white/10 dark:hover:text-white"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 flex items-center gap-2">
+        <input
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && add()}
+          placeholder="New container name"
+          className="min-w-0 flex-1 rounded-lg border border-black/10 bg-transparent px-2.5 py-1.5 text-[13px] outline-none focus:border-black/30 dark:border-white/12 dark:focus:border-white/30"
+        />
+        <button
+          type="button"
+          onClick={add}
+          disabled={!newName.trim()}
+          className="inline-flex h-[34px] shrink-0 items-center gap-1.5 rounded-lg bg-neutral-900 px-3 text-[13px] text-white transition hover:opacity-85 disabled:opacity-35 dark:bg-white dark:text-neutral-900"
+        >
+          <Plus size={13} />
+          Add
+        </button>
+      </div>
+
+      <p className="mt-3 flex items-start gap-1.5 text-[12px] leading-relaxed text-neutral-400">
+        <Route size={13} className="mt-px shrink-0" />
+        Containers set to Tor stay offline until Tor connects &mdash; they will not fall back to a direct connection.
+      </p>
+    </Section>
   );
 }
 

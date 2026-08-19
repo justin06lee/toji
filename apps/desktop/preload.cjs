@@ -46,6 +46,10 @@ contextBridge.exposeInMainWorld('toji', {
   eyesDiff: (webContentsId, maxTokens) => ipcRenderer.invoke('toji:eyes-diff', { webContentsId, maxTokens }),
   eyesAct: (webContentsId, action) => ipcRenderer.invoke('toji:eyes-act', { webContentsId, action }),
   eyesLook: (webContentsId, target) => ipcRenderer.invoke('toji:eyes-look', { webContentsId, ...(target || {}) }),
+  // Containers: hand the main process the table (labels + Tor circuits) and wipe one.
+  // Egress is NOT decided here — it travels in the partition name (see policy.cjs).
+  setContainers: (containers) => ipcRenderer.send('toji:set-containers', containers),
+  clearContainer: (containerId) => ipcRenderer.invoke('toji:clear-container', containerId),
   // Default-browser registration + Chrome extension loading (unpacked + Web Store).
   setDefaultBrowser: () => ipcRenderer.invoke('toji:set-default-browser'),
   isDefaultBrowser: () => ipcRenderer.invoke('toji:is-default-browser'),
