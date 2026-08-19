@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { looksLikeUrl, toUrl, webSearchUrl, hostOf } from './nav.js';
+import { hostOf, isOnionUrl, looksLikeUrl, toUrl, webSearchUrl } from './nav.js';
 
 describe('looksLikeUrl', () => {
   it('recognizes full URLs with scheme', () => {
@@ -78,5 +78,27 @@ describe('hostOf', () => {
 
   it('returns input for invalid URLs', () => {
     expect(hostOf('not a url')).toBe('not a url');
+  });
+});
+
+describe('isOnionUrl', () => {
+  it('recognises hidden services with and without a scheme', () => {
+    expect(isOnionUrl('http://duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion/')).toBe(true);
+    expect(isOnionUrl('duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion')).toBe(true);
+    expect(isOnionUrl('example.onion/path?q=1')).toBe(true);
+    expect(isOnionUrl('example.onion:8080')).toBe(true);
+    expect(isOnionUrl('  EXAMPLE.ONION  ')).toBe(true);
+  });
+
+  it('does not fire on ordinary hosts or lookalikes', () => {
+    expect(isOnionUrl('https://example.com/')).toBe(false);
+    expect(isOnionUrl('onion.com')).toBe(false);
+    expect(isOnionUrl('https://theonion.com/article')).toBe(false);
+    expect(isOnionUrl('how to peel an onion')).toBe(false);
+    expect(isOnionUrl('')).toBe(false);
+  });
+
+  it('treats an onion address as navigation, not a search', () => {
+    expect(looksLikeUrl('duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion')).toBe(true);
   });
 });

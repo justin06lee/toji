@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type Keyboard
 import { createPortal } from 'react-dom';
 import { AgentSpotlight, type AgentLogEntry } from './components/AgentSpotlight';
 import { ContainerPicker } from './components/ContainerPicker';
+import { TorStatusBar } from './components/TorStatusBar';
 import { credentialDirectory, loadCredentials, resolveSecrets, saveCredentials, unresolvedPlaceholders, type CredentialStore } from './lib/credentials';
 import { InternalPage } from './components/InternalPage';
 import { PageView } from './components/PageView';
@@ -20,7 +21,7 @@ import {
   tabSessionPartition,
   type Container
 } from './lib/containers';
-import { hostOf, looksLikeUrl, toUrl, webSearchUrl, type SearchEngineId } from './lib/nav';
+import { hostOf, isOnionUrl, looksLikeUrl, toUrl, webSearchUrl, type SearchEngineId } from './lib/nav';
 import { bridge, type TorStatus } from './lib/bridge';
 import { GROUP_COLORS, type BrowserTab, type TabGroup } from './types';
 
@@ -221,11 +222,24 @@ export function App() {
     (tabId: string, raw: string, opts: { web?: boolean } = {}) => {
       const value = raw.trim();
       if (!value) return;
-      if (looksLikeUrl(value)) navigateTab(tabId, toUrl(value));
+      if (looksLikeUrl(value)) {
+        // A hidden service only resolves through Tor's own resolver, so a direct
+        // container physically cannot load it. Move the tab into a Tor container
+        // rather than letting it fail with a DNS error.
+        if (isOnionUrl(value)) {
+          const tab = tabsRef.current.find((t) => t.id === tabId);
+          const here = findContainer(containersRef.current, tab?.containerId);
+          if (here.egress !== 'tor') {
+            const onion = containersRef.current.find((c) => c.egress === 'tor');
+            if (onion) setTabContainer(tabId, onion.id);
+          }
+        }
+        navigateTab(tabId, toUrl(value));
+      }
       else if (opts.web) navigateTab(tabId, webSearchUrl(value, (localStorage.getItem('toji-search-engine') as SearchEngineId | null) ?? 'duckduckgo'));
       else generatePage(tabId, value);
     },
-    [generatePage, navigateTab]
+    [generatePage, navigateTab, setTabContainer]
   );
 
   const openTab = useCallback((groupId: string | null = null, containerId?: string) => {
@@ -1173,6 +1187,8 @@ export function App() {
     </div>
   );
 
+  const torBar = activeContainer.egress === 'tor' ? <TorStatusBar container={activeContainer} status={torStatus} /> : null;
+
   const addressRow = (
     // In side-tab mode the omnibox row is the topmost row, so it needs the macOS traffic-light
     // offset (just enough to sit right beside them); in top-tab mode the TAB STRIP is above
@@ -1498,6 +1514,7 @@ export function App() {
         {windowDragHandle}
         <header className="drag shrink-0 border-b border-black/[0.07] px-3 pt-2.5 pb-2.5 dark:border-white/10">
           {addressRow}
+          {torBar && <div className="mt-2">{torBar}</div>}
         </header>
         <div className="relative flex min-h-0 flex-1">
           {sidebarOpen && sidebarEl()}
@@ -1588,6 +1605,7 @@ export function App() {
         </Reorder.Group>
         {/* Same 10px rhythm as the header's top/bottom padding, so all three gaps match. */}
         <div className="mt-2.5">{addressRow}</div>
+        {torBar && <div className="mt-2">{torBar}</div>}
       </header>
       {viewport}
       {agentSpotlight}

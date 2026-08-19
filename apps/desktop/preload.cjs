@@ -50,6 +50,17 @@ contextBridge.exposeInMainWorld('toji', {
   // Egress is NOT decided here — it travels in the partition name (see policy.cjs).
   setContainers: (containers) => ipcRenderer.send('toji:set-containers', containers),
   clearContainer: (containerId) => ipcRenderer.invoke('toji:clear-container', containerId),
+  // Tor: lifecycle + live bootstrap status. Containers set to Tor egress stay offline
+  // (their traffic is cancelled, never sent direct) until this reports ready.
+  torStatus: () => ipcRenderer.invoke('toji:tor-status'),
+  torStart: () => ipcRenderer.invoke('toji:tor-start'),
+  torStop: () => ipcRenderer.invoke('toji:tor-stop'),
+  torNewCircuit: () => ipcRenderer.invoke('toji:tor-new-circuit'),
+  onTorStatus: (callback) => {
+    const handler = (_event, status) => callback(status);
+    ipcRenderer.on('toji:tor-status', handler);
+    return () => ipcRenderer.removeListener('toji:tor-status', handler);
+  },
   // Default-browser registration + Chrome extension loading (unpacked + Web Store).
   setDefaultBrowser: () => ipcRenderer.invoke('toji:set-default-browser'),
   isDefaultBrowser: () => ipcRenderer.invoke('toji:is-default-browser'),

@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Menu, ipcMain, shell, nativeImage, webContents, dialog, session } = require('electron');
 const { spawn } = require('node:child_process');
 const { applySessionPolicy, applyWebRtcPolicy, parsePartition } = require('./policy.cjs');
+const { TorController } = require('./tor.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -199,16 +200,18 @@ function setupExtensions() {
 // egress (direct or Tor) is encoded in the partition name, which is what lets the
 // policy be applied here, atomically, at session-creation time. See policy.cjs.
 
-// The Tor controller. Until Tor is wired up this reports "not ready", which makes the
-// kill switch in policy.cjs refuse all traffic from Tor containers — the safe default:
-// they stay offline rather than quietly falling back to the direct connection.
-const tor = { isReady: () => false, socksPortFor: () => null };
+// The Tor controller. While Tor is not ready the kill switch in policy.cjs refuses all
+// traffic from Tor containers — the safe default: they stay offline rather than quietly
+// falling back to the direct connection. Constructed lazily because it needs app paths.
+let tor = { isReady: () => false, socksPortFor: () => null, status: { ready: false, state: 'off', progress: 0, detail: 'Tor is not running', source: null } };
 
 // The renderer's container table, for labelling and Tor circuit assignment only —
 // never for deciding egress (that comes from the partition name).
 let containerTable = [];
 ipcMain.on('toji:set-containers', (_event, containers) => {
-  if (Array.isArray(containers)) containerTable = containers;
+  if (!Array.isArray(containers)) return;
+  containerTable = containers;
+  startTorIfNeeded(containers);
 });
 
 // Electron gives no public API for a session's own partition name, so remember it
@@ -243,6 +246,66 @@ function attachContainerPolicy(hostContents) {
       /* guest may already be gone */
     }
   });
+}
+
+// --- Tor ---------------------------------------------------------------------
+
+function broadcastTorStatus(status) {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('toji:tor-status', status);
+}
+
+function setupTor() {
+  tor = new TorController({
+    dataDir: path.join(app.getPath('userData'), 'tor'),
+    resourcesPath: process.resourcesPath,
+    log: appendServerLog
+  });
+  tor.onStatus((status) => {
+    broadcastTorStatus(status);
+    // Sessions created while Tor was down have no proxy set and are being held offline
+    // by the kill switch. Now that the port exists, push the proxy onto them — otherwise
+    // a container that was opened during bootstrap would stay dark until it was reloaded.
+    if (status.ready) reapplyTorPolicies();
+  });
+}
+
+/** Re-run the egress policy for every live Tor container session. */
+function reapplyTorPolicies() {
+  for (const sess of partitionSessions) {
+    const name = sessionPartitions.get(sess);
+    const policy = name ? parsePartition(name) : null;
+    if (policy && policy.egress === 'tor') applySessionPolicy(sess, name, tor);
+  }
+}
+
+ipcMain.handle('toji:tor-status', () => tor.status);
+ipcMain.handle('toji:tor-start', async () => {
+  await tor.start();
+  return tor.status;
+});
+ipcMain.handle('toji:tor-stop', () => {
+  tor.stop();
+  return tor.status;
+});
+ipcMain.handle('toji:tor-new-circuit', async () => {
+  const ok = await tor.newCircuit();
+  // New circuits mean new exits; drop cached connections so pages actually use them.
+  if (ok) {
+    for (const sess of partitionSessions) {
+      const name = sessionPartitions.get(sess);
+      const policy = name ? parsePartition(name) : null;
+      if (policy && policy.egress === 'tor') sess.closeAllConnections().catch(() => {});
+    }
+  }
+  return ok;
+});
+
+// Start Tor on demand: the first time the renderer registers a container that wants it,
+// rather than paying the bootstrap cost for users who never browse over Tor.
+function startTorIfNeeded(containers) {
+  if (!Array.isArray(containers)) return;
+  if (!containers.some((c) => c && c.egress === 'tor')) return;
+  if (tor.status && (tor.status.state === 'off' || tor.status.state === 'error')) void tor.start();
 }
 
 // Wipe everything a container has stored. The renderer simultaneously bumps the
@@ -638,6 +701,7 @@ app.whenReady().then(async () => {
     }
   }
   buildAppMenu();
+  setupTor();
   setupExtensions();
   try {
     await ensureBundledAgentServer();
@@ -660,4 +724,9 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   serverProcess?.kill();
   serverProcess = null;
+  try {
+    tor.stop();
+  } catch {
+    /* already down */
+  }
 });
