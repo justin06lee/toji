@@ -22,7 +22,7 @@ import {
   type PinnedMemory,
   type ReferenceDoc
 } from '../lib/api';
-import type { AgentChoice, AgentId, AgentsStatus, InternalPage as InternalPageKind, ThinkingLevel } from '../types';
+import type { AgentChoice, AgentId, AgentsStatus, InternalPage as InternalPageKind, ThinkingLevel, UserSettings } from '../types';
 import type { CredentialSet, CredentialStore } from '../lib/credentials';
 import { SEARCH_ENGINES, type SearchEngineId } from '../lib/nav';
 import { Dropdown, type DropdownOption } from './Dropdown';
@@ -258,6 +258,12 @@ const THINKING: DropdownOption<ThinkingLevel>[] = [
   { value: 'high', label: 'High' }
 ];
 const AGENT_LABELS: Record<AgentId, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'opencode' };
+// Claude API model ids ('' = the server default, claude-opus-4-8).
+const ANTHROPIC_MODELS: DropdownOption<string>[] = [
+  { value: '', label: 'Opus 4.8 (default)' },
+  { value: 'claude-sonnet-5', label: 'Sonnet 5' },
+  { value: 'claude-haiku-4-5', label: 'Haiku 4.5' }
+];
 type AgentPick = AgentChoice | 'custom';
 
 function SettingsView({ store, onChange }: { store: CredentialStore; onChange: (s: CredentialStore) => void }) {
@@ -272,12 +278,39 @@ function SettingsView({ store, onChange }: { store: CredentialStore; onChange: (
   );
 }
 
+// A single provider field: label + input; password-style for keys (the server returns
+// keys MASKED — sending the mask back leaves the stored key untouched).
+function ProviderField({ label, value, onChange, placeholder, secret }: { label: string; value: string; onChange: (v: string) => void; placeholder: string; secret?: boolean }) {
+  return (
+    <label className="block flex-1">
+      <span className="mb-1 block text-[11px] text-neutral-400">{label}</span>
+      <input
+        type={secret ? 'password' : 'text'}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        spellCheck={false}
+        autoComplete="off"
+        className="w-full rounded-lg border border-black/10 bg-transparent px-2.5 py-1.5 font-mono text-[12px] outline-none focus:border-black/30 dark:border-white/12 dark:focus:border-white/30"
+      />
+    </label>
+  );
+}
+
 function AgentSettings() {
   const [status, setStatus] = useState<AgentsStatus | null>(null);
   const [agent, setAgent] = useState<AgentChoice>('auto');
   const [agentCmd, setAgentCmd] = useState('');
   const [agentModel, setAgentModel] = useState('');
   const [agentThinking, setAgentThinking] = useState<ThinkingLevel>('default');
+  // API backends — keys arrive masked; typing a new value replaces the stored key on save.
+  const [anthropicKey, setAnthropicKey] = useState('');
+  const [anthropicModel, setAnthropicModel] = useState('');
+  const [openaiKey, setOpenaiKey] = useState('');
+  const [openaiModel, setOpenaiModel] = useState('');
+  const [localUrl, setLocalUrl] = useState('');
+  const [localModel, setLocalModel] = useState('');
+  const [localKey, setLocalKey] = useState('');
   const [customOpen, setCustomOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -289,6 +322,13 @@ function AgentSettings() {
     setAgentCmd(settings.agentCmd ?? '');
     setAgentModel(settings.agentModel ?? '');
     setAgentThinking(settings.agentThinking ?? 'default');
+    setAnthropicKey(settings.anthropicApiKey ?? '');
+    setAnthropicModel(settings.anthropicModel ?? '');
+    setOpenaiKey(settings.openaiApiKey ?? '');
+    setOpenaiModel(settings.openaiModel ?? '');
+    setLocalUrl(settings.localUrl ?? '');
+    setLocalModel(settings.localModel ?? '');
+    setLocalKey(settings.localApiKey ?? '');
     setCustomOpen(Boolean(settings.agentCmd?.trim()));
     setStatus(agents);
   }, []);
@@ -296,17 +336,34 @@ function AgentSettings() {
     void refresh().catch(() => {});
   }, [refresh]);
 
-  const apply = async (patch: { agent?: AgentChoice; agentCmd?: string; agentModel?: string; agentThinking?: ThinkingLevel }) => {
-    const next = { agent, agentCmd, agentModel, agentThinking, ...patch };
-    setAgent(next.agent);
-    setAgentCmd(next.agentCmd);
-    setAgentModel(next.agentModel);
-    setAgentThinking(next.agentThinking);
+  const apply = async (patch: Partial<UserSettings>) => {
+    const next: Partial<UserSettings> = {
+      agent,
+      agentCmd,
+      agentModel,
+      agentThinking,
+      anthropicApiKey: anthropicKey,
+      anthropicModel,
+      openaiApiKey: openaiKey,
+      openaiModel,
+      localUrl: localUrl.trim(),
+      localModel: localModel.trim(),
+      localApiKey: localKey,
+      ...patch
+    };
+    if (next.agent !== undefined) setAgent(next.agent);
+    if (next.agentCmd !== undefined) setAgentCmd(next.agentCmd);
+    if (next.agentModel !== undefined) setAgentModel(next.agentModel);
+    if (next.agentThinking !== undefined) setAgentThinking(next.agentThinking);
     setSaving(true);
     setSaved(false);
     setApplyErr('');
     try {
-      await saveSettings(next);
+      const settings = await saveSettings(next);
+      // Reflect the server's masked keys so we never hold a plaintext key in state longer than needed.
+      setAnthropicKey(settings.anthropicApiKey ?? '');
+      setOpenaiKey(settings.openaiApiKey ?? '');
+      setLocalKey(settings.localApiKey ?? '');
       setStatus(await getAgents());
       setSaved(true);
     } catch (e) {
@@ -322,14 +379,28 @@ function AgentSettings() {
   const options: DropdownOption<AgentPick>[] = [
     { value: 'auto', label: 'Auto-detect' },
     ...detected.map((d) => ({ value: d.id as AgentPick, label: AGENT_LABELS[d.id] })),
+    { value: 'anthropic', label: 'Claude API' },
+    { value: 'openai', label: 'OpenAI API' },
+    { value: 'local', label: 'Self-hosted / local model' },
     { value: 'custom', label: 'Custom command' },
     { value: 'off', label: 'Off' }
   ];
-  const tunedId: AgentId | null = usingCustom || agent === 'off' ? null : agent === 'auto' ? detected[0]?.id ?? null : agent;
+  const isApiPick = agent === 'anthropic' || agent === 'openai' || agent === 'local';
+  const tunedId: AgentId | null = usingCustom || agent === 'off' || isApiPick ? null : agent === 'auto' ? detected[0]?.id ?? null : agent;
+
+  const saveButton = (
+    <button type="button" onClick={() => void apply({})} disabled={saving} className="shrink-0 self-end rounded-lg bg-neutral-900 px-3 py-1.5 text-[12px] font-medium text-white transition enabled:hover:opacity-85 disabled:opacity-40 dark:bg-white dark:text-neutral-900">
+      Save
+    </button>
+  );
 
   return (
-    <Section icon={<Cpu size={16} />} title="AI agent">
-      <p className="mb-3 text-[12.5px] text-neutral-500">Toji runs your own local coding agent for inference — no API keys.</p>
+    <Section icon={<Cpu size={16} />} title="AI model">
+      <p className="mb-3 text-[12.5px] text-neutral-500">
+        Toji can run on a local coding agent (no keys), your own API key (Claude / OpenAI), or a model you host yourself — Ollama on this
+        machine or an OpenAI-compatible endpoint on your own server. Keys are stored only in Toji&apos;s local settings file and sent
+        nowhere except the provider you pick.
+      </p>
       <div className="space-y-2 rounded-xl border border-black/10 p-3 dark:border-white/10">
         <Dropdown<AgentPick>
           value={pick}
@@ -357,6 +428,44 @@ function AgentSettings() {
             </button>
           </div>
         )}
+        {agent === 'anthropic' && !usingCustom && (
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <ProviderField label="API key" value={anthropicKey} onChange={setAnthropicKey} placeholder="sk-ant-…" secret />
+              {saveButton}
+            </div>
+            <div className="flex gap-2">
+              <label className="flex-1">
+                <span className="mb-1 block text-[11px] text-neutral-400">Model</span>
+                <Dropdown<string> value={anthropicModel} options={ANTHROPIC_MODELS} onChange={(v) => void apply({ anthropicModel: v })} />
+              </label>
+              <label className="flex-1">
+                <span className="mb-1 block text-[11px] text-neutral-400">Thinking</span>
+                <Dropdown<ThinkingLevel> value={agentThinking} options={THINKING} onChange={(v) => void apply({ agentThinking: v })} />
+              </label>
+            </div>
+          </div>
+        )}
+        {agent === 'openai' && !usingCustom && (
+          <div className="flex gap-2">
+            <ProviderField label="API key" value={openaiKey} onChange={setOpenaiKey} placeholder="sk-…" secret />
+            <ProviderField label="Model" value={openaiModel} onChange={setOpenaiModel} placeholder="gpt-5.1" />
+            {saveButton}
+          </div>
+        )}
+        {agent === 'local' && !usingCustom && (
+          <div className="space-y-2">
+            <ProviderField label="Endpoint URL (OpenAI-compatible)" value={localUrl} onChange={setLocalUrl} placeholder="http://127.0.0.1:11434/v1" />
+            <div className="flex gap-2">
+              <ProviderField label="Model" value={localModel} onChange={setLocalModel} placeholder="llama3.2" />
+              <ProviderField label="API key (optional)" value={localKey} onChange={setLocalKey} placeholder="none" secret />
+              {saveButton}
+            </div>
+            <p className="text-[11.5px] text-neutral-400">
+              Works with Ollama (`http://127.0.0.1:11434/v1`), LM Studio, vLLM, or anything OpenAI-compatible on your home server.
+            </p>
+          </div>
+        )}
         {tunedId && (
           <div className="flex gap-2">
             <label className="flex-1">
@@ -375,54 +484,21 @@ function AgentSettings() {
           ) : agent === 'off' && !usingCustom ? (
             <span className="text-neutral-400">Demo mode — no agent</span>
           ) : status?.available ? (
-            <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">{saved && <Check size={12} />} Ready</span>
+            <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">{saved && <Check size={12} />} Ready — {status.model}</span>
+          ) : isApiPick ? (
+            <span className="text-amber-600 dark:text-amber-400">
+              {agent === 'local' ? 'Enter your endpoint URL and model, then Save' : 'Paste your API key, then Save'}
+            </span>
           ) : (
-            <span className="text-amber-600 dark:text-amber-400">No agent found — install one or set a custom command</span>
+            <span className="text-amber-600 dark:text-amber-400">No agent found — install one, use an API key, or self-host a model</span>
           )}
         </div>
         {applyErr && <p className="text-[12px] text-red-500">{applyErr}</p>}
-      </div>
-      <div className="mt-2 space-y-2">
-        <PerceptionToggle
-          storageKey="toji-agent-vision"
-          title="Vision-first (screenshot every step)"
-          description="Capture an annotated screenshot every turn so the agent always sees the page — much better on chess/canvases/visual layouts. Uses more tokens and is a bit slower; best with a vision-capable agent."
-        />
-        <PerceptionToggle
-          storageKey="toji-agent-cdp"
-          title="Accessibility-tree perception"
-          description="Add elements from Chromium's accessibility tree (CDP) on top of the normal page reading — extra targeting on complex sites. Experimental."
-        />
       </div>
     </Section>
   );
 }
 
-// A localStorage-backed on/off switch for a client-only agent setting (no server round-trip).
-function PerceptionToggle({ storageKey, title, description }: { storageKey: string; title: string; description: string }) {
-  const [on, setOn] = useState(() => localStorage.getItem(storageKey) === '1');
-  const set = (v: boolean) => {
-    setOn(v);
-    localStorage.setItem(storageKey, v ? '1' : '0');
-  };
-  return (
-    <div className="flex items-center justify-between rounded-xl border border-black/10 p-3 dark:border-white/10">
-      <div className="min-w-0 pr-3">
-        <div className="text-[13px] font-medium">{title}</div>
-        <p className="mt-0.5 text-[11.5px] text-neutral-400">{description}</p>
-      </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={on}
-        onClick={() => set(!on)}
-        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition ${on ? 'bg-emerald-500' : 'bg-black/15 dark:bg-white/20'}`}
-      >
-        <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${on ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
-      </button>
-    </div>
-  );
-}
 
 function SearchSettings() {
   const [engine, setEngine] = useState<SearchEngineId>(() => (localStorage.getItem('toji-search-engine') as SearchEngineId | null) ?? 'duckduckgo');

@@ -347,10 +347,29 @@ ipcMain.handle('toji:list-extensions', () => {
 // Whether real Chrome Web Store installs are wired up (the package loaded successfully).
 ipcMain.handle('toji:web-store-available', () => Boolean(webStore));
 
+// --- Byakugan page perception ------------------------------------------------
+// The web agent's eyes: @justin06lee/byakugan reads what Chromium actually PAINTED
+// (DOMSnapshot layout tree over CDP) into a compact, stable-ID text manifest, emits tiny
+// diffs between steps, verifies every click/type against fresh geometry at dispatch time
+// (blocked actions return {ok:false, blockedBy}), and serves cropped screenshots via look().
+// The package is ESM-only and this file is CJS, so it's loaded via dynamic import().
+let byakuganPromise = null;
+function loadByakugan() {
+  if (!byakuganPromise) {
+    byakuganPromise = Promise.all([import('@justin06lee/byakugan'), import('@justin06lee/byakugan/transports')]).then(
+      ([core, transports]) => ({ Byakugan: core.Byakugan, fromElectronDebugger: transports.fromElectronDebugger })
+    );
+    byakuganPromise.catch((error) => {
+      appendServerLog(`byakugan unavailable: ${error && error.message}`);
+      byakuganPromise = null;
+    });
+  }
+  return byakuganPromise;
+}
+
 // Attach the Chrome DevTools Protocol to a guest webContents (idempotent). We keep it
-// attached for the life of the page rather than detaching per call — the web agent reads
-// the page every step (Accessibility.getFullAXTree), so repeated attach/detach would add
-// latency and flakiness. Detached automatically when the webContents is destroyed.
+// attached for the life of the page — the agent perceives every step, so repeated
+// attach/detach would add latency and flakiness. Detached when the webContents dies.
 function ensureDebugger(wc) {
   const dbg = wc.debugger;
   if (!dbg.isAttached()) {
@@ -366,81 +385,106 @@ function ensureDebugger(wc) {
   return dbg;
 }
 
-// AX roles we treat as actionable targets for the agent (mirrors the DOM scraper's element set).
-const AX_INTERACTIVE = new Set([
-  'button', 'link', 'textbox', 'searchbox', 'combobox', 'listbox', 'checkbox', 'radio', 'switch',
-  'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab', 'slider', 'spinbutton', 'option', 'treeitem'
-]);
-const AX_NAME_OPTIONAL = new Set(['textbox', 'searchbox', 'combobox']);
+// One stateful Byakugan instance per guest webContents (it owns the stable-ID map and the
+// last manifest, which is what makes diff() small). Dropped when the webContents dies.
+const eyesByWc = new Map(); // webContentsId → Promise<Byakugan>
+function eyesFor(webContentsId) {
+  const wc = webContents.fromId(webContentsId);
+  if (!wc || wc.isDestroyed()) return Promise.reject(new Error('page is gone'));
+  let entry = eyesByWc.get(webContentsId);
+  if (!entry) {
+    entry = loadByakugan().then(({ Byakugan, fromElectronDebugger }) => {
+      ensureDebugger(wc); // attach first so byakugan's transport shares (and never detaches) it
+      return Byakugan.attach(fromElectronDebugger(wc));
+    });
+    eyesByWc.set(webContentsId, entry);
+    entry.catch(() => eyesByWc.delete(webContentsId));
+    wc.once('destroyed', () => eyesByWc.delete(webContentsId));
+  }
+  return entry;
+}
 
-// CDP-native page perception. Instead of scraping the DOM with injected JS, read the page's
-// accessibility tree (Accessibility.getFullAXTree) — a clean semantic list of roles/names/values
-// that Chromium computes itself — and resolve each node's on-screen box via DOM.getContentQuads.
-// Returns the SAME shape the DOM scraper does ({ url,title,scrollY,maxScroll,elements[] }) with
-// viewport-relative rects, so the agent's click/type paths work unchanged.
-ipcMain.handle('toji:ax-snapshot', async (_event, { webContentsId, max = 40 }) => {
+// The renderer only needs each element's id + bounds (to aim the animated cursor); the
+// model-facing content travels as manifest/diff TEXT.
+const pickElements = (manifest) => manifest.elements.map((e) => ({ id: e.id, role: e.role, label: e.label, bounds: e.bounds }));
+
+ipcMain.handle('toji:eyes-observe', async (_event, { webContentsId, maxTokens }) => {
   try {
-    const wc = webContents.fromId(webContentsId);
-    if (!wc) return null;
-    const dbg = ensureDebugger(wc);
-    await dbg.sendCommand('DOM.enable');
-    await dbg.sendCommand('Accessibility.enable');
-    const metrics = await dbg.sendCommand('Page.getLayoutMetrics');
-    // Prefer the CSS-adjusted metrics so coordinates are in CSS pixels (what sendInputEvent uses).
-    const layout = metrics.cssLayoutViewport || metrics.layoutViewport || { pageX: 0, pageY: 0, clientWidth: 0, clientHeight: 0 };
-    const content = metrics.cssContentSize || metrics.contentSize || { height: 0 };
-    const scrollX = layout.pageX || 0;
-    const scrollY = layout.pageY || 0;
-    const vh = layout.clientHeight || 0;
-    const { nodes } = await dbg.sendCommand('Accessibility.getFullAXTree');
-    const elements = [];
-    let i = 0;
-    for (const node of nodes) {
-      if (i >= max) break;
-      if (node.ignored) continue;
-      const role = node.role && node.role.value;
-      if (!role || !AX_INTERACTIVE.has(role)) continue;
-      const backendNodeId = node.backendDOMNodeId;
-      if (!backendNodeId) continue;
-      const name = (node.name && node.name.value != null ? String(node.name.value) : '').trim().replace(/\s+/g, ' ').slice(0, 140);
-      const value = node.value && node.value.value != null ? String(node.value.value).slice(0, 80) : '';
-      if (!name && !AX_NAME_OPTIONAL.has(role)) continue;
-      let quads;
-      try {
-        ({ quads } = await dbg.sendCommand('DOM.getContentQuads', { backendNodeId }));
-      } catch {
-        continue; // no layout box → not rendered/clickable
-      }
-      if (!quads || !quads.length) continue;
-      const q = quads[0]; // [x1,y1, x2,y2, x3,y3, x4,y4] in page CSS px
-      const xs = [q[0], q[2], q[4], q[6]];
-      const ys = [q[1], q[3], q[5], q[7]];
-      const w = Math.max(...xs) - Math.min(...xs);
-      const h = Math.max(...ys) - Math.min(...ys);
-      if (w < 3 || h < 3) continue;
-      const rx = Math.min(...xs) - scrollX; // page → viewport-relative
-      const ry = Math.min(...ys) - scrollY;
-      if (ry < -200 || ry > vh + 800) continue; // well outside the viewport
-      elements.push({ i, tag: role, role, name, value, rect: { x: Math.round(rx), y: Math.round(ry), w: Math.round(w), h: Math.round(h) } });
-      i += 1;
-    }
-    return {
-      url: wc.getURL(),
-      title: wc.getTitle(),
-      scrollY: Math.round(scrollY),
-      maxScroll: Math.round(Math.max(0, (content.height || 0) - vh)),
-      elements
-    };
+    const eyes = await eyesFor(webContentsId);
+    const m = await eyes.observe(maxTokens ? { maxTokens } : undefined);
+    return { ok: true, text: m.text, tokens: m.meta.tokens, meta: m.meta, elements: pickElements(m) };
   } catch (error) {
-    appendServerLog(`ax-snapshot error ${error && error.message}`);
-    return null;
+    appendServerLog(`eyes-observe error ${error && error.message}`);
+    return { ok: false, error: String((error && error.message) || error) };
+  }
+});
+
+ipcMain.handle('toji:eyes-diff', async (_event, { webContentsId, maxTokens }) => {
+  try {
+    const eyes = await eyesFor(webContentsId);
+    const d = await eyes.diff(maxTokens ? { maxTokens } : undefined);
+    return { ok: true, text: d.text, tokens: d.tokens, full: d.full, navigated: d.navigated, meta: d.manifest.meta, elements: pickElements(d.manifest) };
+  } catch (error) {
+    appendServerLog(`eyes-diff error ${error && error.message}`);
+    return { ok: false, error: String((error && error.message) || error) };
+  }
+});
+
+// Verified input dispatch on manifest IDs. A blocked/failed action comes back as
+// {ok:false, error, blockedBy} — the renderer feeds that to the model as an observation.
+ipcMain.handle('toji:eyes-act', async (_event, { webContentsId, action }) => {
+  try {
+    const eyes = await eyesFor(webContentsId);
+    const a = action || {};
+    switch (a.verb) {
+      case 'click':
+        return await eyes.act.click(Number(a.id));
+      case 'type':
+        return await eyes.act.type(Number(a.id), String(a.text ?? ''));
+      case 'press':
+        return await eyes.act.press(String(a.key ?? 'Enter'));
+      case 'select':
+        return await eyes.act.select(Number(a.id), String(a.value ?? ''));
+      case 'hover':
+        return await eyes.act.hover(Number(a.id));
+      case 'scroll':
+        return await eyes.act.scroll(a.direction === 'up' ? 'up' : 'down');
+      case 'navigate':
+        return await eyes.act.navigate(String(a.url ?? ''));
+      default:
+        return { ok: false, error: `unknown action verb: ${a.verb}` };
+    }
+  } catch (error) {
+    return { ok: false, error: String((error && error.message) || error) };
+  }
+});
+
+// Cropped, downscaled screenshot of one element (by manifest id) or a viewport region —
+// the agent's escalation sense for canvas / images / text-blind iframes.
+ipcMain.handle('toji:eyes-look', async (_event, { webContentsId, id, rect, maxLongEdge }) => {
+  try {
+    const eyes = await eyesFor(webContentsId);
+    let target = typeof id === 'number' ? id : rect;
+    if (!target && target !== 0) {
+      // No target → the whole visible viewport.
+      const meta = eyes.lastManifest ? eyes.lastManifest.meta : (await eyes.observe()).meta;
+      target = { x: 0, y: 0, w: meta.viewport.width, h: meta.viewport.height };
+    }
+    // Where the crop sits in viewport coords, so the model can convert screenshot pixels
+    // back to clickAt/drag coordinates.
+    const crop = typeof target === 'number' ? eyes.resolve(target).bounds : target;
+    const shot = await eyes.look(target, maxLongEdge ? { maxLongEdge } : undefined);
+    return { ok: true, dataUri: `data:image/png;base64,${Buffer.from(shot.data).toString('base64')}`, width: shot.width, height: shot.height, tokens: shot.tokens, crop };
+  } catch (error) {
+    appendServerLog(`eyes-look error ${error && error.message}`);
+    return { ok: false, error: String((error && error.message) || error) };
   }
 });
 
 // Set a local file onto a <input type=file> inside a guest <webview>. The renderer
 // can't do this (security), so we drive it via the Chrome DevTools Protocol on the
 // guest's webContents. Best-effort: targets the Nth file input on the page.
-ipcMain.handle('toji:upload-file-input', async (_event, { webContentsId, filePath, inputIndex }) => {
+ipcMain.handle('toji:upload-file-input', async (_event, { webContentsId, filePath, inputIndex, elementId }) => {
   try {
     const wc = webContents.fromId(webContentsId);
     if (!wc) return false;
@@ -459,6 +503,17 @@ ipcMain.handle('toji:upload-file-input', async (_event, { webContentsId, filePat
     }
     const dbg = ensureDebugger(wc);
     await dbg.sendCommand('DOM.enable');
+    // Preferred path: the agent names the exact file-input by its byakugan manifest id.
+    if (typeof elementId === 'number') {
+      try {
+        const eyes = await eyesFor(webContentsId);
+        const rec = eyes.resolve(elementId);
+        await dbg.sendCommand('DOM.setFileInputFiles', { files: [resolved], backendNodeId: rec.backendNodeId });
+        return true;
+      } catch {
+        /* fall back to the Nth file input below */
+      }
+    }
     const { root } = await dbg.sendCommand('DOM.getDocument', { depth: -1, pierce: true });
     const { nodeIds } = await dbg.sendCommand('DOM.querySelectorAll', { nodeId: root.nodeId, selector: 'input[type=file]' });
     if (!nodeIds || !nodeIds.length) return false;

@@ -306,7 +306,9 @@ export type ServerEvent = (
 ) & { at?: string };
 
 export type AgentId = 'claude' | 'codex' | 'opencode';
-export type AgentChoice = AgentId | 'auto' | 'off';
+/** HTTP inference backends: hosted APIs with a pasted key, or any OpenAI-compatible endpoint. */
+export type ApiProvider = 'anthropic' | 'openai' | 'local';
+export type AgentChoice = AgentId | ApiProvider | 'auto' | 'off';
 export type ThinkingLevel = 'default' | 'low' | 'medium' | 'high';
 
 export interface UserSettings {
@@ -320,6 +322,15 @@ export interface UserSettings {
   agentCmd: string;
   agentModel: string;
   agentThinking: ThinkingLevel;
+  /** API keys come back MASKED ('••••xxxx') — the real values never leave the server's
+   *  local settings file. Sending the mask back in a PATCH leaves the stored key as-is. */
+  anthropicApiKey: string;
+  anthropicModel: string;
+  openaiApiKey: string;
+  openaiModel: string;
+  localUrl: string;
+  localModel: string;
+  localApiKey: string;
 }
 
 export interface DetectedAgent {
@@ -332,6 +343,13 @@ export interface DetectedAgent {
 export interface AgentsStatus {
   detected: DetectedAgent[];
   available: boolean;
+  /** Live backend label, e.g. "api: Claude API · claude-opus-4-8" or "cli: opencode". */
+  model: string;
+  api: {
+    anthropic: { configured: boolean; model: string };
+    openai: { configured: boolean; model: string };
+    local: { configured: boolean; url: string; model: string };
+  };
   effective: { id: AgentId | null; label: string; source: string; command: string } | null;
 }
 

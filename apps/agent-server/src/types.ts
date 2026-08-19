@@ -277,15 +277,25 @@ export interface UserSettings {
   defaultFreshness: FreshnessMode;
   visualAnalysis: boolean;
   theme: 'dark' | 'system';
-  /** Which CLI coding agent powers inference. 'auto' picks the first detected;
-   *  'local' uses a self-hosted OpenAI-compatible endpoint instead of a CLI. */
-  agent: 'auto' | 'claude' | 'codex' | 'opencode' | 'local' | 'off';
+  /** What powers inference. CLI agents ('claude'|'codex'|'opencode'; 'auto' = first
+   *  detected) spawn a local coding agent; 'anthropic'/'openai' call those APIs with a
+   *  user-saved key; 'local' is any OpenAI-compatible endpoint (Ollama, LM Studio, vLLM,
+   *  a home server). Keys/URLs live only in the local settings.json on disk. */
+  agent: 'auto' | 'claude' | 'codex' | 'opencode' | 'anthropic' | 'openai' | 'local' | 'off';
   /** Optional full command override (wins over `agent`); prompt piped on stdin. */
   agentCmd: string;
   /** Model passed to the selected agent's --model flag. '' = the agent's default. */
   agentModel: string;
   /** Reasoning/thinking effort for the selected agent. 'default' = omit the flag. */
   agentThinking: 'default' | 'low' | 'medium' | 'high';
+  /** Claude API key (sk-ant-…). Stored locally; sent only to api.anthropic.com. */
+  anthropicApiKey: string;
+  /** Claude API model id. '' = claude-opus-4-8. */
+  anthropicModel: string;
+  /** OpenAI API key (sk-…). Stored locally; sent only to api.openai.com. */
+  openaiApiKey: string;
+  /** OpenAI model id. '' = the default. */
+  openaiModel: string;
   /** Self-hosted model: OpenAI-compatible base URL (e.g. http://127.0.0.1:11434/v1 for Ollama). */
   localUrl: string;
   /** Self-hosted model name (e.g. llama3.2). */

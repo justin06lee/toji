@@ -3,14 +3,13 @@ import { AnimatePresence, motion, Reorder } from 'motion/react';
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { AgentSpotlight, type AgentLogEntry } from './components/AgentSpotlight';
-import { SettingsModal } from './components/SettingsModal';
 import { credentialDirectory, loadCredentials, resolveSecrets, saveCredentials, unresolvedPlaceholders, type CredentialStore } from './lib/credentials';
 import { InternalPage } from './components/InternalPage';
 import { PageView } from './components/PageView';
 import { Sidebar } from './components/Sidebar';
 import { WebView } from './components/WebView';
 import { addMemory, agentResearch, agentStep, fetchPageSources, getReferences, librarian, pageStreamUrl, uploadFile } from './lib/api';
-import { type AgentCell, CLEAR_MARKS_JS, locateScript, marksScript, PAGE_SIGNATURE_JS, scrollScript, SNAPSHOT_JS } from './lib/agentDom';
+import { eyesAct, eyesAvailable, eyesDiff, eyesLook, eyesObserve, PAGE_SIGNATURE_JS, type EyesElement } from './lib/agentDom';
 import { hostOf, looksLikeUrl, toUrl, webSearchUrl, type SearchEngineId } from './lib/nav';
 import { GROUP_COLORS, type BrowserTab, type TabGroup } from './types';
 
@@ -238,7 +237,6 @@ export function App() {
       delete agentAskResolve.current[id];
       delete agentCancel.current[id];
       delete cursorPos.current[id];
-      delete agentRunningRef.current[id];
       setAgents((a) => {
         const { [id]: _drop, ...rest } = a;
         return rest;
@@ -383,13 +381,6 @@ export function App() {
   useEffect(() => {
     agentFilesRef.current = agentFiles;
   }, [agentFiles]);
-  // Which tabs currently have a running agent — used to keep them awake/capturable off-screen.
-  const agentRunningRef = useRef<Record<string, boolean>>({});
-  useEffect(() => {
-    const running: Record<string, boolean> = {};
-    for (const [id, st] of Object.entries(agents)) if (st.running) running[id] = true;
-    agentRunningRef.current = running;
-  }, [agents]);
   const [spotlight, setSpotlight] = useState<string | null>(null);
   const [agentCursor, setAgentCursor] = useState<{ x: number; y: number; tick: number } | null>(null);
   // Hide the agent cursor when you switch away from the tab it's acting on.
@@ -403,7 +394,6 @@ export function App() {
   });
   const [agentNoLimit, setAgentNoLimit] = useState<boolean>(() => localStorage.getItem('toji.agentNoLimit') === '1');
   // Local credential vault (renderer-only; secrets are never sent to the model/server).
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [credentials, setCredentials] = useState<CredentialStore>(loadCredentials);
   const credentialsRef = useRef(credentials);
   useEffect(() => {
@@ -533,25 +523,6 @@ export function App() {
     [glideCursor]
   );
 
-  // Real mouse click on a DOM element: locate it, then glide + click its center.
-  const realClick = useCallback(
-    async (tabId: string, index: number) => {
-      const wv = webviewRefs.current[tabId];
-      if (!wv) return false;
-      let res;
-      try {
-        res = await wv.executeJavaScript(locateScript(index), true);
-      } catch {
-        return false;
-      }
-      if (!res?.ok || !res.rect) return false;
-      const cx = Math.round(res.rect.x + res.rect.w / 2);
-      const cy = Math.round(res.rect.y + res.rect.h / 2);
-      return clickPoint(tabId, cx, cy);
-    },
-    [clickPoint]
-  );
-
   // Real mouse click at an absolute viewport PIXEL coordinate — for visual targets (chess
   // squares, canvases, images) with no DOM element. The model reads the grid's pixel labels
   // and returns pixels; if it ever returns a 0..1 fraction instead, we scale it up.
@@ -580,9 +551,9 @@ export function App() {
 
   // Real mouse DRAG — presses at the source, glides to the destination with the button held,
   // releases. Needed to MOVE things (chess pieces, sliders, drag-and-drop); a plain click can't.
-  // Each end can be an exact DOM element (by index) or absolute pixels (0..1 fractions accepted).
+  // Endpoints are absolute viewport pixels (0..1 fractions accepted as a fallback).
   const realDrag = useCallback(
-    async (tabId: string, from: { index?: number; x?: number; y?: number }, to: { index?: number; x?: number; y?: number }) => {
+    async (tabId: string, from: { x: number; y: number }, to: { x: number; y: number }) => {
       const wv = webviewRefs.current[tabId];
       if (!wv) return false;
       let size: { w: number; h: number };
@@ -591,27 +562,15 @@ export function App() {
       } catch {
         return false;
       }
-      const resolve = async (p: { index?: number; x?: number; y?: number }) => {
-        if (typeof p.index === 'number') {
-          try {
-            const res = await wv.executeJavaScript(locateScript(p.index), true);
-            if (res?.ok && res.rect) return { x: Math.round(res.rect.x + res.rect.w / 2), y: Math.round(res.rect.y + res.rect.h / 2) };
-          } catch {
-            /* fall through to pixels */
-          }
-        }
-        if (typeof p.x === 'number' && typeof p.y === 'number') {
-          const frac = p.x <= 1 && p.y <= 1;
-          return {
-            x: Math.round(Math.max(0, Math.min(size.w, frac ? p.x * size.w : p.x))),
-            y: Math.round(Math.max(0, Math.min(size.h, frac ? p.y * size.h : p.y)))
-          };
-        }
-        return null;
+      const resolve = (p: { x: number; y: number }) => {
+        const frac = p.x <= 1 && p.y <= 1;
+        return {
+          x: Math.round(Math.max(0, Math.min(size.w, frac ? p.x * size.w : p.x))),
+          y: Math.round(Math.max(0, Math.min(size.h, frac ? p.y * size.h : p.y)))
+        };
       };
-      const s = await resolve(from);
-      const d = await resolve(to);
-      if (!s || !d) return false;
+      const s = resolve(from);
+      const d = resolve(to);
       try {
         await glideCursor(tabId, s.x, s.y);
         wv.sendInputEvent({ type: 'mouseMove', x: s.x, y: s.y });
@@ -631,108 +590,13 @@ export function App() {
     [glideCursor]
   );
 
-  // Grab a screenshot of the tab's visible viewport as a data URI (for the vision step).
-  // Only works while the tab is painting (i.e. it's the active tab); returns undefined
-  // otherwise so the agent falls back to DOM-only reasoning.
-  const captureScreenshot = useCallback(async (tabId: string): Promise<string | undefined> => {
-    const wv = webviewRefs.current[tabId];
-    // Capture the active tab, or any tab with a running agent (those stay painted off-screen).
-    if (!wv?.capturePage || (tabId !== activeRef.current && !agentRunningRef.current[tabId])) return undefined;
-    try {
-      const img = await wv.capturePage();
-      const size = img?.getSize?.();
-      if (!size || !size.width) return undefined;
-      // Downscale wide captures, then re-encode PNG→JPEG to cut the upload ~5-10x (big context
-      // saving on the vision call). Falls back to the PNG if the canvas re-encode fails.
-      const scaled = size.width > 1024 ? img.resize({ width: 1024 }) : img;
-      const png = scaled.toDataURL();
-      if (typeof png !== 'string' || png.length < 64) return undefined;
-      const jpeg = await new Promise<string | undefined>((resolve) => {
-        const im = new Image();
-        im.onload = () => {
-          try {
-            const c = document.createElement('canvas');
-            c.width = im.naturalWidth;
-            c.height = im.naturalHeight;
-            const ctx = c.getContext('2d');
-            if (!ctx) return resolve(undefined);
-            ctx.drawImage(im, 0, 0);
-            resolve(c.toDataURL('image/jpeg', 0.6));
-          } catch {
-            resolve(undefined);
-          }
-        };
-        im.onerror = () => resolve(undefined);
-        im.src = png;
-      });
-      return jpeg && jpeg.length > 64 ? jpeg : png;
-    } catch {
-      return undefined;
-    }
-  }, []);
-
-  const realType = useCallback(
-    async (tabId: string, index: number, text: string) => {
-      const focused = await realClick(tabId, index);
-      if (!focused) return false;
-      const wv = webviewRefs.current[tabId];
-      await delay(140);
-      // Substitute any {{credential}} placeholders with the real secret HERE — at the last moment,
-      // locally. The resolved value is typed into the page but was never in the model's context.
-      const resolved = resolveSecrets(String(text), credentialsRef.current);
-      try {
-        for (const ch of resolved) wv.sendInputEvent({ type: 'char', keyCode: ch });
-      } catch {
-        return false;
-      }
-      return true;
-    },
-    [realClick]
-  );
-
-  // Click a snapshot element by its center rect (CDP-native path — the accessibility snapshot
-  // already carries a viewport-relative box, so we click coordinates instead of re-querying the
-  // DOM for a data-toji-ai attribute the CDP snapshot never set).
-  const clickElementByRect = useCallback(
-    async (tabId: string, elements: Array<{ i: number; rect?: { x: number; y: number; w: number; h: number } }>, index: number) => {
-      const el = elements.find((e) => e.i === index);
-      if (!el?.rect) return false;
-      return clickPoint(tabId, Math.round(el.rect.x + el.rect.w / 2), Math.round(el.rect.y + el.rect.h / 2));
-    },
-    [clickPoint]
-  );
-
-  const typeElementByRect = useCallback(
-    async (tabId: string, elements: Array<{ i: number; rect?: { x: number; y: number; w: number; h: number } }>, index: number, text: string) => {
-      const focused = await clickElementByRect(tabId, elements, index);
-      if (!focused) return false;
-      const wv = webviewRefs.current[tabId];
-      if (!wv) return false;
-      await delay(140);
-      // Substitute {{credential}} placeholders locally, at the last moment (never sent to the model).
-      const resolved = resolveSecrets(String(text), credentialsRef.current);
-      try {
-        for (const ch of resolved) wv.sendInputEvent({ type: 'char', keyCode: ch });
-      } catch {
-        return false;
-      }
-      return true;
-    },
-    [clickElementByRect]
-  );
-
-  // Run the agent loop on a specific tab. Uses real mouse/keyboard input so it works on
-  // complex sites, detects when an action didn't change the page, and stops if stuck.
+  // Run the agent loop on a specific tab. Perception + element actions go through byakugan
+  // (main process, over CDP): a render-truthful manifest on step 1 and tiny diffs after,
+  // with every click/type verified against fresh geometry — blocked actions come back as
+  // "blocked by <element>" observations instead of clicking through.
   const runAgent = useCallback(
     async (tabId: string, goal: string) => {
       agentCancel.current[tabId] = false;
-      // Perception engine (A/B flag). When on, we AUGMENT the DOM scraper with elements from the
-      // page's accessibility tree (webContents.debugger → Accessibility.getFullAXTree) — "use both".
-      // The DOM list always stays the base, so this only adds coverage and can't regress board/visual
-      // play (which relies on the DOM + screenshot path). Default off.
-      const cdpMode = localStorage.getItem('toji-agent-cdp') === '1' && Boolean((window as unknown as { toji?: { axSnapshot?: unknown } }).toji?.axSnapshot);
-      // Vision-first: capture the Set-of-Marks screenshot every step instead of only on demand.
-      const visionFirst = localStorage.getItem('toji-agent-vision') === '1';
       setAgents((a) => ({ ...a, [tabId]: { running: true, log: [...(a[tabId]?.log ?? []), { role: 'you', text: goal }] } }));
       const history: Array<{ action: string; reason?: string }> = [];
       // Hermes-style memory: ask the librarian once for a compact digest relevant to this goal
@@ -756,12 +620,15 @@ export function App() {
         /* references are optional */
       }
       const allFiles = () => [...(agentFilesRef.current[tabId] ?? []), ...references];
-      // DOM-only by default to save tokens; the agent sets this via the "screenshot" action when it
-      // genuinely needs to see pixels. One-shot: captured for the next step, then reset.
-      let wantImage = false;
-      let lastSig = '';
+      // Perception state: observe once (full manifest), then diff every step — byakugan holds the
+      // stable-ID map in the main process. boundsById aims the animated cursor at act targets.
+      let observedOnce = false;
+      const boundsById = new Map<number, { x: number; y: number; w: number; h: number }>();
+      // A look() the model requested last turn: null = none, {} = whole viewport, {id} = element crop.
+      let pendingLook: { id?: number } | null = null;
       let stuck = 0;
       let waits = 0;
+      let emptyViews = 0; // consecutive element-less manifests (SPA still hydrating)
       let completed = false;
       let acted = 0; // real (non-wait) actions performed so far
       let doneOverrides = 0; // times we've rejected a premature "done"
@@ -787,7 +654,7 @@ export function App() {
               goal,
               url: 'about:blank',
               title: 'New Tab',
-              elements: [],
+              page: '(no page is open in this tab yet)',
               // The server accepts at most 20 history entries — send the most recent ones.
               history: [...history.slice(-19), { action: 'note', reason: 'No website is open yet. Use "navigate" with the URL the goal needs to begin.' }]
             });
@@ -831,101 +698,81 @@ export function App() {
           await delay(100);
         }
         if (agentCancel.current[tabId]) break;
-        let snap: { url: string; title: string; scrollY: number; maxScroll: number; elements: Array<{ i: number; tag: string; role: string; name: string; value?: string; rect?: { x: number; y: number; w: number; h: number } }>; cells: AgentCell[] };
-        // Vision step: draw the Set-of-Marks overlay (numbered element badges + a labeled grid on
-        // any board/canvas), capture it, then remove it — so the model picks discrete labels with
-        // exact known coordinates instead of guessing pixels.
-        let image: string | undefined;
-        // Elements that came ONLY from the accessibility tree (CDP mode) — keyed by the synthetic
-        // index we assign them. They have no data-toji-ai attribute, so we click them by rect.
-        const axExtras: Record<number, { x: number; y: number; w: number; h: number }> = {};
-        // DOM-only by default. Only when the agent asked for a screenshot last turn do we draw the
-        // overlay + capture (one-shot). The tab stays painted even when backgrounded (keepAlive),
-        // so this works whether or not it's the active tab — keeps token cost down.
-        // Vision-first mode forces the rich Set-of-Marks snapshot EVERY step (board grid + element
-        // badges + screenshot), so the model always "sees" the page. Costs more tokens/latency but
-        // grounds far better on visual pages (chess, canvases) — worth it when running a local agent.
-        if (visionFirst && wv.capturePage) wantImage = true;
-        const captureNow = wantImage && Boolean(wv.capturePage);
-        wantImage = false;
-        try {
-          if (captureNow) {
-            snap = await wv.executeJavaScript(marksScript(10), true);
-            await delay(40); // let the overlay paint before the capture
-            image = await captureScreenshot(tabId);
-            try {
-              await wv.executeJavaScript(CLEAR_MARKS_JS, true);
-            } catch {
-              /* overlay is re-drawn next step anyway */
-            }
-          } else {
-            // DOM scraper is ALWAYS the base (keeps clicks, board cells, and everything working).
-            const s = await wv.executeJavaScript(SNAPSHOT_JS, true);
-            snap = { ...s, cells: [] };
-            // In CDP mode, AUGMENT it with accessibility-tree elements the DOM scraper missed —
-            // "use both". We never replace the DOM list, so CDP can only add coverage, never regress
-            // (board/canvas play still uses the DOM + screenshot path). Extras get high indices and
-            // are clicked by their rect.
-            if (cdpMode) {
-              const wcId = (wv as unknown as { getWebContentsId?: () => number }).getWebContentsId?.();
-              const axBridge = (window as unknown as { toji?: { axSnapshot?: (id: number, max: number) => Promise<{ elements?: typeof snap.elements } | null> } }).toji?.axSnapshot;
-              if (typeof wcId === 'number' && axBridge) {
-                try {
-                  const ax = await axBridge(wcId, 40);
-                  const axEls = ax && Array.isArray(ax.elements) ? ax.elements : [];
-                  const inside = (cx: number, cy: number, r: { x: number; y: number; w: number; h: number }) => cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h;
-                  let nextIdx = 500; // well above DOM indices (capped at 60)
-                  const merged = [...snap.elements];
-                  for (const a of axEls) {
-                    if (!a.rect || nextIdx > 540) continue;
-                    const acx = a.rect.x + a.rect.w / 2;
-                    const acy = a.rect.y + a.rect.h / 2;
-                    // Skip anything a DOM element already covers (avoid duplicate targets).
-                    if (snap.elements.some((e) => e.rect && inside(acx, acy, e.rect))) continue;
-                    if (!a.name) continue; // unnamed extras add noise, not signal
-                    axExtras[nextIdx] = a.rect;
-                    merged.push({ i: nextIdx, tag: a.tag, role: a.role, name: a.name, value: a.value, rect: a.rect });
-                    nextIdx += 1;
-                  }
-                  snap = { ...snap, elements: merged };
-                } catch {
-                  /* AX augmentation is best-effort; DOM base already stands on its own */
-                }
-              }
-            }
-          }
-        } catch {
-          logAgent(tabId, { role: 'system', text: 'Could not read this page.' });
+        const wcId = (wv as unknown as { getWebContentsId?: () => number }).getWebContentsId?.();
+        if (typeof wcId !== 'number' || !eyesAvailable()) {
+          logAgent(tabId, { role: 'system', text: 'Page perception is unavailable — the agent needs the Toji desktop app.' });
           break;
         }
-        let sig = snap.url;
-        try {
-          sig = await wv.executeJavaScript(PAGE_SIGNATURE_JS, true);
-        } catch {
-          /* fall back to url */
+        // Perceive through byakugan: a full render-truthful manifest on the first step, then only
+        // a DIFF of what changed ("NO CHANGE" when idle) — byakugan itself falls back to a full
+        // manifest on navigation or large change, and keeps element ids stable across steps.
+        const view = observedOnce ? await eyesDiff(wcId) : await eyesObserve(wcId);
+        if (agentCancel.current[tabId]) break;
+        if (!view.ok || typeof view.text !== 'string') {
+          stepFailures += 1;
+          if (stepFailures >= 5) {
+            logAgent(tabId, { role: 'system', text: `Could not read this page${view.error ? ` (${view.error})` : ''} — stopping.` });
+            break;
+          }
+          await delay(600 * stepFailures);
+          step -= 1;
+          continue;
         }
-        if (step > 0 && sig === lastSig && !lastWasVisual) {
+        observedOnce = true;
+        // SPAs (lichess, gmail, …) often finish "loading" before they render anything —
+        // an empty manifest right after navigation means "not hydrated yet", not "blank
+        // page". Re-observe briefly instead of asking the model to act on nothing.
+        if ((view.elements?.length ?? 0) === 0 && emptyViews < 4) {
+          emptyViews += 1;
+          observedOnce = false; // next perception is a fresh full manifest
+          await delay(900);
+          step -= 1;
+          continue;
+        }
+        if (view.elements?.length) emptyViews = 0;
+        for (const el of view.elements ?? ([] as EyesElement[])) boundsById.set(el.id, el.bounds);
+        // Stuck detection straight from the diff: "NO CHANGE" right after a real page action means
+        // the action did nothing visible; three in a row means we're stuck. (The model sees the
+        // same "NO CHANGE" as its PAGE, so it gets the signal too.)
+        const noChange = view.text.trim() === 'NO CHANGE';
+        if (step > 0 && noChange && !lastWasVisual) {
           stuck += 1;
-          history.push({ action: 'note', reason: 'the previous action did not change the page' });
-        } else if (step > 0) {
+        } else if (step > 0 && !noChange) {
           stuck = 0;
         }
-        lastSig = sig;
         if (stuck >= 3) {
           logAgent(tabId, { role: 'system', text: "The page isn't responding to actions — stopping." });
           break;
         }
-        let viewport: { w: number; h: number } | undefined;
-        if (image) {
-          try {
-            viewport = await wv.executeJavaScript('({ w: innerWidth, h: innerHeight })', true);
-          } catch {
-            /* optional */
+        // A look() the model requested last turn: capture the crop now — an element crop
+        // when it named an id, else the whole visible viewport.
+        let image: string | undefined;
+        let crop: { x: number; y: number; w: number; h: number } | undefined;
+        if (pendingLook) {
+          const lk = await eyesLook(wcId, typeof pendingLook.id === 'number' ? { id: pendingLook.id } : undefined);
+          if (lk.ok && lk.dataUri) {
+            image = lk.dataUri;
+            crop = lk.crop;
+          } else {
+            history.push({ action: 'note', reason: `look failed: ${lk.error ?? 'could not capture'}` });
           }
+          pendingLook = null;
         }
         let action;
         try {
-          action = await agentStep({ goal, url: snap.url, title: snap.title, scrollY: snap.scrollY, maxScroll: snap.maxScroll, elements: snap.elements, history: history.slice(-20), image, viewport, cells: snap.cells, credentials: credentialDirectory(credentialsRef.current), files: allFiles().map((f) => ({ index: f.index, name: f.name, mime: f.mime })), memory });
+          action = await agentStep({
+            goal,
+            url: view.meta?.url ?? '',
+            title: view.meta?.title,
+            page: view.text,
+            history: history.slice(-20),
+            image,
+            crop,
+            viewport: view.meta ? { w: view.meta.viewport.width, h: view.meta.viewport.height } : undefined,
+            credentials: credentialDirectory(credentialsRef.current),
+            files: allFiles().map((f) => ({ index: f.index, name: f.name, mime: f.mime })),
+            memory
+          });
           stepFailures = 0;
         } catch {
           // A transient model/network hiccup (rate-limit, timeout) shouldn't kill the run — retry
@@ -997,7 +844,7 @@ export function App() {
           logAgent(tabId, { role: 'agent', text: `Researching: ${action.query}` });
           let answer = '';
           try {
-            const r = await agentResearch({ question: action.query, goal, url: snap.url });
+            const r = await agentResearch({ question: action.query, goal, url: view.meta?.url });
             answer = r.answer || '';
           } catch {
             answer = '';
@@ -1032,13 +879,14 @@ export function App() {
           step -= 1; // asking is free
           continue;
         }
-        // screenshot: the agent decided it needs to SEE the page — capture one for next turn.
-        if (action.action === 'screenshot') {
-          wantImage = true;
-          logAgent(tabId, { role: 'agent', text: 'Taking a screenshot…' });
-          history.push({ action: 'note', reason: 'screenshot requested — it will be attached next turn' });
+        // look: the agent decided it needs to SEE pixels — a cropped screenshot of one element
+        // (or the viewport) is captured and attached next turn.
+        if (action.action === 'look') {
+          pendingLook = { id: typeof action.id === 'number' ? action.id : undefined };
+          logAgent(tabId, { role: 'agent', text: typeof action.id === 'number' ? `Looking at [${action.id}]…` : 'Taking a look…' });
+          history.push({ action: 'note', reason: 'look requested — the screenshot will be attached next turn' });
           lastWasVisual = true;
-          step -= 1; // requesting a screenshot is free
+          step -= 1; // requesting a look is free
           if (++waits > 24) {
             logAgent(tabId, { role: 'system', text: 'Too many non-acting steps — stopping.' });
             break;
@@ -1061,15 +909,16 @@ export function App() {
           continue;
         }
         // uploadFile: put one of the dropped files into a page file-input (e.g. attach a resume).
+        // The manifest id (action.id) targets the exact input; the Nth-input fallback covers a
+        // model that omitted it.
         if (action.action === 'uploadFile') {
           const files = allFiles();
           const file = files.find((f) => f.index === action.fileIndex) ?? files[0];
-          const toji = (window as unknown as { toji?: { uploadToFileInput?: (id: number, filePath: string, inputIndex: number) => Promise<boolean> } }).toji;
-          const wcId = (wv as unknown as { getWebContentsId?: () => number }).getWebContentsId?.();
+          const toji = (window as unknown as { toji?: { uploadToFileInput?: (id: number, filePath: string, inputIndex: number, elementId?: number) => Promise<boolean> } }).toji;
           let ok = false;
-          if (file && toji?.uploadToFileInput && typeof wcId === 'number') {
+          if (file && toji?.uploadToFileInput) {
             try {
-              ok = await toji.uploadToFileInput(wcId, file.path, typeof action.index === 'number' ? action.index : 0);
+              ok = await toji.uploadToFileInput(wcId, file.path, 0, typeof action.id === 'number' ? action.id : undefined);
             } catch {
               ok = false;
             }
@@ -1086,7 +935,14 @@ export function App() {
         if (action.action === 'wait') {
           waits += 1;
           const ms = Math.min(8000, Math.max(800, typeof action.ms === 'number' ? action.ms : 2500));
-          const base = lastSig;
+          // Poll a cheap in-page signature (NOT a byakugan diff — that would consume the change
+          // before the model sees it) so we resume as soon as the page updates.
+          let base = '';
+          try {
+            base = await wv.executeJavaScript(PAGE_SIGNATURE_JS, true);
+          } catch {
+            /* poll blindly */
+          }
           const start = Date.now();
           while (Date.now() - start < ms) {
             if (agentCancel.current[tabId]) break;
@@ -1131,52 +987,87 @@ export function App() {
           if (action.action === 'navigate' && action.url) {
             navigateTab(tabId, toUrl(action.url));
             await delay(2000);
-          } else if (action.action === 'type' && typeof action.index === 'number') {
-            // AX-only extras have no DOM attribute → type by rect; DOM elements use the exact path.
-            if (axExtras[action.index]) await typeElementByRect(tabId, snap.elements, action.index, action.text || '');
-            else await realType(tabId, action.index, action.text || '');
-            await delay(900);
-          } else if (action.action === 'scroll') {
-            await wv.executeJavaScript(scrollScript(action.direction === 'up' ? 'up' : 'down'), true);
-            await delay(700);
-          } else if (action.action === 'click' && typeof action.index === 'number') {
-            if (axExtras[action.index]) await clickElementByRect(tabId, snap.elements, action.index);
-            else await realClick(tabId, action.index);
-            await delay(1100);
           } else if (action.action === 'clickAt' && typeof action.x === 'number' && typeof action.y === 'number') {
+            // Raw pixel click for visual targets (canvas/board) with no manifest element.
             await realClickAt(tabId, action.x, action.y);
             await delay(1100);
           } else if (action.action === 'drag') {
-            // Resolve each end to coordinates: a board square ref (exact), an element index
-            // (exact), or absolute pixels — in that order of preference.
-            const endpoint = (cell?: string, index?: number, x?: number, y?: number) => {
-              if (cell) {
-                const c = snap.cells.find((k) => k.ref === cell);
-                if (c) return { x: c.cx, y: c.cy };
-              }
-              if (typeof index === 'number') return { index };
-              if (typeof x === 'number' && typeof y === 'number') return { x, y };
-              return null;
-            };
-            const from = endpoint(action.fromCell, action.fromIndex, action.fromX, action.fromY);
-            const to = endpoint(action.toCell, action.toIndex, action.toX, action.toY);
-            if (from && to) {
-              await realDrag(tabId, from, to);
+            if (typeof action.fromX === 'number' && typeof action.fromY === 'number' && typeof action.toX === 'number' && typeof action.toY === 'number') {
+              await realDrag(tabId, { x: action.fromX, y: action.fromY }, { x: action.toX, y: action.toY });
               await delay(1100);
             }
+          } else {
+            // Element/keyboard actions dispatched by byakugan in the main process: geometry is
+            // re-resolved at click time and the target hit-tested, so a covered element is
+            // REFUSED with {blockedBy} instead of clicked through.
+            // Only real page verbs may reach the dispatcher. Anything else landing here is a
+            // free-form action that arrived missing its required field (e.g. research with no
+            // query) — bounce it back to the model instead of sending a bogus verb to byakugan.
+            const verb = action.action;
+            if (verb !== 'click' && verb !== 'type' && verb !== 'press' && verb !== 'select' && verb !== 'hover' && verb !== 'scroll') {
+              history.push({ action: 'note', reason: `your "${verb}" action was missing its required field (research needs query, ask needs question, remember needs text, runJS needs code) — resend it complete` });
+              lastWasVisual = true;
+              step -= 1;
+              if (++waits > 24) {
+                logAgent(tabId, { role: 'system', text: 'Too many non-acting steps — stopping.' });
+                break;
+              }
+              continue;
+            }
+            const needsId = verb === 'click' || verb === 'type' || verb === 'select' || verb === 'hover';
+            if (needsId && typeof action.id !== 'number') {
+              history.push({ action: 'note', reason: `${verb} needs an element id from the PAGE — e.g. click(17)` });
+              lastWasVisual = true;
+              step -= 1;
+              if (++waits > 24) {
+                logAgent(tabId, { role: 'system', text: 'Too many non-acting steps — stopping.' });
+                break;
+              }
+              continue;
+            }
+            // Glide the visible cursor to the target — purely cosmetic; the verified dispatch in
+            // the main process re-derives fresh coordinates itself.
+            const b = typeof action.id === 'number' ? boundsById.get(action.id) : undefined;
+            if (b) await glideCursor(tabId, Math.round(b.x + b.w / 2), Math.round(b.y + b.h / 2));
+            // Substitute {{credential}} placeholders with the real secret HERE — at the last
+            // moment, locally. The resolved value goes into the page, never to the model.
+            const typed = verb === 'type' ? resolveSecrets(String(action.text ?? ''), credentialsRef.current) : undefined;
+            const res = await eyesAct(wcId, { verb, id: action.id, text: typed, key: action.key, value: action.value, direction: action.direction });
+            if (!res.ok) {
+              const why = `${res.error ?? 'action failed'}${res.blockedBy ? ` — blocked by ${res.blockedBy}` : ''}`;
+              // A stale id (element gone from the live page — dynamic sites churn constantly)
+              // means the model's picture is out of date: re-ground it with a fresh FULL
+              // manifest next turn instead of another diff against the world it mispredicted.
+              const stale = (res.error ?? '').includes('no such element');
+              if (stale) observedOnce = false;
+              logAgent(tabId, { role: 'system', text: `Couldn't ${verb}${typeof action.id === 'number' ? ` [${action.id}]` : ''}: ${why}` });
+              history.push({
+                action: `${verb}${typeof action.id === 'number' ? ` [${action.id}]` : ''} FAILED`,
+                reason: `${why}. ${stale ? 'That element is gone — a fresh PAGE manifest follows; pick from it.' : 'Deal with the blocker or pick a different element.'}`.slice(0, 300)
+              });
+              lastWasVisual = true; // nothing changed on the page
+              step -= 1; // a refused action shouldn't burn the budget — the retry is the real step
+              if (++waits > 24) {
+                logAgent(tabId, { role: 'system', text: 'Too many blocked/non-acting steps — stopping.' });
+                break;
+              }
+              continue;
+            }
+            if (verb === 'click') setAgentCursor((c) => (c ? { ...c, tick: c.tick + 1 } : c)); // ripple
+            await delay(verb === 'click' ? 1100 : verb === 'type' ? 900 : verb === 'scroll' ? 700 : 500);
           }
         } catch {
-          // keep going; the next snapshot reflects reality
+          // keep going; the next diff reflects reality
         }
         acted += 1;
-        // Board/canvas clicks/drags change pixels but not the DOM, so don't let them trip "stuck".
+        // Canvas clicks/drags change pixels but often not the layout tree — don't trip "stuck".
         lastWasVisual = action.action === 'clickAt' || action.action === 'drag';
         const label =
           action.action === 'clickAt'
             ? `clickAt ${Math.round(action.x ?? 0)},${Math.round(action.y ?? 0)}`
             : action.action === 'drag'
-                ? `drag ${action.fromCell ?? (typeof action.fromIndex === 'number' ? `#${action.fromIndex}` : `${Math.round(action.fromX ?? 0)},${Math.round(action.fromY ?? 0)}`)}→${action.toCell ?? (typeof action.toIndex === 'number' ? `#${action.toIndex}` : `${Math.round(action.toX ?? 0)},${Math.round(action.toY ?? 0)}`)}`
-                : `${action.action}${typeof action.index === 'number' ? ` #${action.index}` : ''}`;
+                ? `drag ${Math.round(action.fromX ?? 0)},${Math.round(action.fromY ?? 0)}→${Math.round(action.toX ?? 0)},${Math.round(action.toY ?? 0)}`
+                : `${action.action}${typeof action.id === 'number' ? ` [${action.id}]` : ''}${action.key ? ` ${action.key}` : ''}`;
         history.push({ action: label, reason: action.reason });
       }
       setAgentCursor(null);
@@ -1188,7 +1079,7 @@ export function App() {
       }
       setAgents((a) => ({ ...a, [tabId]: { running: false, log: a[tabId]?.log ?? [] } }));
     },
-    [captureScreenshot, clickElementByRect, clickPoint, logAgent, navigateTab, realClick, realClickAt, realDrag, realType, typeElementByRect]
+    [glideCursor, logAgent, navigateTab, realClickAt, realDrag]
   );
 
   const toggleTheme = useCallback(() => {
@@ -1423,7 +1314,7 @@ export function App() {
     createPortal(
       <motion.div className="pointer-events-none fixed left-0 top-0 z-[55]" animate={{ x: agentCursor.x, y: agentCursor.y }} transition={{ type: 'spring', stiffness: 240, damping: 24 }}>
         <MousePointer2 size={22} className="fill-white text-neutral-900 drop-shadow-[0_2px_6px_rgba(0,0,0,0.55)]" />
-        <motion.span key={agentCursor.tick} className="absolute left-0 top-0 block h-5 w-5 rounded-full border-2 border-violet-500" initial={{ scale: 0.3, opacity: 0.8 }} animate={{ scale: 1.9, opacity: 0 }} transition={{ duration: 0.45 }} />
+        <motion.span key={agentCursor.tick} className="absolute left-0 top-0 block h-5 w-5 rounded-full border-2 border-white shadow-[0_0_0_1.5px_rgba(0,0,0,0.55)]" initial={{ scale: 0.3, opacity: 0.9 }} animate={{ scale: 1.9, opacity: 0 }} transition={{ duration: 0.45 }} />
       </motion.div>,
       document.body
     );
@@ -1561,7 +1452,6 @@ export function App() {
           )}
         </div>
         {agentSpotlight}
-        <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} store={credentials} onChange={setCredentials} />
         {agentCursorEl}
         {tabContextMenu}
       </div>
@@ -1596,7 +1486,7 @@ export function App() {
               >
                 {color ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} /> : <TabFavicon tab={tab} />}
                 <span className="flex-1 truncate text-[13px]">{tabTitle(tab)}</span>
-                {agents[tab.id]?.running && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-violet-500" title="Agent working" />}
+                {agents[tab.id]?.running && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500" title="Agent working" />}
                 {tab.status === 'loading' && <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-[1.5px] border-current/30 border-t-current" />}
                 <button
                   type="button"
@@ -1621,7 +1511,6 @@ export function App() {
       </header>
       {viewport}
       {agentSpotlight}
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} store={credentials} onChange={setCredentials} />
       {agentCursorEl}
       {tabContextMenu}
     </div>

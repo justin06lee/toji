@@ -131,13 +131,14 @@ export function agentStep(body: {
   goal: string;
   url: string;
   title?: string;
-  scrollY?: number;
-  maxScroll?: number;
-  elements: Array<{ i: number; tag: string; role: string; name: string; value?: string; rect?: { x: number; y: number; w: number; h: number } }>;
+  /** Byakugan view of the page: the full manifest (first step) or a diff of what changed since. */
+  page: string;
   history?: Array<{ action: string; reason?: string }>;
+  /** Cropped screenshot from a look() request last turn (data URI). */
   image?: string;
+  /** Where the screenshot crop sits in viewport CSS px (maps image pixels → clickAt coords). */
+  crop?: { x: number; y: number; w: number; h: number };
   viewport?: { w: number; h: number };
-  cells?: Array<{ ref: string; cx: number; cy: number }>;
   credentials?: { name: string; keys: string[]; active?: boolean }[];
   files?: { index: number; name: string; mime?: string }[];
   memory?: string;

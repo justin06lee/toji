@@ -17,7 +17,7 @@ import { gatherPageSources } from './agents/search.js';
 import { getCachedPage, putCachedPage } from './lib/pageCache.js';
 import { nextAgentAction, researchHelp } from './agents/webAgent.js';
 import { agentAvailable, liveModelName } from './agents/model.js';
-import { detectAgents, getEffectiveAgent, isValidAgentCmd, refreshDetection, setAgentChoice } from './agents/agentRuntime.js';
+import { apiStatus, detectAgents, getEffectiveAgent, isValidAgentCmd, refreshDetection, setAgentChoice, setApiConfig } from './agents/agentRuntime.js';
 import { addFact, listFacts, removeFact, readPinned, writePinned, PINNED_CAPS } from './lib/memory.js';
 import { detectBrowsers, importBookmarks } from './lib/browserImport.js';
 import { listBookmarks, addBookmarks, removeBookmark } from './lib/bookmarks.js';
@@ -95,12 +95,35 @@ const settingsPatchSchema = z
     defaultFreshness: z.enum(['auto', 'latest', 'timeless']).optional(),
     visualAnalysis: z.boolean().optional(),
     theme: z.enum(['dark', 'system']).optional(),
-    agent: z.enum(['auto', 'claude', 'codex', 'opencode', 'off']).optional(),
+    agent: z.enum(['auto', 'claude', 'codex', 'opencode', 'anthropic', 'openai', 'local', 'off']).optional(),
     agentCmd: z.string().max(500).refine((val) => !val || isValidAgentCmd(val), { message: 'Invalid agent command: contains unsafe characters or references a disallowed binary' }).optional(),
     agentModel: z.string().max(120).optional(),
-    agentThinking: z.enum(['default', 'low', 'medium', 'high']).optional()
+    agentThinking: z.enum(['default', 'low', 'medium', 'high']).optional(),
+    anthropicApiKey: z.string().max(400).optional(),
+    anthropicModel: z.string().max(120).optional(),
+    openaiApiKey: z.string().max(400).optional(),
+    openaiModel: z.string().max(120).optional(),
+    localUrl: z
+      .string()
+      .max(400)
+      .refine((val) => !val || /^https?:\/\//i.test(val.trim()), { message: 'Self-hosted URL must start with http:// or https://' })
+      .optional(),
+    localModel: z.string().max(160).optional(),
+    localApiKey: z.string().max(400).optional()
   })
   .strict();
+
+// API keys are stored in the local settings.json but never echoed back over HTTP:
+// responses carry a mask (so the UI can show "saved"), and a PATCH whose key value is
+// still the mask leaves the stored key untouched.
+const KEY_FIELDS = ['anthropicApiKey', 'openaiApiKey', 'localApiKey'] as const;
+const MASK_PREFIX = '••••';
+const maskKey = (value: string) => (value ? `${MASK_PREFIX}${value.slice(-4)}` : '');
+function maskSettings(settings: UserSettings): UserSettings {
+  const masked = { ...settings };
+  for (const field of KEY_FIELDS) masked[field] = maskKey(settings[field]);
+  return masked;
+}
 
 async function buildStatusPayload() {
   return {
@@ -153,7 +176,7 @@ app.get('/api/config', (_req, res) => {
 
 app.get('/api/settings', async (_req, res, next) => {
   try {
-    res.json(await loadSettings());
+    res.json(maskSettings(await loadSettings()));
   } catch (error) {
     next(error);
   }
@@ -162,31 +185,39 @@ app.get('/api/settings', async (_req, res, next) => {
 app.patch('/api/settings', async (req, res, next) => {
   try {
     const patch = settingsPatchSchema.parse(req.body);
+    // A key value that is still the mask means "unchanged" — drop it so the stored key
+    // survives round-trips through the settings UI.
+    for (const field of KEY_FIELDS) {
+      if (typeof patch[field] === 'string' && patch[field]!.startsWith(MASK_PREFIX)) delete patch[field];
+    }
     const current = await loadSettings();
     const nextSettings: UserSettings = { ...current, ...patch };
     await saveSettings(nextSettings);
-    // Apply the agent choice immediately so the change takes effect without a restart.
+    // Apply the choice + API config immediately so changes take effect without a restart.
     setAgentChoice({
       agent: nextSettings.agent,
       agentCmd: nextSettings.agentCmd,
       agentModel: nextSettings.agentModel,
       agentThinking: nextSettings.agentThinking
     });
-    broadcast({ type: 'settings_update', settings: nextSettings });
-    res.json(nextSettings);
+    setApiConfig(nextSettings);
+    broadcast({ type: 'settings_update', settings: maskSettings(nextSettings) });
+    res.json(maskSettings(nextSettings));
   } catch (error) {
     next(error);
   }
 });
 
-// Which coding agents are installed, and which command Toji will actually run.
-// The UI uses this to offer a zero-config picker with live detection status.
+// Which coding agents are installed, which API backends are configured, and which
+// command/backend Toji will actually run. The UI uses this for the backend picker.
 app.get('/api/agents', (_req, res) => {
   const detected = refreshDetection();
   const effective = getEffectiveAgent();
   res.json({
     detected,
     available: agentAvailable(),
+    model: liveModelName(),
+    api: apiStatus(),
     effective: effective
       ? { id: effective.id, label: effective.label, source: effective.source, command: [effective.cmd, ...effective.args].join(' ') }
       : null
@@ -393,7 +424,7 @@ app.get('/api/page/stream', expensiveRateLimit, async (req, res) => {
   }
 });
 
-// Web agent: given the page's interactive elements + a goal, decide the next action.
+// Web agent: given the byakugan page view (manifest or diff) + a goal, decide the next action.
 app.post('/api/agent/step', expensiveRateLimit, async (req, res, next) => {
   try {
     const body = z
@@ -401,24 +432,13 @@ app.post('/api/agent/step', expensiveRateLimit, async (req, res, next) => {
         goal: z.string().min(1).max(600),
         url: z.string().max(2000),
         title: z.string().max(400).optional(),
-        scrollY: z.number().optional(),
-        maxScroll: z.number().optional(),
-        elements: z
-          .array(
-            z.object({
-              i: z.number(),
-              tag: z.string(),
-              role: z.string(),
-              name: z.string(),
-              value: z.string().optional(),
-              rect: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }).optional()
-            })
-          )
-          .max(80),
+        // Byakugan manifest/diff text — already token-capped by the producer (default 800 tokens
+        // ≈ 3200 chars); the generous cap here is just a transport guard.
+        page: z.string().max(40_000),
         history: z.array(z.object({ action: z.string(), reason: z.string().optional() })).max(20).optional(),
         image: z.string().max(12_000_000).optional(),
+        crop: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }).optional(),
         viewport: z.object({ w: z.number(), h: z.number() }).optional(),
-        cells: z.array(z.object({ ref: z.string().max(6), cx: z.number(), cy: z.number() })).max(400).optional(),
         credentials: z
           .array(z.object({ name: z.string().max(60), keys: z.array(z.string().max(60)).max(20), active: z.boolean().optional() }))
           .max(20)
@@ -610,6 +630,7 @@ try {
     agentModel: settings.agentModel,
     agentThinking: settings.agentThinking
   });
+  setApiConfig(settings);
 } catch (error) {
   // Defaults (env-seeded) apply if settings can't be read.
   console.warn('[toji] Failed to load settings at boot, using env defaults:', error instanceof Error ? error.message : error);

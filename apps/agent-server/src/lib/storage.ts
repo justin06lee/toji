@@ -169,7 +169,16 @@ export function defaultSettings(): UserSettings {
     agent: agentChoice.agent,
     agentCmd: agentChoice.agentCmd,
     agentModel: agentChoice.agentModel,
-    agentThinking: agentChoice.agentThinking
+    agentThinking: agentChoice.agentThinking,
+    // API backends (Claude API / OpenAI API / self-hosted endpoint) — unconfigured by
+    // default; the user pastes a key or URL in Settings and it lives only in this file.
+    anthropicApiKey: '',
+    anthropicModel: '',
+    openaiApiKey: '',
+    openaiModel: '',
+    localUrl: '',
+    localModel: '',
+    localApiKey: ''
   };
 }
 

@@ -92,7 +92,7 @@ export function AgentSpotlight({ target, running, pendingAsk, log, maxSteps, noL
               </div>
             ))}
             {running && !pendingAsk && <div className="flex items-center gap-2 text-[12.5px] text-neutral-400"><span className="h-3 w-3 animate-spin rounded-full border-[1.5px] border-current/30 border-t-current" /> Working…</div>}
-            {pendingAsk && <div className="flex items-center gap-2 text-[12.5px] text-violet-500"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" /> Waiting for your answer…</div>}
+            {pendingAsk && <div className="flex items-center gap-2 text-[12.5px] text-amber-500"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" /> Waiting for your answer…</div>}
           </div>
         )}
         {files && files.length > 0 && (

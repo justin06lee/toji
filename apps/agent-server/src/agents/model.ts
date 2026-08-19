@@ -3,27 +3,31 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { config } from '../config.js';
-import { agentAvailable, effectiveCommand, getEffectiveAgent } from './agentRuntime.js';
+import { agentAvailable, effectiveCommand, getActiveBackend } from './agentRuntime.js';
+import { apiComplete, apiStream, apiSupportsVision } from './apiModel.js';
 
-// Toji's "model" is a local CLI coding agent (Claude Code / Codex / opencode / …)
-// driven in non-interactive "print" mode. We pipe the prompt to the agent over
-// stdin and read its answer from stdout. This keeps Toji provider-agnostic: any
-// agent that takes a prompt on stdin and prints a result works, and there are no
-// API keys anywhere. Which agent runs (and where its binary is) is resolved at
-// call time by agentRuntime, so a user can switch agents from the UI live.
+// Toji's "model" is either a local CLI coding agent (Claude Code / Codex / opencode)
+// driven in non-interactive "print" mode — prompt piped to stdin, answer read from
+// stdout — or an HTTP backend: the Claude API, the OpenAI API, or any self-hosted
+// OpenAI-compatible endpoint. Which backend runs is resolved at call time by
+// agentRuntime, so the user can switch backends (and paste keys) live from the UI.
 
 export { agentAvailable };
 
 export function liveModelName() {
-  const eff = getEffectiveAgent();
-  return eff ? `cli: ${eff.label}` : 'demo (no agent)';
+  const backend = getActiveBackend();
+  if (!backend) return 'demo (no agent)';
+  return backend.kind === 'api' ? `api: ${backend.label}` : `cli: ${backend.label}`;
 }
 
-// With the temp-file image path below, vision works for any agent that can read a
-// local image file (Claude Code, Codex). Gate it on the visual-analysis flag and
-// on an agent actually being available.
+// CLI agents get vision via the temp-file image path below (any agent that can read a
+// local image file); API backends take inline image content where the provider
+// supports it. Gated on the visual-analysis flag either way.
 export function modelSupportsVision(): boolean {
-  return agentAvailable() && config.enableVisualAnalysis;
+  if (!config.enableVisualAnalysis) return false;
+  const backend = getActiveBackend();
+  if (!backend) return false;
+  return backend.kind === 'api' ? apiSupportsVision(backend) : true;
 }
 
 // Coding agents wrap answers in prose, ```fences```, or inline a <think> block.
@@ -139,7 +143,12 @@ export async function* streamText(options: {
   maxTokens?: number;
   signal?: AbortSignal;
 }): AsyncGenerator<string, void, unknown> {
-  if (!agentAvailable()) throw new Error('No CLI agent available (none detected / agent disabled)');
+  const backend = getActiveBackend();
+  if (!backend) throw new Error('No CLI agent available (none detected / agent disabled)');
+  if (backend.kind === 'api') {
+    yield* apiStream(backend, { system: options.system, user: options.user, maxTokens: options.maxTokens, signal: options.signal });
+    return;
+  }
 
   const prompt = buildPrompt(options.system, options.user);
   const queue: string[] = [];
@@ -188,6 +197,16 @@ export async function completeJSON<T>(options: {
   maxTokens?: number;
   signal?: AbortSignal;
 }): Promise<T> {
+  const backend = getActiveBackend();
+  if (backend?.kind === 'api') {
+    const out = await apiComplete(backend, {
+      system: `${options.system}\n${JSON_INSTRUCTION}`,
+      user: options.user,
+      maxTokens: options.maxTokens,
+      signal: options.signal
+    });
+    return parseJsonLoose<T>(out, 'content');
+  }
   const prompt = buildPrompt(`${options.system}\n${JSON_INSTRUCTION}`, options.user);
   const out = await runAgent(prompt, { signal: options.signal });
   return parseJsonLoose<T>(out, 'content');
@@ -206,6 +225,17 @@ export async function completeMultimodalJSON<T>(options: {
   maxTokens?: number;
   signal?: AbortSignal;
 }): Promise<T> {
+  const backend = getActiveBackend();
+  if (backend?.kind === 'api') {
+    const out = await apiComplete(backend, {
+      system: `${options.system}\n${JSON_INSTRUCTION}`,
+      user: options.userText,
+      imageDataUri: options.imageDataUri,
+      maxTokens: options.maxTokens,
+      signal: options.signal
+    });
+    return parseJsonLoose<T>(out, 'multimodal content');
+  }
   const imagePath = await writeImageTemp(options.imageDataUri);
   try {
     const prompt = buildPrompt(

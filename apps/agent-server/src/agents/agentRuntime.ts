@@ -11,8 +11,16 @@ import { config } from '../config.js';
 // without an async init step.
 
 export type AgentId = 'claude' | 'codex' | 'opencode';
-export type AgentChoice = AgentId | 'auto' | 'off';
+/** HTTP inference backends: hosted APIs with a user-saved key, or any OpenAI-compatible
+ *  endpoint ('local' — Ollama on this machine, LM Studio, vLLM on a home server, …). */
+export type ApiProvider = 'anthropic' | 'openai' | 'local';
+export type AgentChoice = AgentId | ApiProvider | 'auto' | 'off';
 export type ThinkingLevel = 'default' | 'low' | 'medium' | 'high';
+
+const API_PROVIDERS: ApiProvider[] = ['anthropic', 'openai', 'local'];
+export function isApiProvider(value: string): value is ApiProvider {
+  return (API_PROVIDERS as string[]).includes(value);
+}
 
 interface AgentTuning {
   /** Model passed to the agent's --model flag. '' = the agent's default. */
@@ -140,6 +148,93 @@ function detectedById(id: AgentId): DetectedAgent | undefined {
 type Choice = { agent: AgentChoice; agentCmd: string } & AgentTuning;
 let userChoice: Choice | null = null;
 
+// --- HTTP inference backends (Claude API / OpenAI API / self-hosted) ----------
+// Keys and URLs come from the persisted UserSettings (local settings.json) and are
+// pushed here at boot and on every settings PATCH, like the CLI choice above.
+
+export interface ApiConfig {
+  anthropicApiKey: string;
+  anthropicModel: string;
+  openaiApiKey: string;
+  openaiModel: string;
+  localUrl: string;
+  localModel: string;
+  localApiKey: string;
+}
+
+let apiConfig: ApiConfig = {
+  anthropicApiKey: '',
+  anthropicModel: '',
+  openaiApiKey: '',
+  openaiModel: '',
+  localUrl: '',
+  localModel: '',
+  localApiKey: ''
+};
+
+export function setApiConfig(cfg: Partial<ApiConfig>) {
+  const trim = (v: unknown) => (typeof v === 'string' ? v.trim() : undefined);
+  apiConfig = {
+    anthropicApiKey: trim(cfg.anthropicApiKey) ?? apiConfig.anthropicApiKey,
+    anthropicModel: trim(cfg.anthropicModel) ?? apiConfig.anthropicModel,
+    openaiApiKey: trim(cfg.openaiApiKey) ?? apiConfig.openaiApiKey,
+    openaiModel: trim(cfg.openaiModel) ?? apiConfig.openaiModel,
+    localUrl: trim(cfg.localUrl) ?? apiConfig.localUrl,
+    localModel: trim(cfg.localModel) ?? apiConfig.localModel,
+    localApiKey: trim(cfg.localApiKey) ?? apiConfig.localApiKey
+  };
+}
+
+export interface ApiBackend {
+  kind: 'api';
+  provider: ApiProvider;
+  /** OpenAI-compatible base URL ('' for Anthropic — the SDK owns the endpoint). */
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  label: string;
+  thinking: ThinkingLevel;
+}
+
+export type Backend = ({ kind: 'cli' } & EffectiveAgent) | ApiBackend;
+
+export const ANTHROPIC_DEFAULT_MODEL = 'claude-opus-4-8';
+export const OPENAI_DEFAULT_MODEL = 'gpt-5.1';
+
+/** The configured API backend for a provider, or null when it isn't set up yet. */
+function apiBackendFor(provider: ApiProvider, thinking: ThinkingLevel): ApiBackend | null {
+  if (provider === 'anthropic') {
+    if (!apiConfig.anthropicApiKey) return null;
+    const model = apiConfig.anthropicModel || ANTHROPIC_DEFAULT_MODEL;
+    return { kind: 'api', provider, baseUrl: '', apiKey: apiConfig.anthropicApiKey, model, label: `Claude API · ${model}`, thinking };
+  }
+  if (provider === 'openai') {
+    if (!apiConfig.openaiApiKey) return null;
+    const model = apiConfig.openaiModel || OPENAI_DEFAULT_MODEL;
+    return { kind: 'api', provider, baseUrl: 'https://api.openai.com/v1', apiKey: apiConfig.openaiApiKey, model, label: `OpenAI API · ${model}`, thinking };
+  }
+  // local: URL + model are required; the bearer token is optional (most local servers have none).
+  if (!apiConfig.localUrl || !apiConfig.localModel) return null;
+  return {
+    kind: 'api',
+    provider,
+    baseUrl: apiConfig.localUrl.replace(/\/+$/, ''),
+    apiKey: apiConfig.localApiKey,
+    model: apiConfig.localModel,
+    label: `self-hosted · ${apiConfig.localModel}`,
+    thinking
+  };
+}
+
+/** Per-provider configuration status for the settings UI (never exposes key values). */
+export function apiStatus() {
+  return {
+    anthropic: { configured: Boolean(apiConfig.anthropicApiKey), model: apiConfig.anthropicModel || ANTHROPIC_DEFAULT_MODEL },
+    openai: { configured: Boolean(apiConfig.openaiApiKey), model: apiConfig.openaiModel || OPENAI_DEFAULT_MODEL },
+    local: { configured: Boolean(apiConfig.localUrl && apiConfig.localModel), url: apiConfig.localUrl, model: apiConfig.localModel }
+  };
+}
+
 /**
  * Validate that a custom agent command looks like a legitimate CLI agent binary
  * path rather than an arbitrary shell command. Rejects shell metacharacters,
@@ -222,9 +317,9 @@ function firstDetected(tuning: AgentTuning): EffectiveAgent | null {
 }
 
 /**
- * Resolve the command Toji should run, or null to use deterministic fallbacks.
- * Precedence: env hard-override > UI custom command > UI preset > UI auto-detect >
- * env-seeded defaults (for scripts that never set a UI choice).
+ * Resolve the CLI command Toji should run, or null when the active choice is not a
+ * CLI (off, an API backend, or nothing available). Precedence: env hard-override >
+ * UI custom command > UI preset > UI auto-detect > env-seeded defaults.
  */
 export function getEffectiveAgent(): EffectiveAgent | null {
   // Env TOJI_AGENT_CMD is a deployment/debug hard-override that always wins. The
@@ -242,9 +337,37 @@ export function getEffectiveAgent(): EffectiveAgent | null {
     const { cmd, args } = splitCommand(choice.agentCmd);
     return { cmd, args, label: `custom (${cmd})`, id: null, source: 'custom' };
   }
-  if (choice.agent === 'off') return null;
+  if (choice.agent === 'off' || isApiProvider(choice.agent)) return null;
   if (choice.agent === 'auto') return firstDetected(tuning);
   return presetCommand(choice.agent, userChoice ? 'preset' : 'env', tuning);
+}
+
+/**
+ * The active inference backend: a CLI agent to spawn, an HTTP API backend, or null
+ * (demo mode). This is what model.ts dispatches on. 'auto' prefers a detected CLI
+ * (zero-config), then falls back to the first CONFIGURED API backend.
+ */
+export function getActiveBackend(): Backend | null {
+  const choice = userChoice ?? envChoice();
+
+  // An explicitly chosen API provider wins over CLI resolution (env cmd override
+  // excluded — that's a deployment escape hatch and getEffectiveAgent handles it).
+  if (!process.env.TOJI_AGENT_CMD?.trim() && !choice.agentCmd && isApiProvider(choice.agent)) {
+    return apiBackendFor(choice.agent, choice.agentThinking);
+  }
+
+  const cli = getEffectiveAgent();
+  if (cli) return { kind: 'cli', ...cli };
+  if (choice.agent === 'off') return null;
+
+  // 'auto' with no CLI installed: use whichever API backend the user has configured.
+  if (choice.agent === 'auto') {
+    for (const provider of API_PROVIDERS) {
+      const backend = apiBackendFor(provider, choice.agentThinking);
+      if (backend) return backend;
+    }
+  }
+  return null;
 }
 
 /** Env-derived choice, used as the default before the UI sets one. */
@@ -260,7 +383,7 @@ function envChoice(): Choice {
 }
 
 export function agentAvailable(): boolean {
-  return getEffectiveAgent() !== null;
+  return getActiveBackend() !== null;
 }
 
 export function effectiveCommand(): { cmd: string; args: string[] } | null {

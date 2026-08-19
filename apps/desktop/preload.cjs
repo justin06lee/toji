@@ -35,11 +35,17 @@ contextBridge.exposeInMainWorld('toji', {
   // Set a dropped file onto a <input type=file> inside a guest <webview> (the agent
   // attaching e.g. a resume). Done in the main process via the Chrome DevTools
   // Protocol because the renderer can't set a file input programmatically.
-  uploadToFileInput: (webContentsId, filePath, inputIndex) =>
-    ipcRenderer.invoke('toji:upload-file-input', { webContentsId, filePath, inputIndex }),
-  // CDP-native page perception for the web agent: reads the guest page's accessibility tree
-  // (roles/names/values + on-screen boxes) from the main process instead of scraping the DOM.
-  axSnapshot: (webContentsId, max) => ipcRenderer.invoke('toji:ax-snapshot', { webContentsId, max }),
+  // elementId targets the exact input by its byakugan manifest id; inputIndex is the fallback.
+  uploadToFileInput: (webContentsId, filePath, inputIndex, elementId) =>
+    ipcRenderer.invoke('toji:upload-file-input', { webContentsId, filePath, inputIndex, elementId }),
+  // Byakugan page perception for the web agent (runs in the main process over CDP):
+  // observe = full render-truthful manifest, diff = only what changed since last step,
+  // act = verified click/type/press/select/hover/scroll/navigate on manifest ids,
+  // look = cropped screenshot of one element/region for canvas/visual content.
+  eyesObserve: (webContentsId, maxTokens) => ipcRenderer.invoke('toji:eyes-observe', { webContentsId, maxTokens }),
+  eyesDiff: (webContentsId, maxTokens) => ipcRenderer.invoke('toji:eyes-diff', { webContentsId, maxTokens }),
+  eyesAct: (webContentsId, action) => ipcRenderer.invoke('toji:eyes-act', { webContentsId, action }),
+  eyesLook: (webContentsId, target) => ipcRenderer.invoke('toji:eyes-look', { webContentsId, ...(target || {}) }),
   // Default-browser registration + Chrome extension loading (unpacked + Web Store).
   setDefaultBrowser: () => ipcRenderer.invoke('toji:set-default-browser'),
   isDefaultBrowser: () => ipcRenderer.invoke('toji:is-default-browser'),
