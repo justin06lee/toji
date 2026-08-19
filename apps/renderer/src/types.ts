@@ -285,12 +285,14 @@ export interface BrowserTab {
   canBack?: boolean;
   canForward?: boolean;
   contextKey: number;
+  /** Which container (identity + egress policy) this tab browses in. */
+  containerId: string;
   /** When set, this tab shows a built-in Toji page instead of a web/AI page. */
   internal?: InternalPage;
 }
 
 /** Colors used to visually distinguish tab groups (work in light + dark). */
-export const GROUP_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#f43f5e', '#06b6d4', '#8b5cf6'];
+export const GROUP_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#f43f5e', '#06b6d4', '#0ea5e9'];
 
 export type ServerEvent = (
   | { type: 'hello'; message: string; app?: string }
