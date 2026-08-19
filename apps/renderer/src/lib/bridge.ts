@@ -14,6 +14,8 @@ export interface TorStatus {
   detail: string;
   /** Where the tor binary came from, for the settings panel. */
   source?: 'managed' | 'external' | null;
+  /** Whether each Tor container gets its own circuits (false when using an external Tor). */
+  isolated?: boolean;
 }
 
 export interface TojiBridge {

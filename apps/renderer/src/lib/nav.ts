@@ -44,6 +44,26 @@ export function webSearchUrl(query: string, engine: SearchEngineId = 'duckduckgo
   return (ENGINE_URL[engine] ?? ENGINE_URL.duckduckgo)(q);
 }
 
+/**
+ * True for a Tor hidden-service address. These only resolve through Tor's own
+ * resolver, so a container on a direct connection can never reach one — Toji moves
+ * the tab into a Tor container instead of showing a DNS error.
+ */
+export function isOnionUrl(input: string): boolean {
+  const value = input.trim();
+  if (!value) return false;
+  const host = /^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? safeHost(value) : value.split(/[/?#]/)[0];
+  return /(^|\.)onion$/i.test((host || '').replace(/:\d+$/, ''));
+}
+
+function safeHost(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+}
+
 export function hostOf(url: string): string {
   try {
     return new URL(url).hostname.replace(/^www\./, '');

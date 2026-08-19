@@ -1,4 +1,4 @@
-import { BookMarked, Boxes, Brain, Check, Compass, Cpu, Download, EyeOff, FileText, KeyRound, Loader2, Paperclip, Plus, Puzzle, Route, Search, ShieldCheck, Star, Trash2, X } from 'lucide-react';
+import { BookMarked, Boxes, Brain, Check, Compass, Cpu, Download, EyeOff, FileText, KeyRound, Loader2, Paperclip, Plus, Puzzle, RefreshCw, Route, Search, ShieldCheck, Star, Trash2, TriangleAlert, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import {
   addMemory,
@@ -24,7 +24,7 @@ import {
 } from '../lib/api';
 import type { AgentChoice, AgentId, AgentsStatus, InternalPage as InternalPageKind, ThinkingLevel, UserSettings } from '../types';
 import type { CredentialSet, CredentialStore } from '../lib/credentials';
-import { bridge } from '../lib/bridge';
+import { bridge, type TorStatus } from '../lib/bridge';
 import { CONTAINER_COLORS, containerId as makeContainerId, type Container, type Egress } from '../lib/containers';
 import { SEARCH_ENGINES, type SearchEngineId } from '../lib/nav';
 import { Dropdown, type DropdownOption } from './Dropdown';
@@ -283,6 +283,7 @@ function SettingsView({
     <div>
       <h1 className="mb-8 text-2xl font-semibold tracking-tight">Settings</h1>
       <ContainersSettings containers={containers} onChange={onContainersChange} onClear={onClearContainer} />
+      <TorSettings />
       <AgentSettings />
       <SearchSettings />
       <CredentialsSettings store={store} onChange={onChange} />
@@ -406,6 +407,93 @@ function ContainersSettings({ containers, onChange, onClear }: { containers: Con
       <p className="mt-3 flex items-start gap-1.5 text-[12px] leading-relaxed text-neutral-400">
         <Route size={13} className="mt-px shrink-0" />
         Containers set to Tor stay offline until Tor connects &mdash; they will not fall back to a direct connection.
+      </p>
+    </Section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tor
+// ---------------------------------------------------------------------------
+const OFFLINE_STATUS: TorStatus = { ready: false, state: 'off', progress: 0, detail: 'Tor is not running' };
+
+function TorSettings() {
+  const [status, setStatus] = useState<TorStatus>(OFFLINE_STATUS);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void bridge().torStatus?.().then((s) => s && setStatus(s));
+    return bridge().onTorStatus?.(setStatus);
+  }, []);
+
+  const run = (fn: (() => Promise<unknown>) | undefined) => async () => {
+    if (!fn) return;
+    setBusy(true);
+    try {
+      await fn();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const running = status.state !== 'off' && status.state !== 'error';
+  const dot = status.ready ? 'bg-emerald-500' : running ? 'bg-amber-500' : 'bg-neutral-400';
+
+  return (
+    <Section icon={<Route size={15} />} title="Tor">
+      <p className="mb-4 text-[13px] leading-relaxed text-neutral-500 dark:text-neutral-400">
+        Toji drives the real Tor client rather than implementing onion routing itself. Containers set to Tor send every
+        request through it &mdash; and while Tor is unavailable their traffic is cancelled outright, never quietly sent over
+        the direct connection.
+      </p>
+
+      <div className="rounded-xl border border-black/10 p-3 dark:border-white/12">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} />
+          <span className="min-w-0 flex-1 text-[13px]">
+            {status.detail}
+            {status.source && <span className="ml-1.5 text-[11px] text-neutral-400">({status.source === 'managed' ? 'Toji-managed' : 'external'})</span>}
+          </span>
+          {running && !status.ready && <span className="shrink-0 text-[12px] tabular-nums text-neutral-400">{status.progress}%</span>}
+
+          {status.ready && (
+            <button type="button" onClick={run(bridge().torNewCircuit)} disabled={busy} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-black/10 px-2.5 text-[12px] transition hover:border-black/25 disabled:opacity-40 dark:border-white/12 dark:hover:border-white/30">
+              <RefreshCw size={12} className={busy ? 'animate-spin' : undefined} />
+              New circuit
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={run(running ? bridge().torStop : bridge().torStart)}
+            disabled={busy}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-neutral-900 px-3 text-[12px] text-white transition hover:opacity-85 disabled:opacity-40 dark:bg-white dark:text-neutral-900"
+          >
+            {busy && <Loader2 size={12} className="animate-spin" />}
+            {running ? 'Stop Tor' : 'Start Tor'}
+          </button>
+        </div>
+
+        {status.ready && !status.isolated && (
+          <p className="mt-3 flex items-start gap-1.5 border-t border-black/[0.07] pt-3 text-[12px] leading-relaxed text-amber-600 dark:border-white/10 dark:text-amber-400">
+            <TriangleAlert size={13} className="mt-px shrink-0" />
+            Using a Tor instance that was already running. It offers a single SOCKS port, and Chromium cannot send SOCKS
+            credentials, so every Tor container shares its circuits &mdash; they can be linked by their common exit. For
+            per-container circuits, quit the other Tor and let Toji manage its own.
+          </p>
+        )}
+
+        {status.state === 'error' && (
+          <p className="mt-3 border-t border-black/[0.07] pt-3 text-[12px] leading-relaxed text-neutral-500 dark:border-white/10 dark:text-neutral-400">
+            Toji looks for a <code className="rounded bg-black/[0.06] px-1 py-0.5 font-mono text-[11px] dark:bg-white/10">tor</code> binary in the app bundle and the usual
+            install locations, then for a Tor already listening on 9050 or 9150. On macOS,{' '}
+            <code className="rounded bg-black/[0.06] px-1 py-0.5 font-mono text-[11px] dark:bg-white/10">brew install tor</code> is enough; starting Tor Browser also works.
+          </p>
+        )}
+      </div>
+
+      <p className="mt-3 text-[12px] leading-relaxed text-neutral-400">
+        Tor protects what the network can see about you. It does not make this browser indistinguishable from other
+        browsers &mdash; for a threat model where that matters, use the Tor Browser.
       </p>
     </Section>
   );
