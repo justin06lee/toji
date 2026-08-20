@@ -1,41 +1,53 @@
-# Toji — common tasks. Run `make <target>`.
-# Uses bun (the project's package manager).
+# Toji. Plain `make` does the whole golden path: install, build, put the app in
+# /Applications, and launch it. Everything else is a shortcut off that.
 
-PM := bun
+PM      := bun
+APP     := Toji
+DEST    := /Applications/$(APP).app
+UNPACKED = release/mac-arm64/$(APP).app
 
-.DEFAULT_GOAL := help
-.PHONY: help install setup dev build typecheck check dmg app dir clean
+.DEFAULT_GOAL := all
+.PHONY: all deps app dev build install uninstall update check typecheck test dmg clean
 
-help: ## Show available targets
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
+all: install ## Install deps, build, install to /Applications, and launch
 
-install: ## Install dependencies
-	$(PM) install
+deps:
+	@$(PM) install
 
-setup: install ## Install dependencies and the Chromium browser for research
-	$(PM) run setup:browsers
+build: deps ## Type-check and build the renderer + server bundles
+	@$(PM) run build
 
-dev: ## Run the full app in development (server + renderer + electron)
-	$(PM) run dev
+app: build ## Package an unpacked .app (no installer)
+	@bunx electron-builder --dir
 
-build: ## Type-check and build the renderer + server bundles
-	$(PM) run build
+install: app ## Put the app in /Applications and launch it
+	@rm -rf "$(DEST)"
+	@cp -R "$(UNPACKED)" "$(DEST)" 2>/dev/null || cp -R release/mac-*/$(APP).app "$(DEST)"
+	@echo "installed $(DEST)"
+	@open "$(DEST)"
+
+uninstall: ## Quit the app and remove it from /Applications
+	@osascript -e 'quit app "$(APP)"' 2>/dev/null || true
+	@rm -rf "$(DEST)"
+	@echo "removed $(DEST)"
+
+update: uninstall install ## Stop, rebuild, reinstall, relaunch
+
+dev: deps ## Run from source with hot reload (server + renderer + Electron)
+	@$(PM) run dev
 
 typecheck: ## Type-check only
-	$(PM) run typecheck
+	@$(PM) run typecheck
+
+test: ## Run the unit tests
+	@$(PM) run test
 
 check: ## Full gate: typecheck + smoke + build + e2e
-	$(PM) run check
+	@$(PM) run check
 
-dmg: build ## Build a distributable .dmg installer (drag-to-Applications) and open it
-	bunx electron-builder --mac dmg
-	@echo "Opening installer…"
+dmg: build ## Build a distributable .dmg and open it
+	@bunx electron-builder --mac dmg
 	@open release/*.dmg 2>/dev/null || true
 
-dir: build ## Build an unpacked .app folder (no installer)
-	bunx electron-builder --dir
-
-app: dir ## Alias for `dir`
-
 clean: ## Remove build output
-	rm -rf dist release
+	@rm -rf dist release

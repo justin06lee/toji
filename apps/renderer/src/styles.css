@@ -99,3 +99,25 @@ body {
   0% { transform: translateX(-110%); }
   100% { transform: translateX(420%); }
 }
+
+/* Round color swatches (container accents). Chromium draws the swatch in a shadow
+   part, so border-radius on the input alone leaves a square inside the circle. */
+.swatch {
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  padding: 0;
+  background: transparent;
+  border-radius: 9999px;
+  overflow: hidden;
+}
+.swatch::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.swatch::-webkit-color-swatch {
+  border: 1px solid rgb(0 0 0 / 0.15);
+  border-radius: 9999px;
+}
+:where(.dark) .swatch::-webkit-color-swatch {
+  border-color: rgb(255 255 255 / 0.2);
+}

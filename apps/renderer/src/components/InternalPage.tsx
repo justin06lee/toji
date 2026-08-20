@@ -339,7 +339,7 @@ function ContainersSettings({ containers, onChange, onClear }: { containers: Con
               aria-label={`${container.name} color`}
               value={container.color}
               onChange={(e) => patch(container.id, { color: e.target.value })}
-              className="h-6 w-6 shrink-0 cursor-pointer rounded-full border-0 bg-transparent p-0"
+              className="swatch h-6 w-6 shrink-0 cursor-pointer"
             />
             <input
               value={container.name}
