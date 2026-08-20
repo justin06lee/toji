@@ -7,7 +7,7 @@ DEST    := /Applications/$(APP).app
 UNPACKED = release/mac-arm64/$(APP).app
 
 .DEFAULT_GOAL := all
-.PHONY: all deps app dev build install uninstall update check typecheck test dmg clean
+.PHONY: all deps app dev build install uninstall update check tor-check typecheck test dmg clean
 
 all: install ## Install deps, build, install to /Applications, and launch
 
@@ -41,6 +41,9 @@ typecheck: ## Type-check only
 
 test: ## Run the unit tests
 	@$(PM) run test
+
+tor-check: ## Live Tor check against a real daemon (needs: brew install tor)
+	@$(PM) run tor:check
 
 check: ## Full gate: typecheck + smoke + build + e2e
 	@$(PM) run check

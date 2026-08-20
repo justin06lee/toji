@@ -30,6 +30,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "smoke": "tsx scripts/smoke.ts",
+    "tor:check": "node scripts/tor-live-check.cjs",
     "e2e:demo": "tsx scripts/e2e-demo.ts",
     "start:app": "concurrently -k -n server,desktop -c auto \"bun run start:server\" \"wait-on tcp:8787 && electron apps/desktop/main.cjs\"",
     "package": "bun run build && electron-builder",
