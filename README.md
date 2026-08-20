@@ -91,11 +91,16 @@ re-checked at fill time so a navigation mid-click cannot redirect one elsewhere.
 Requires [bun](https://bun.sh) and Node 18+.
 
 ```bash
-make          # install, build, install to /Applications, launch
-make dev      # run from source with hot reload
-make update   # stop, rebuild, reinstall, relaunch
-make check    # typecheck + smoke + build + e2e
+make            # install, build, install to /Applications, launch
+make dev        # run from source with hot reload
+make update     # stop, rebuild, reinstall, relaunch
+make check      # typecheck + smoke + build + e2e
+make tor-check  # start a real Tor and verify circuits, .onion and NEWNYM
 ```
+
+`make tor-check` is the one that proves the isolation claim rather than asserting it: it
+boots an actual Tor, sends traffic for two containers through their assigned SocksPorts, and
+fails unless they come out of **different relays**.
 
 ## The omnibox
 
