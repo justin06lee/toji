@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Copy, FolderPlus, Globe, Moon, MousePointer2, PanelLeft, PanelTop, Plus, RefreshCcw, RotateCw, Search, Settings, Sun, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Copy, FolderPlus, Moon, MousePointer2, PanelLeft, PanelTop, Plus, RefreshCcw, RotateCw, Search, Settings, Sparkles, Sun, X } from 'lucide-react';
 import { AnimatePresence, motion, Reorder } from 'motion/react';
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
@@ -226,7 +226,7 @@ export function App() {
 
   // Omnibox submit. URLs always navigate; otherwise either a web search or an AI page.
   const go = useCallback(
-    (tabId: string, raw: string, opts: { web?: boolean } = {}) => {
+    (tabId: string, raw: string, opts: { ai?: boolean } = {}) => {
       const value = raw.trim();
       if (!value) return;
       if (looksLikeUrl(value)) {
@@ -243,8 +243,10 @@ export function App() {
         }
         navigateTab(tabId, toUrl(value));
       }
-      else if (opts.web) navigateTab(tabId, webSearchUrl(value, (localStorage.getItem('toji-search-engine') as SearchEngineId | null) ?? 'duckduckgo'));
-      else generatePage(tabId, value);
+      // Plain Enter behaves like any browser: search. Shift+Enter asks the model to
+      // build an answer page instead.
+      else if (opts.ai) generatePage(tabId, value);
+      else navigateTab(tabId, webSearchUrl(value, (localStorage.getItem('toji-search-engine') as SearchEngineId | null) ?? 'duckduckgo'));
     },
     [generatePage, navigateTab, setTabContainer]
   );
@@ -401,7 +403,7 @@ export function App() {
   const onSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter' && event.shiftKey) {
       event.preventDefault();
-      if (activeTab) go(activeTab.id, activeTab.query, { web: true });
+      if (activeTab) go(activeTab.id, activeTab.query, { ai: true });
       (event.currentTarget as HTMLInputElement).blur();
     }
   };
@@ -1256,15 +1258,15 @@ export function App() {
           value={activeTab?.query ?? ''}
           onChange={(e) => activeTab && patchTab(activeTab.id, { query: e.target.value })}
           onKeyDown={onSearchKeyDown}
-          placeholder="Search, ask anything, or enter a URL"
+          placeholder="Search or enter a URL  —  ⇧↵ to ask the model"
           spellCheck={false}
           autoComplete="off"
           aria-label="Search"
           className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-neutral-400"
         />
         {activeTab && <VaultFillButton matches={vaultMatches[activeTab.id] ?? []} onFill={(entryId) => fillCredential(activeTab.id, entryId)} />}
-        <button type="button" aria-label="Search the web" title="Search the web" onClick={() => activeTab && go(activeTab.id, activeTab.query, { web: true })} className="inline-flex h-7 w-7 mr-1 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-black/10 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/15 dark:hover:text-white">
-          <Globe size={15} />
+        <button type="button" aria-label="Generate an AI page" title="Generate an AI page  ⇧↵" onClick={() => activeTab && go(activeTab.id, activeTab.query, { ai: true })} className="inline-flex h-7 w-7 mr-1 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-black/10 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/15 dark:hover:text-white">
+          <Sparkles size={15} />
         </button>
         <button type="submit" aria-label="Go" className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-white transition hover:opacity-85 dark:bg-white dark:text-neutral-900">
           <ArrowRight size={15} />
@@ -1292,15 +1294,15 @@ export function App() {
           value={activeTab?.query ?? ''}
           onChange={(e) => activeTab && patchTab(activeTab.id, { query: e.target.value })}
           onKeyDown={onSearchKeyDown}
-          placeholder="Search the web, ask a question, or enter a URL…"
+          placeholder="Search or enter a URL  —  ⇧↵ to ask the model…"
           spellCheck={false}
           autoComplete="off"
           autoFocus
           aria-label="Search"
           className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-neutral-400"
         />
-        <button type="button" aria-label="Search the web" title="Search the web" onClick={() => activeTab && go(activeTab.id, activeTab.query, { web: true })} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-black/10 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/15 dark:hover:text-white mr-1.5">
-          <Globe size={18} />
+        <button type="button" aria-label="Generate an AI page" title="Generate an AI page  ⇧↵" onClick={() => activeTab && go(activeTab.id, activeTab.query, { ai: true })} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-black/10 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/15 dark:hover:text-white mr-1.5">
+          <Sparkles size={18} />
         </button>
         <button type="submit" aria-label="Go" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-white transition hover:opacity-85 dark:bg-white dark:text-neutral-900 mr-1">
           <ArrowRight size={18} />

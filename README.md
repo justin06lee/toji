@@ -97,6 +97,12 @@ make update   # stop, rebuild, reinstall, relaunch
 make check    # typecheck + smoke + build + e2e
 ```
 
+## The omnibox
+
+Enter searches DuckDuckGo (or Google, Bing, Brave, Startpage — your pick) or navigates, the
+way any browser does. **Shift+Enter** hands the query to the model instead, which builds an
+answer page with its sources; the ✨ button does the same thing with the mouse.
+
 ## The agent
 
 A local model can drive any page: click, type, scroll, navigate, upload a file, and take a
