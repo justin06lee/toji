@@ -24,8 +24,9 @@ import {
 } from '../lib/api';
 import type { AgentChoice, AgentId, AgentsStatus, InternalPage as InternalPageKind, ThinkingLevel, UserSettings } from '../types';
 import type { CredentialSet, CredentialStore } from '../lib/credentials';
-import { bridge, type TorStatus } from '../lib/bridge';
+import { bridge, type TorStatus, type VaultEntry, type VaultStatus } from '../lib/bridge';
 import { CONTAINER_COLORS, containerId as makeContainerId, type Container, type Egress } from '../lib/containers';
+import { VaultUnavailable } from './VaultBar';
 import { SEARCH_ENGINES, type SearchEngineId } from '../lib/nav';
 import { Dropdown, type DropdownOption } from './Dropdown';
 
@@ -284,6 +285,7 @@ function SettingsView({
       <h1 className="mb-8 text-2xl font-semibold tracking-tight">Settings</h1>
       <ContainersSettings containers={containers} onChange={onContainersChange} onClear={onClearContainer} />
       <TorSettings />
+      <VaultSettings containers={containers} />
       <AgentSettings />
       <SearchSettings />
       <CredentialsSettings store={store} onChange={onChange} />
@@ -495,6 +497,111 @@ function TorSettings() {
         Tor protects what the network can see about you. It does not make this browser indistinguishable from other
         browsers &mdash; for a threat model where that matters, use the Tor Browser.
       </p>
+    </Section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Passwords
+// ---------------------------------------------------------------------------
+function VaultSettings({ containers }: { containers: Container[] }) {
+  const [status, setStatus] = useState<VaultStatus | null>(null);
+  const [entries, setEntries] = useState<VaultEntry[]>([]);
+  const [generated, setGenerated] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const refresh = useCallback(async () => {
+    const s = await bridge().vaultStatus?.();
+    if (s) setStatus(s);
+    const listed = await bridge().vaultList?.();
+    if (listed?.ok) setEntries(listed.value);
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const remove = async (id: string) => {
+    await bridge().vaultDelete?.(id);
+    void refresh();
+  };
+
+  const generate = async () => {
+    const password = await bridge().vaultGenerate?.(20);
+    if (password) {
+      setGenerated(password);
+      setCopied(false);
+    }
+  };
+
+  const copy = async () => {
+    await navigator.clipboard.writeText(generated);
+    setCopied(true);
+  };
+
+  const nameOf = (containerId: string | null) => containers.find((c) => c.id === containerId) ?? null;
+
+  return (
+    <Section icon={<KeyRound size={15} />} title="Passwords">
+      <p className="mb-4 text-[13px] leading-relaxed text-neutral-500 dark:text-neutral-400">
+        Saved logins are encrypted with your operating system&rsquo;s keychain and are scoped to the container they were saved
+        in &mdash; a credential saved in Work is never offered in Personal. Passwords are held in Toji&rsquo;s main process and
+        are filled straight into the page: the browser UI (and the AI agent driving it) can see which accounts exist, but
+        never the passwords themselves.
+      </p>
+
+      {status && !status.available ? (
+        <VaultUnavailable message={status.error ?? 'The vault is unavailable on this system.'} />
+      ) : (
+        <>
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <button type="button" onClick={generate} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-black/10 px-2.5 text-[12px] transition hover:border-black/25 dark:border-white/12 dark:hover:border-white/30">
+              <RefreshCw size={12} />
+              Generate a password
+            </button>
+            {generated && (
+              <button type="button" onClick={copy} title="Copy to clipboard" className="inline-flex h-8 min-w-0 items-center gap-2 rounded-lg border border-black/10 px-2.5 font-mono text-[12px] transition hover:border-black/25 dark:border-white/12 dark:hover:border-white/30">
+                <span className="truncate">{generated}</span>
+                {copied ? <Check size={12} className="shrink-0 text-emerald-500" /> : <Download size={12} className="shrink-0 text-neutral-400" />}
+              </button>
+            )}
+          </div>
+
+          {entries.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-black/10 p-4 text-center text-[13px] text-neutral-400 dark:border-white/12">
+              No saved logins yet. Sign in to a site and Toji will offer to save it.
+            </p>
+          ) : (
+            <div className="divide-y divide-black/[0.07] rounded-xl border border-black/10 dark:divide-white/10 dark:border-white/12">
+              {entries.map((entry) => {
+                const container = nameOf(entry.containerId);
+                return (
+                  <div key={entry.id} className="flex items-center gap-3 p-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px]">{entry.origin.replace(/^https?:\/\//, '')}</p>
+                      <p className="truncate text-[12px] text-neutral-400">{entry.username || '(no username)'}</p>
+                    </div>
+                    {container && (
+                      <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-black/10 px-2 py-0.5 text-[11px] text-neutral-500 dark:border-white/12 dark:text-neutral-400">
+                        <span className="h-1.5 w-1.5 rounded-full" style={{ background: container.color }} />
+                        {container.name}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => remove(entry.id)}
+                      aria-label={`Delete the login for ${entry.origin}`}
+                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-neutral-400 transition hover:bg-black/[0.06] hover:text-neutral-900 dark:hover:bg-white/10 dark:hover:text-white"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
     </Section>
   );
 }

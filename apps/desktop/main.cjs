@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, ipcMain, shell, nativeImage, webContents, dial
 const { spawn } = require('node:child_process');
 const { applySessionPolicy, applyWebRtcPolicy, parsePartition } = require('./policy.cjs');
 const { TorController } = require('./tor.cjs');
+const { Vault, generatePassword } = require('./vault.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -247,6 +248,106 @@ function attachContainerPolicy(hostContents) {
     }
   });
 }
+
+// --- Password vault ----------------------------------------------------------
+// Secrets live only in the main process. The renderer may list entries and ask for one
+// to be filled, but a password travels main → guest page and is never handed to the
+// renderer — so neither a compromised renderer nor the AI agent can read one.
+
+let vault = null;
+function getVault() {
+  if (!vault) {
+    vault = new Vault({
+      file: path.join(app.getPath('userData'), 'vault.bin'),
+      safeStorage: require('electron').safeStorage,
+      log: appendServerLog
+    });
+  }
+  return vault;
+}
+
+/** Wrap a vault call so a failure surfaces as a message instead of an unhandled throw. */
+function vaultTry(fn) {
+  try {
+    return { ok: true, value: fn(getVault()) };
+  } catch (error) {
+    appendServerLog(`vault error: ${error && error.message}`);
+    return { ok: false, error: String((error && error.message) || error) };
+  }
+}
+
+ipcMain.handle('toji:vault-status', () => {
+  const v = getVault();
+  const available = v.available();
+  if (!available) {
+    return { available: false, count: 0, error: 'This system offers no OS-backed encryption, so the vault is disabled.' };
+  }
+  const result = vaultTry((vlt) => vlt.list().length);
+  return result.ok ? { available: true, count: result.value } : { available: true, count: 0, error: result.error };
+});
+ipcMain.handle('toji:vault-list', (_event, containerId) => vaultTry((v) => v.list(containerId)));
+ipcMain.handle('toji:vault-matches', (_event, { url, containerId }) => vaultTry((v) => v.matchesFor(url, containerId)));
+ipcMain.handle('toji:vault-save', (_event, entry) => vaultTry((v) => v.save(entry)));
+ipcMain.handle('toji:vault-delete', (_event, id) => vaultTry((v) => v.remove(id)));
+ipcMain.handle('toji:vault-generate', (_event, length) => generatePassword(Math.min(Math.max(Number(length) || 20, 8), 128)));
+
+/** The container a guest webContents belongs to, derived from its session's partition. */
+function containerOf(wc) {
+  try {
+    const name = sessionPartitions.get(wc.session);
+    const policy = name ? parsePartition(name) : null;
+    return policy ? policy.id : null;
+  } catch {
+    return null;
+  }
+}
+
+// A credential the user just submitted, held in the main process until they decide.
+// Keyed by webContents id. The renderer is told only the origin and username.
+const pendingCaptures = new Map();
+
+ipcMain.handle('toji:vault-captured', (event, { url, username, password }) => {
+  const wc = event.sender;
+  const containerId = containerOf(wc);
+  const result = vaultTry((v) => v.captureStatus({ origin: url, username, password, containerId }));
+  if (!result.ok || result.value === 'ignore' || result.value === 'same') return false;
+
+  pendingCaptures.set(wc.id, { url, username, password, containerId });
+  wc.once('destroyed', () => pendingCaptures.delete(wc.id));
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('toji:vault-prompt', {
+      webContentsId: wc.id,
+      origin: require('./vault.cjs').originOf(url),
+      username: username || '',
+      containerId,
+      status: result.value
+    });
+  }
+  return true;
+});
+
+// Commit a held credential. The secret never left the main process.
+ipcMain.handle('toji:vault-commit', (_event, webContentsId) => {
+  const pending = pendingCaptures.get(webContentsId);
+  if (!pending) return { ok: false, error: 'nothing to save' };
+  pendingCaptures.delete(webContentsId);
+  return vaultTry((v) =>
+    v.save({ origin: pending.url, username: pending.username, password: pending.password, containerId: pending.containerId })
+  );
+});
+ipcMain.handle('toji:vault-dismiss', (_event, webContentsId) => pendingCaptures.delete(webContentsId));
+
+// Fill a credential into a guest page. The origin is re-checked here against the page's
+// CURRENT url, so a navigation between the user's click and this call cannot steer a
+// password to a different site.
+ipcMain.handle('toji:vault-fill', (_event, { webContentsId, entryId }) => {
+  const wc = webContents.fromId(webContentsId);
+  if (!wc || wc.isDestroyed()) return false;
+  const result = vaultTry((v) => v.secretFor(entryId, wc.getURL()));
+  if (!result.ok || !result.value) return false;
+  wc.send('toji-vault:fill', result.value);
+  return true;
+});
 
 // --- Tor ---------------------------------------------------------------------
 
