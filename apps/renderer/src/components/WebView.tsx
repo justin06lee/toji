@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { bridge } from '../lib/bridge';
 import { SWIPE_NAV_JS } from '../lib/swipeNav';
 
 interface WebViewProps {
@@ -10,6 +11,8 @@ interface WebViewProps {
   onLoadingChange: (loading: boolean) => void;
   onHistory?: (canBack: boolean, canForward: boolean) => void;
   onFavicon?: (url: string | undefined) => void;
+  /** Messages from the guest preload (login-form detection, submitted credentials). */
+  onGuestMessage?: (channel: string, payload: unknown) => void;
   // Register the underlying <webview> element so the web agent can drive it
   // (executeJavaScript / capturePage) even while this tab is inactive.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -23,7 +26,7 @@ interface WebViewProps {
  * the address bar and tab stay in sync; popups are routed into Toji by the main
  * process (web-contents-created → setWindowOpenHandler).
  */
-export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadingChange, onHistory, onFavicon, onRegister }: WebViewProps) {
+export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadingChange, onHistory, onFavicon, onGuestMessage, onRegister }: WebViewProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ref = useRef<any>(null);
   const registerRef = useRef(onRegister);
@@ -68,6 +71,9 @@ export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadin
       reportHistory();
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const onIpc = (e: any) => onGuestMessage?.(e?.channel, e?.args?.[0]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const onFailLoad = (e: any) => {
       // -3 = ERR_ABORTED (a navigation was superseded) — harmless, ignore.
       if (e?.errorCode === -3 || e?.isMainFrame === false) return;
@@ -81,6 +87,7 @@ export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadin
     el.addEventListener('page-favicon-updated', onFaviconUpdated);
     el.addEventListener('dom-ready', onDomReady);
     el.addEventListener('did-fail-load', onFailLoad);
+    el.addEventListener('ipc-message', onIpc);
     return () => {
       el.removeEventListener('did-start-loading', onStart);
       el.removeEventListener('did-stop-loading', onStop);
@@ -90,8 +97,9 @@ export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadin
       el.removeEventListener('page-favicon-updated', onFaviconUpdated);
       el.removeEventListener('dom-ready', onDomReady);
       el.removeEventListener('did-fail-load', onFailLoad);
+      el.removeEventListener('ipc-message', onIpc);
     };
-  }, [onHistory, onLoadingChange, onNavigate, onTitle, onFavicon]);
+  }, [onHistory, onLoadingChange, onNavigate, onTitle, onFavicon, onGuestMessage]);
 
   return (
     <div className="relative flex min-h-0 flex-1">
@@ -102,7 +110,16 @@ export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadin
       )}
       {/* backgroundThrottling=false keeps timers/JS running at full speed when this tab is
           backgrounded, so an agent can keep working on it after you switch tabs. */}
-      <webview ref={ref} src={url} partition={partition} webpreferences="backgroundThrottling=false" className="flex min-h-0 flex-1 bg-white dark:bg-neutral-950" />
+      {/* The guest preload is the page-side half of the password manager (see
+          apps/desktop/guest-preload.cjs). Absent outside the Electron shell. */}
+      <webview
+        ref={ref}
+        src={url}
+        partition={partition}
+        preload={bridge().guestPreload}
+        webpreferences="backgroundThrottling=false"
+        className="flex min-h-0 flex-1 bg-white dark:bg-neutral-950"
+      />
     </div>
   );
 }

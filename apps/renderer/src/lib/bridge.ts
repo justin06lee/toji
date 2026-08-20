@@ -18,6 +18,44 @@ export interface TorStatus {
   isolated?: boolean;
 }
 
+/** Vault calls return either a value or a message; they never throw across IPC. */
+export type VaultResult<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/** Credential metadata. Never carries the password. */
+export interface VaultEntry {
+  id: string;
+  origin: string;
+  username: string;
+  containerId: string | null;
+  updatedAt?: string;
+  note?: string;
+}
+
+export interface VaultDraft {
+  id?: string;
+  origin: string;
+  username: string;
+  password: string;
+  containerId?: string | null;
+  note?: string;
+}
+
+/** A login the user just submitted, waiting on their decision. Carries no password. */
+export interface VaultPrompt {
+  webContentsId: number;
+  origin: string;
+  username: string;
+  containerId: string | null;
+  status: 'new' | 'update';
+}
+
+export interface VaultStatus {
+  /** False when the OS offers no keychain-backed encryption; the vault is then disabled. */
+  available: boolean;
+  count: number;
+  error?: string;
+}
+
 export interface TojiBridge {
   platform?: string;
   setDefaultBrowser?: () => Promise<boolean>;
@@ -31,6 +69,22 @@ export interface TojiBridge {
   setContainers?: (containers: Container[]) => void;
   /** Erase every cookie, cache entry and storage bucket a container holds. */
   clearContainer?: (containerId: string) => Promise<boolean>;
+
+  // --- password vault ---
+  // There is deliberately no "read a password" call: the renderer can see which
+  // credentials exist and ask for one to be filled, but never receives a secret.
+  vaultStatus?: () => Promise<VaultStatus>;
+  vaultList?: (containerId?: string | null) => Promise<VaultResult<VaultEntry[]>>;
+  vaultMatches?: (url: string, containerId?: string | null) => Promise<VaultResult<VaultEntry[]>>;
+  vaultSave?: (entry: VaultDraft) => Promise<VaultResult<boolean>>;
+  vaultDelete?: (id: string) => Promise<VaultResult<boolean>>;
+  vaultGenerate?: (length?: number) => Promise<string>;
+  vaultFill?: (webContentsId: number, entryId: string) => Promise<boolean>;
+  vaultCommit?: (webContentsId: number) => Promise<VaultResult<boolean>>;
+  vaultDismiss?: (webContentsId: number) => Promise<boolean>;
+  onVaultPrompt?: (callback: (prompt: VaultPrompt) => void) => () => void;
+  /** file:// URL of the preload every <webview> guest loads. */
+  guestPreload?: string;
 
   // --- tor ---
   torStatus?: () => Promise<TorStatus>;

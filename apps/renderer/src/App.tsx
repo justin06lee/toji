@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { AgentSpotlight, type AgentLogEntry } from './components/AgentSpotlight';
 import { ContainerPicker } from './components/ContainerPicker';
 import { TorStatusBar } from './components/TorStatusBar';
+import { VaultFillButton, VaultPromptBar } from './components/VaultBar';
 import { credentialDirectory, loadCredentials, resolveSecrets, saveCredentials, unresolvedPlaceholders, type CredentialStore } from './lib/credentials';
 import { InternalPage } from './components/InternalPage';
 import { PageView } from './components/PageView';
@@ -22,7 +23,7 @@ import {
   type Container
 } from './lib/containers';
 import { hostOf, isOnionUrl, looksLikeUrl, toUrl, webSearchUrl, type SearchEngineId } from './lib/nav';
-import { bridge, type TorStatus } from './lib/bridge';
+import { bridge, type TorStatus, type VaultEntry, type VaultPrompt } from './lib/bridge';
 import { GROUP_COLORS, type BrowserTab, type TabGroup } from './types';
 
 interface AgentState {
@@ -88,6 +89,9 @@ export function App() {
   // next tab a brand-new store.
   const [containerEpochs, setContainerEpochs] = useState<Record<string, number>>({});
   const [torStatus, setTorStatus] = useState<TorStatus>({ ready: false, state: 'off', progress: 0, detail: 'Tor is not running' });
+  // Saved credentials that match the page each tab is on (metadata only — no passwords).
+  const [vaultMatches, setVaultMatches] = useState<Record<string, VaultEntry[]>>({});
+  const [vaultPrompt, setVaultPrompt] = useState<VaultPrompt | null>(null);
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
   const activeRef = useRef(activeId);
@@ -108,6 +112,9 @@ export function App() {
     void bridge().torStatus?.().then(setTorStatus);
     return bridge().onTorStatus?.(setTorStatus);
   }, []);
+
+  // A login the user submitted; the password stays in the main process until they say so.
+  useEffect(() => bridge().onVaultPrompt?.(setVaultPrompt), []);
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
   const activeContainer = findContainer(containers, activeTab?.containerId);
@@ -302,6 +309,11 @@ export function App() {
       const index = current.findIndex((t) => t.id === id);
       const next = current.filter((t) => t.id !== id);
       setTabs(next);
+      setVaultMatches((m) => {
+        if (!(id in m)) return m;
+        const { [id]: _gone, ...rest } = m;
+        return rest;
+      });
       if (id === activeRef.current) setActiveId(next[Math.min(index, next.length - 1)].id);
       const surviving = new Set(next.map((t) => t.groupId).filter(Boolean) as string[]);
       setGroups((gs) => gs.filter((g) => surviving.has(g.id)));
@@ -483,6 +495,28 @@ export function App() {
     localStorage.setItem('toji.agentMaxSteps', String(agentMaxSteps));
     localStorage.setItem('toji.agentNoLimit', agentNoLimit ? '1' : '0');
   }, [agentMaxSteps, agentNoLimit]);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  /** Messages from a tab's guest preload (see apps/desktop/guest-preload.cjs). */
+  const onGuestMessage = useCallback((tabId: string, channel: string, payload: unknown) => {
+    if (channel !== 'toji-vault:form') return;
+    const { hasLogin, url } = (payload ?? {}) as { hasLogin?: boolean; url?: string };
+    if (!hasLogin || !url) {
+      setVaultMatches((m) => (m[tabId]?.length ? { ...m, [tabId]: [] } : m));
+      return;
+    }
+    const tab = tabsRef.current.find((t) => t.id === tabId);
+    void bridge()
+      .vaultMatches?.(url, tab?.containerId ?? null)
+      .then((result) => setVaultMatches((m) => ({ ...m, [tabId]: result?.ok ? result.value : [] })));
+  }, []);
+
+  /** Ask the main process to fill a credential into a tab's page. */
+  const fillCredential = useCallback((tabId: string, entryId: string) => {
+    const wv = webviewRefs.current[tabId] as unknown as { getWebContentsId?: () => number } | undefined;
+    const wcId = wv?.getWebContentsId?.();
+    if (wcId) void bridge().vaultFill?.(wcId, entryId);
+  }, []);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const registerWebview = useCallback((tabId: string, el: any | null) => {
@@ -1188,6 +1222,9 @@ export function App() {
   );
 
   const torBar = activeContainer.egress === 'tor' ? <TorStatusBar container={activeContainer} status={torStatus} /> : null;
+  const vaultBar = vaultPrompt ? (
+    <VaultPromptBar prompt={vaultPrompt} container={findContainer(containers, vaultPrompt.containerId ?? undefined)} onDone={() => setVaultPrompt(null)} />
+  ) : null;
 
   const addressRow = (
     // In side-tab mode the omnibox row is the topmost row, so it needs the macOS traffic-light
@@ -1225,6 +1262,7 @@ export function App() {
           aria-label="Search"
           className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-neutral-400"
         />
+        {activeTab && <VaultFillButton matches={vaultMatches[activeTab.id] ?? []} onFill={(entryId) => fillCredential(activeTab.id, entryId)} />}
         <button type="button" aria-label="Search the web" title="Search the web" onClick={() => activeTab && go(activeTab.id, activeTab.query, { web: true })} className="inline-flex h-7 w-7 mr-1 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-black/10 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/15 dark:hover:text-white">
           <Globe size={15} />
         </button>
@@ -1316,6 +1354,7 @@ export function App() {
                 onLoadingChange={(l) => patchTab(tab.id, { status: l ? 'loading' : 'ready' })}
                 onHistory={(canBack, canForward) => patchTab(tab.id, { canBack, canForward })}
                 onFavicon={(favicon) => patchTab(tab.id, { favicon })}
+                onGuestMessage={(channel, payload) => onGuestMessage(tab.id, channel, payload)}
                 onRegister={(el) => registerWebview(tab.id, el)}
               />
             </div>
@@ -1515,6 +1554,8 @@ export function App() {
         <header className="drag shrink-0 border-b border-black/[0.07] px-3 pt-2.5 pb-2.5 dark:border-white/10">
           {addressRow}
           {torBar && <div className="mt-2">{torBar}</div>}
+        {vaultBar && <div className="mt-2">{vaultBar}</div>}
+          {vaultBar && <div className="mt-2">{vaultBar}</div>}
         </header>
         <div className="relative flex min-h-0 flex-1">
           {sidebarOpen && sidebarEl()}
