@@ -32,6 +32,14 @@ contextBridge.exposeInMainWorld('toji', {
     ipcRenderer.on('toji:toggle-agent', handler);
     return () => ipcRenderer.removeListener('toji:toggle-agent', handler);
   },
+  // Window-relative cursor position, streamed from the main process while this window
+  // is focused. DOM mouse events go missing over native drag regions, so the top-edge
+  // window-drag notch reveals from this instead of hover state.
+  onWindowCursor: (callback) => {
+    const handler = (_event, cursor) => callback(cursor);
+    ipcRenderer.on('toji:window-cursor', handler);
+    return () => ipcRenderer.removeListener('toji:window-cursor', handler);
+  },
   // Set a dropped file onto a <input type=file> inside a guest <webview> (the agent
   // attaching e.g. a resume). Done in the main process via the Chrome DevTools
   // Protocol because the renderer can't set a file input programmatically.
