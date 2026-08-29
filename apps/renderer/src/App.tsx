@@ -10,6 +10,7 @@ import { VaultFillButton, VaultPromptBar } from './components/VaultBar';
 import { InternalPage } from './components/InternalPage';
 import { PageView } from './components/PageView';
 import { Sidebar } from './components/Sidebar';
+import { TabStatus } from './components/TabStatus';
 import { WebView } from './components/WebView';
 import { addMemory, agentResearch, agentStep, fetchPageSources, getReferences, librarian, pageStreamUrl, uploadFile } from './lib/api';
 import { eyesAct, eyesAvailable, pageScreenshot, toPagePoint, PAGE_SIGNATURE_JS } from './lib/agentDom';
@@ -101,14 +102,6 @@ function LandingSearch({ onGo, onAi, torActive, onTorToggle }: { onGo: (value: s
 }
 
 /** A tab's icon: the site's favicon for web tabs (falling back to the Toji mark), else the Toji mark. */
-function TabFavicon({ tab }: { tab: BrowserTab }) {
-  const [errored, setErrored] = useState(false);
-  useEffect(() => setErrored(false), [tab.favicon]);
-  if (tab.mode === 'web' && tab.favicon && !errored) {
-    return <img src={tab.favicon} alt="" aria-hidden className="h-4 w-4 shrink-0 rounded-[4px]" onError={() => setErrored(true)} />;
-  }
-  return <img src={ICON} alt="" aria-hidden className="h-4 w-4 shrink-0 rounded-[5px]" />;
-}
 
 // Alternates the side each cursor arc bows toward, so repeated moves don't look mechanical.
 let bowSign = 1;
@@ -1611,6 +1604,9 @@ export function App() {
       );
     })();
 
+  // Which tabs the agent is driving — the side strip marks them the same way the top one does.
+  const agentTabIds = new Set(Object.entries(agents).filter(([, a]) => a?.running).map(([id]) => id));
+
   const sidebarEl = (peek = false) => (
     <Sidebar
       tabs={tabs}
@@ -1640,6 +1636,7 @@ export function App() {
           return cur.map((t) => (t.groupId ? t : ordered[k++] ?? t));
         })
       }
+      agentTabIds={agentTabIds}
     />
   );
 
@@ -1739,17 +1736,15 @@ export function App() {
                 }}
                 whileDrag={{ cursor: 'grabbing', zIndex: 90 }}
                 className={`no-drag group relative flex h-8 w-[210px] min-w-[120px] max-w-[210px] flex-[1_1_210px] cursor-grab items-center gap-2 overflow-hidden rounded-xl px-2.5 transition-colors ${
-                  draggingTopTabId === tab.id
-                    ? 'top-tab-dragging bg-black/[0.06] dark:bg-white/[0.12]'
-                    : tab.id === activeId
-                      ? 'bg-black/[0.06] dark:bg-white/[0.12]'
-                      : 'bg-black/[0.02] text-neutral-500 hover:bg-black/[0.035] dark:bg-white/[0.03] dark:text-neutral-400 dark:hover:bg-white/[0.06]'
+                  draggingTopTabId === tab.id || tab.id === activeId
+                    ? `bg-[var(--tab-active)]${draggingTopTabId === tab.id ? ' top-tab-dragging' : ''}`
+                    : 'bg-[var(--tab)] text-neutral-500 hover:bg-[var(--tab-hover)] dark:text-neutral-400'
                 }`}
               >
-                {color ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} /> : <TabFavicon tab={tab} />}
+                {/* Status lives in the LEADING slot, in place of the favicon: a fixed spot that
+                    can't be squeezed out as tabs shrink, the way trailing badges were. */}
+                <TabStatus tab={tab} color={color} agentRunning={Boolean(agents[tab.id]?.running)} />
                 <span className="flex-1 truncate text-[13px]">{tabTitle(tab)}</span>
-                {agents[tab.id]?.running && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500" title="Agent working" />}
-                {tab.status === 'loading' && <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-[1.5px] border-current/30 border-t-current" />}
                 <button
                   type="button"
                   aria-label="Close tab"

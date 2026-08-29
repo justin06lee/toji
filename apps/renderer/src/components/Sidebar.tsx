@@ -2,9 +2,8 @@ import { ChevronDown, ChevronRight, FolderPlus, PanelLeftClose, PanelLeftOpen, P
 import { useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { motion, Reorder } from 'motion/react';
 import { tabTitle } from '../lib/tabPresentation';
+import { TabStatus } from './TabStatus';
 import { GROUP_COLORS, type BrowserTab, type TabGroup } from '../types';
-
-const ICON = `${import.meta.env.BASE_URL}toji-round.png`;
 
 interface SidebarProps {
   tabs: BrowserTab[];
@@ -26,6 +25,8 @@ interface SidebarProps {
   onTabContextMenu: (tabId: string, x: number, y: number) => void;
   /** Reorder the ungrouped tabs (drag along the Y axis). */
   onReorderUngrouped?: (ordered: BrowserTab[]) => void;
+  /** Tabs the agent is currently driving — shown with the agent cursor in place of the favicon. */
+  agentTabIds?: Set<string>;
 }
 
 function TabRow({
@@ -35,7 +36,8 @@ function TabRow({
   onSelect,
   onClose,
   onContext,
-  dragging = false
+  dragging = false,
+  agentRunning = false
 }: {
   tab: BrowserTab;
   active: boolean;
@@ -44,22 +46,18 @@ function TabRow({
   onClose: () => void;
   onContext: (e: ReactMouseEvent) => void;
   dragging?: boolean;
+  agentRunning?: boolean;
 }) {
   return (
     <div
       onClick={onSelect}
       onContextMenu={onContext}
       className={`no-drag group/tab flex h-8 items-center gap-2 rounded-lg px-2 ${indent ? 'ml-4 cursor-pointer' : 'cursor-grab active:cursor-grabbing'} ${
-        dragging || active ? 'bg-black/[0.06] dark:bg-white/[0.12]' : 'text-neutral-500 hover:bg-black/[0.035] dark:text-neutral-400 dark:hover:bg-white/[0.06]'
+        dragging || active ? 'bg-[var(--tab-active)]' : 'text-neutral-500 hover:bg-[var(--tab-hover)] dark:text-neutral-400'
       }`}
     >
-      {tab.mode === 'web' && tab.favicon ? (
-        <img src={tab.favicon} alt="" aria-hidden className="h-4 w-4 shrink-0 rounded-[4px]" onError={(e) => ((e.currentTarget as HTMLImageElement).src = ICON)} />
-      ) : (
-        <img src={ICON} alt="" aria-hidden className="h-4 w-4 shrink-0 rounded-[5px]" />
-      )}
+      <TabStatus tab={tab} agentRunning={agentRunning} />
       <span className={`flex-1 truncate text-[13px] ${active ? 'text-neutral-900 dark:text-neutral-100' : ''}`}>{tabTitle(tab)}</span>
-      {tab.status === 'loading' && <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-[1.5px] border-current/30 border-t-current" />}
       <button
         type="button"
         aria-label="Close tab"
@@ -166,7 +164,7 @@ function SidebarNewButton({ onNewTab, onNewGroup, onNewAgentTab }: { onNewTab: (
   );
 }
 
-export function Sidebar({ tabs, groups, activeId, onSelect, onClose, onNewTab, onNewGroup, onNewAgentTab, peek, onToggleCollapse, onToggleGroup, onRenameGroup, onRemoveGroup, onTabContextMenu, onReorderUngrouped }: SidebarProps) {
+export function Sidebar({ tabs, groups, activeId, onSelect, onClose, onNewTab, onNewGroup, onNewAgentTab, peek, onToggleCollapse, onToggleGroup, onRenameGroup, onRemoveGroup, onTabContextMenu, onReorderUngrouped, agentTabIds }: SidebarProps) {
   const contextHandler = (tabId: string) => (e: ReactMouseEvent) => {
     e.preventDefault();
     onTabContextMenu(tabId, e.clientX, e.clientY);
@@ -240,7 +238,7 @@ export function Sidebar({ tabs, groups, activeId, onSelect, onClose, onNewTab, o
               </div>
               {!group.collapsed &&
                 groupTabs.map((tab) => (
-                  <TabRow key={tab.id} tab={tab} active={tab.id === activeId} indent onSelect={() => onSelect(tab.id)} onClose={() => onClose(tab.id)} onContext={contextHandler(tab.id)} />
+                  <TabRow key={tab.id} tab={tab} active={tab.id === activeId} indent agentRunning={agentTabIds?.has(tab.id)} onSelect={() => onSelect(tab.id)} onClose={() => onClose(tab.id)} onContext={contextHandler(tab.id)} />
                 ))}
             </div>
           );
@@ -250,7 +248,7 @@ export function Sidebar({ tabs, groups, activeId, onSelect, onClose, onNewTab, o
         {/* Ungrouped tabs drag-reorder along the Y axis only (vertical list). */}
         <Reorder.Group ref={ungroupedListRef} as="div" axis="y" values={ungrouped} onReorder={(o) => onReorderUngrouped?.(o)} layoutScroll data-testid="sidebar-tab-list" className="space-y-0.5">
           {ungrouped.map((tab) => (
-            <DraggableTabRow key={tab.id} tab={tab} active={tab.id === activeId} constraintsRef={ungroupedListRef} onSelect={() => onSelect(tab.id)} onClose={() => onClose(tab.id)} onContext={contextHandler(tab.id)} />
+            <DraggableTabRow key={tab.id} tab={tab} active={tab.id === activeId} agentRunning={agentTabIds?.has(tab.id)} constraintsRef={ungroupedListRef} onSelect={() => onSelect(tab.id)} onClose={() => onClose(tab.id)} onContext={contextHandler(tab.id)} />
           ))}
         </Reorder.Group>
         <SidebarNewButton onNewTab={() => onNewTab(null)} onNewGroup={onNewGroup} onNewAgentTab={onNewAgentTab} />
@@ -259,7 +257,7 @@ export function Sidebar({ tabs, groups, activeId, onSelect, onClose, onNewTab, o
   );
 }
 
-function DraggableTabRow({ tab, active, constraintsRef, onSelect, onClose, onContext }: { tab: BrowserTab; active: boolean; constraintsRef: RefObject<HTMLDivElement | null>; onSelect: () => void; onClose: () => void; onContext: (e: ReactMouseEvent) => void }) {
+function DraggableTabRow({ tab, active, constraintsRef, agentRunning, onSelect, onClose, onContext }: { tab: BrowserTab; active: boolean; constraintsRef: RefObject<HTMLDivElement | null>; agentRunning?: boolean; onSelect: () => void; onClose: () => void; onContext: (e: ReactMouseEvent) => void }) {
   const [dragging, setDragging] = useState(false);
   return (
     <Reorder.Item
@@ -276,9 +274,9 @@ function DraggableTabRow({ tab, active, constraintsRef, onSelect, onClose, onCon
       }}
       onDragEnd={() => setDragging(false)}
       whileDrag={{ zIndex: 50 }}
-      className={`relative rounded-lg ${dragging ? 'sidebar-tab-dragging bg-black/[0.06] dark:bg-white/[0.12]' : ''}`}
+      className={`relative rounded-lg ${dragging ? 'sidebar-tab-dragging bg-[var(--tab-active)]' : ''}`}
     >
-      <TabRow tab={tab} active={active} indent={false} dragging={dragging} onSelect={onSelect} onClose={onClose} onContext={onContext} />
+      <TabRow tab={tab} active={active} indent={false} dragging={dragging} agentRunning={agentRunning} onSelect={onSelect} onClose={onClose} onContext={onContext} />
     </Reorder.Item>
   );
 }
