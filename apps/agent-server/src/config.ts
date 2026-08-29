@@ -20,15 +20,19 @@ function numEnv(name: string, fallback: number) {
 const projectRoot = process.cwd();
 
 // Toji's "model" is the embedded yagami engine (the signed-in coding-agent CLIs on
-// this machine — no keys) or a custom OpenAI-compatible endpoint configured in the
-// UI. TOJI_AGENT=off forces the deterministic demo/heuristic fallbacks; any legacy
-// value (claude/codex/opencode/…) means yagami now, which drives those same CLIs.
+// this machine — no keys), Cerebras, or a custom OpenAI-compatible endpoint configured
+// in the UI. TOJI_AGENT=off forces the deterministic demo/heuristic fallbacks; any
+// legacy value (claude/codex/opencode/…) means yagami now, which drives those same CLIs.
 const rawAgent = (process.env.TOJI_AGENT ?? 'yagami').trim().toLowerCase();
+const AGENT_CHOICES = new Set(['off', 'local', 'cerebras', 'yagami']);
 
 export const config = {
   appName: 'Toji',
   port: numEnv('PORT', 8788),
-  agent: (rawAgent === 'off' ? 'off' : rawAgent === 'local' ? 'local' : 'yagami') as 'yagami' | 'local' | 'off',
+  agent: (AGENT_CHOICES.has(rawAgent) ? rawAgent : 'yagami') as 'yagami' | 'cerebras' | 'local' | 'off',
+  // Cerebras key from the environment (.env.local). Used as a fallback when Settings
+  // holds no key, and deliberately never copied into settings.json — one secret, one home.
+  cerebrasApiKey: (process.env.CEREBRAS_API_KEY ?? '').trim(),
   agentTimeoutMs: Math.max(5_000, numEnv('TOJI_AGENT_TIMEOUT_MS', 120_000)),
   maxAgentTabs: Math.max(1, numEnv('MAX_AGENT_TABS', 8)),
   maxSpeculativeTabs: Math.max(0, numEnv('MAX_SPECULATIVE_TABS', 2)),

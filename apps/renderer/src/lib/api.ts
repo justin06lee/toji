@@ -1,4 +1,4 @@
-import type { AgentsStatus, AppConfig, ModelCatalog, PageSource, PredictionResult, ResearchMode, ResearchOptions, ResearchSessionState, ServerEvent, UserSettings } from '../types';
+import type { AgentsStatus, AppConfig, CerebrasModels, ModelCatalog, PageSource, PredictionResult, ResearchMode, ResearchOptions, ResearchSessionState, ServerEvent, UserSettings } from '../types';
 import type { AgentStepResult } from './agentDom';
 
 const DEFAULT_BASE = 'http://127.0.0.1:8788';
@@ -41,6 +41,11 @@ export function getAgents() {
 /** Every model every installed coding CLI reports. `refresh` re-probes the harnesses. */
 export function getAgentModels(refresh = false) {
   return jsonFetch<ModelCatalog>(`/api/agents/models${refresh ? '?refresh=1' : ''}`);
+}
+
+/** Cerebras models the server's key can reach (the key stays server-side). */
+export function getCerebrasModels(refresh = false) {
+  return jsonFetch<CerebrasModels>(`/api/agents/cerebras-models${refresh ? '?refresh=1' : ''}`);
 }
 
 // --- Memory management ---

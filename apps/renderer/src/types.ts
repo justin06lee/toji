@@ -307,9 +307,10 @@ export type ServerEvent = (
   | { type: 'page_sources'; pageId: string; sources: PageSource[] }
 ) & { at?: string };
 
-/** 'yagami' embeds the yagami engine (signed-in coding CLIs, no keys); 'local' is a
- *  custom OpenAI-compatible endpoint; 'off' forces the deterministic fallbacks. */
-export type AgentChoice = 'yagami' | 'local' | 'off';
+/** 'yagami' embeds the yagami engine (signed-in coding CLIs, no keys); 'cerebras' is
+ *  the hosted Cerebras API; 'local' is a custom OpenAI-compatible endpoint; 'off'
+ *  forces the deterministic fallbacks. */
+export type AgentChoice = 'yagami' | 'cerebras' | 'local' | 'off';
 export type ThinkingLevel = 'default' | 'low' | 'medium' | 'high';
 
 export interface UserSettings {
@@ -323,6 +324,9 @@ export interface UserSettings {
   /** Yagami model id ('' = the engine's default; supports "provider:model"). */
   agentModel: string;
   agentThinking: ThinkingLevel;
+  cerebrasModel: string;
+  /** MASKED like localApiKey. Empty means the server uses CEREBRAS_API_KEY from env. */
+  cerebrasApiKey: string;
   localUrl: string;
   localModel: string;
   /** Comes back MASKED ('••••xxxx') — the real value never leaves the server's local
@@ -349,7 +353,20 @@ export interface AgentsStatus {
     supportsEffort: boolean;
     supportsVision: boolean;
   };
+  cerebras: {
+    /** Where the key comes from; the key itself never leaves the server. */
+    keySource: 'settings' | 'env' | 'none';
+    configured: boolean;
+    model: string;
+  };
   local: { configured: boolean; url: string; model: string };
+}
+
+/** Cerebras models the configured key can reach; `error` explains an empty list. */
+export interface CerebrasModels {
+  models: Array<{ id: string; label: string }>;
+  keySource: 'settings' | 'env' | 'none';
+  error?: string;
 }
 
 /** One model a harness reports, addressed by its qualified `provider:model` id. */

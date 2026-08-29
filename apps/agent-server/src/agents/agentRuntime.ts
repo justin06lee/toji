@@ -1,6 +1,7 @@
 import { detectProviders, type DetectedProvider } from '@justin06lee/yagami';
 import { config } from '../config.js';
 import { cachedCatalog, capabilitiesFor, findModel, qualifyModel } from './yagamiCatalog.js';
+import { CEREBRAS_BASE_URL, cerebrasKeyFor, clearCerebrasModels, type KeySource } from './cerebras.js';
 
 // Toji's inference runs through yagami: an embedded, zero-config engine that drives
 // the coding-agent CLIs already installed and signed in on this machine (Claude Code,
@@ -9,7 +10,7 @@ import { cachedCatalog, capabilitiesFor, findModel, qualifyModel } from './yagam
 // The one alternative backend is a custom OpenAI-compatible endpoint (URL + key) for
 // self-hosted models; everything else was folded into yagami.
 
-export type AgentChoice = 'yagami' | 'local' | 'off';
+export type AgentChoice = 'yagami' | 'cerebras' | 'local' | 'off';
 export type ThinkingLevel = 'default' | 'low' | 'medium' | 'high';
 
 /**
@@ -21,6 +22,7 @@ export function normalizeAgentChoice(value: unknown): AgentChoice {
   const v = typeof value === 'string' ? value.trim().toLowerCase() : '';
   if (v === 'off') return 'off';
   if (v === 'local') return 'local';
+  if (v === 'cerebras') return 'cerebras';
   return 'yagami';
 }
 
@@ -91,17 +93,30 @@ export interface ApiConfig {
   localUrl: string;
   localModel: string;
   localApiKey: string;
+  /** Cerebras: model id and an optional key that overrides CEREBRAS_API_KEY from env. */
+  cerebrasModel: string;
+  cerebrasApiKey: string;
 }
 
-let apiConfig: ApiConfig = { localUrl: '', localModel: '', localApiKey: '' };
+let apiConfig: ApiConfig = { localUrl: '', localModel: '', localApiKey: '', cerebrasModel: '', cerebrasApiKey: '' };
 
 export function setApiConfig(cfg: Partial<ApiConfig>) {
   const trim = (v: unknown) => (typeof v === 'string' ? v.trim() : undefined);
+  const previousKey = apiConfig.cerebrasApiKey;
   apiConfig = {
     localUrl: trim(cfg.localUrl) ?? apiConfig.localUrl,
     localModel: trim(cfg.localModel) ?? apiConfig.localModel,
-    localApiKey: trim(cfg.localApiKey) ?? apiConfig.localApiKey
+    localApiKey: trim(cfg.localApiKey) ?? apiConfig.localApiKey,
+    cerebrasModel: trim(cfg.cerebrasModel) ?? apiConfig.cerebrasModel,
+    cerebrasApiKey: trim(cfg.cerebrasApiKey) ?? apiConfig.cerebrasApiKey
   };
+  // A different key means a different account, so its model list no longer applies.
+  if (apiConfig.cerebrasApiKey !== previousKey) clearCerebrasModels();
+}
+
+/** The Cerebras key in effect (Settings wins over the env key) and where it came from. */
+export function cerebrasCredentials(): { key: string; source: KeySource } {
+  return cerebrasKeyFor(apiConfig.cerebrasApiKey);
 }
 
 // --- Backends ------------------------------------------------------------------
@@ -143,6 +158,20 @@ function yagamiBackend(tuning: AgentTuning): YagamiBackend | null {
   };
 }
 
+/** Cerebras speaks OpenAI's wire format, so it rides the same ApiBackend path. */
+function cerebrasBackend(tuning: AgentTuning): ApiBackend | null {
+  const { key } = cerebrasCredentials();
+  if (!key || !apiConfig.cerebrasModel) return null;
+  return {
+    kind: 'api',
+    baseUrl: CEREBRAS_BASE_URL,
+    apiKey: key,
+    model: apiConfig.cerebrasModel,
+    label: `Cerebras · ${apiConfig.cerebrasModel}`,
+    thinking: tuning.agentThinking
+  };
+}
+
 function localBackend(tuning: AgentTuning): ApiBackend | null {
   // URL + model are required; the bearer token is optional (most local servers have none).
   if (!apiConfig.localUrl || !apiConfig.localModel) return null;
@@ -157,7 +186,7 @@ function localBackend(tuning: AgentTuning): ApiBackend | null {
 }
 
 /**
- * The active inference backend: the embedded yagami engine, a custom
+ * The active inference backend: the embedded yagami engine, Cerebras, a custom
  * OpenAI-compatible endpoint, or null (demo mode). model.ts dispatches on this.
  */
 export function getActiveBackend(): Backend | null {
@@ -165,6 +194,7 @@ export function getActiveBackend(): Backend | null {
   const tuning: AgentTuning = { agentModel: choice.agentModel, agentThinking: choice.agentThinking };
   if (choice.agent === 'off') return null;
   if (choice.agent === 'local') return localBackend(tuning);
+  if (choice.agent === 'cerebras') return cerebrasBackend(tuning);
   return yagamiBackend(tuning);
 }
 
@@ -201,6 +231,13 @@ export function agentStatus() {
       unknownModel,
       supportsEffort: capabilities?.effort ?? true,
       supportsVision: capabilities?.images ?? false
+    },
+    cerebras: {
+      // Never the key itself — only whether one exists and where it came from, so the
+      // UI can say "using the key from .env.local" without ever handling it.
+      keySource: cerebrasCredentials().source,
+      configured: Boolean(cerebrasCredentials().key && apiConfig.cerebrasModel),
+      model: apiConfig.cerebrasModel
     },
     local: { configured: Boolean(apiConfig.localUrl && apiConfig.localModel), url: apiConfig.localUrl, model: apiConfig.localModel }
   };

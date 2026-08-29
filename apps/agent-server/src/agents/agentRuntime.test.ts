@@ -29,6 +29,28 @@ describe('backend resolution', () => {
     });
   });
 
+  it('cerebras needs both a key and a model before it is a usable backend', () => {
+    setApiConfig({ cerebrasApiKey: 'csk-test', cerebrasModel: '' });
+    setAgentChoice({ agent: 'cerebras', agentModel: '', agentThinking: 'default' });
+    expect(getActiveBackend()).toBeNull();
+
+    setApiConfig({ cerebrasModel: 'gpt-oss-120b' });
+    expect(getActiveBackend()).toEqual({
+      kind: 'api',
+      baseUrl: 'https://api.cerebras.ai/v1',
+      apiKey: 'csk-test',
+      model: 'gpt-oss-120b',
+      label: 'Cerebras · gpt-oss-120b',
+      thinking: 'default'
+    });
+  });
+
+  it('a key typed into settings overrides the one from the environment', () => {
+    setApiConfig({ cerebrasApiKey: 'csk-from-settings', cerebrasModel: 'gpt-oss-120b' });
+    setAgentChoice({ agent: 'cerebras', agentModel: '', agentThinking: 'default' });
+    expect((getActiveBackend() as { apiKey: string }).apiKey).toBe('csk-from-settings');
+  });
+
   it('off means no backend (demo mode)', () => {
     setAgentChoice({ agent: 'off', agentModel: '', agentThinking: 'default' });
     expect(getActiveBackend()).toBeNull();
