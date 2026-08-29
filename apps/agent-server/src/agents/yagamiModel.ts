@@ -1,6 +1,6 @@
 import { AuthRequiredError, ProviderNotInstalledError, Yagami, type MessagesRequest } from '@justin06lee/yagami';
 import { config } from '../config.js';
-import type { ThinkingLevel, YagamiBackend } from './agentRuntime.js';
+import type { YagamiBackend } from './agentRuntime.js';
 import { parseDataUri, type ApiCallOptions } from './apiModel.js';
 
 // The embedded yagami engine: Anthropic-shaped completions on top of whichever
@@ -22,8 +22,11 @@ export function yagamiSupportsVision(model: string): boolean {
   }
 }
 
-function effortFor(thinking: ThinkingLevel): string | undefined {
-  return thinking === 'default' ? undefined : thinking;
+// Reasoning effort is honored by Claude Code and Codex; ACP harnesses (Gemini, Goose,
+// OpenCode, …) have no notion of it, so it is left off rather than sent to be dropped.
+function effortFor(backend: YagamiBackend): string | undefined {
+  if (!backend.supportsEffort || backend.thinking === 'default') return undefined;
+  return backend.thinking;
 }
 
 function requestFor(backend: YagamiBackend, options: ApiCallOptions, maxTokensFallback: number): MessagesRequest {
@@ -40,7 +43,7 @@ function requestFor(backend: YagamiBackend, options: ApiCallOptions, maxTokensFa
     model: backend.model || undefined,
     system: options.system,
     max_tokens: options.maxTokens ?? maxTokensFallback,
-    effort: effortFor(backend.thinking),
+    effort: effortFor(backend),
     messages: [{ role: 'user', content }]
   };
 }

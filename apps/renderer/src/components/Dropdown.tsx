@@ -10,6 +10,8 @@ export interface DropdownOption<T extends string> {
   dotColor?: string;
   /** Shown but not selectable (e.g. a feature still under construction). */
   disabled?: boolean;
+  /** Section this option belongs to; consecutive options sharing one get a header. */
+  group?: string;
 }
 
 interface DropdownProps<T extends string> {
@@ -59,35 +61,41 @@ export function Dropdown<T extends string>({ value, options, onChange, disabled,
       </button>
 
       {open && (
-        <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 overflow-hidden rounded-lg border border-black/10 bg-white py-1 shadow-lg dark:border-white/12 dark:bg-neutral-900">
-          {options.map((opt) => {
+        <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 max-h-[320px] overflow-y-auto rounded-lg border border-black/10 bg-white py-1 shadow-lg dark:border-white/12 dark:bg-neutral-900">
+          {options.map((opt, i) => {
             const active = opt.value === value;
+            const header = opt.group && opt.group !== options[i - 1]?.group ? opt.group : null;
             return (
-              <button
-                key={opt.value}
-                type="button"
-                disabled={opt.disabled}
-                onClick={() => {
-                  onChange(opt.value);
-                  setOpen(false);
-                }}
-                className={`flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-[13px] transition ${
-                  opt.disabled
-                    ? 'cursor-default text-neutral-400 opacity-60 dark:text-neutral-500'
-                    : active
-                      ? 'bg-black/[0.05] dark:bg-white/10'
-                      : 'hover:bg-black/[0.04] dark:hover:bg-white/[0.07]'
-                }`}
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  {opt.dotColor && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: opt.dotColor }} />}
-                  <span className="truncate">{opt.label}</span>
-                </span>
-                <span className="flex shrink-0 items-center gap-1.5">
-                  {opt.hint && <span className="text-[11px] text-neutral-400">{opt.hint}</span>}
-                  {active && <Check size={13} className="text-neutral-500 dark:text-neutral-300" />}
-                </span>
-              </button>
+              <div key={opt.value}>
+                {header && (
+                  <div className="px-2.5 pb-0.5 pt-2 text-[10.5px] font-medium uppercase tracking-wide text-neutral-400 dark:text-neutral-500">{header}</div>
+                )}
+                <button
+                  type="button"
+                  disabled={opt.disabled}
+                  onClick={() => {
+                    onChange(opt.value);
+                    setOpen(false);
+                  }}
+                  title={opt.hint ? `${opt.label} — ${opt.hint}` : opt.label}
+                  className={`flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-[13px] transition ${
+                    opt.disabled
+                      ? 'cursor-default text-neutral-400 opacity-60 dark:text-neutral-500'
+                      : active
+                        ? 'bg-black/[0.05] dark:bg-white/10'
+                        : 'hover:bg-black/[0.04] dark:hover:bg-white/[0.07]'
+                  }`}
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    {opt.dotColor && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: opt.dotColor }} />}
+                    <span className="truncate">{opt.label}</span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    {opt.hint && <span className="max-w-[130px] truncate text-[11px] text-neutral-400">{opt.hint}</span>}
+                    {active && <Check size={13} className="text-neutral-500 dark:text-neutral-300" />}
+                  </span>
+                </button>
+              </div>
             );
           })}
         </div>

@@ -332,11 +332,60 @@ export interface UserSettings {
 
 export interface AgentsStatus {
   available: boolean;
-  /** Live backend label, e.g. "Yagami · auto" or "custom endpoint · llama3.2". */
+  /** Live backend label, e.g. "Yagami · Codex CLI · GPT-5.6-Luna". */
   model: string;
   choice: AgentChoice;
-  yagami: { providers: Array<{ id: string; label: string; installed: boolean }>; anyInstalled: boolean; model: string };
+  yagami: {
+    /** `usable` = the CLI is installed AND answered a model probe (signed in, handshake ok). */
+    providers: Array<{ id: string; label: string; installed: boolean; usable: boolean; error?: string }>;
+    anyInstalled: boolean;
+    /** Qualified `provider:model` id actually in use ('' = the engine's default). */
+    model: string;
+    modelLabel?: string;
+    modelProvider?: string;
+    /** True when the saved model belongs to no installed harness — every call would fail. */
+    unknownModel: boolean;
+    /** Whether the selected model's provider honors reasoning effort / inline images. */
+    supportsEffort: boolean;
+    supportsVision: boolean;
+  };
   local: { configured: boolean; url: string; model: string };
+}
+
+/** One model a harness reports, addressed by its qualified `provider:model` id. */
+export interface CatalogModel {
+  id: string;
+  model: string;
+  provider: string;
+  providerLabel: string;
+  label: string;
+  description?: string;
+  resolvedModel?: string;
+}
+
+export interface CatalogProvider {
+  id: string;
+  label: string;
+  usable: boolean;
+  error?: string;
+  modelCount: number;
+  capabilities: {
+    resume: boolean;
+    fork: boolean;
+    images: boolean;
+    documents: boolean;
+    systemPrompt: boolean;
+    thinking: boolean;
+    effort: boolean;
+    streaming: 'tokens' | 'chunks';
+  };
+}
+
+export interface ModelCatalog {
+  models: CatalogModel[];
+  providers: CatalogProvider[];
+  defaultProvider: string;
+  at: string;
 }
 
 export interface AppConfig {

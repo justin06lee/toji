@@ -1,4 +1,4 @@
-import type { AgentsStatus, AppConfig, PageSource, PredictionResult, ResearchMode, ResearchOptions, ResearchSessionState, ServerEvent, UserSettings } from '../types';
+import type { AgentsStatus, AppConfig, ModelCatalog, PageSource, PredictionResult, ResearchMode, ResearchOptions, ResearchSessionState, ServerEvent, UserSettings } from '../types';
 import type { AgentStepResult } from './agentDom';
 
 const DEFAULT_BASE = 'http://127.0.0.1:8788';
@@ -36,6 +36,11 @@ export function getSettings() {
 
 export function getAgents() {
   return jsonFetch<AgentsStatus>('/api/agents');
+}
+
+/** Every model every installed coding CLI reports. `refresh` re-probes the harnesses. */
+export function getAgentModels(refresh = false) {
+  return jsonFetch<ModelCatalog>(`/api/agents/models${refresh ? '?refresh=1' : ''}`);
 }
 
 // --- Memory management ---
