@@ -5,20 +5,11 @@ export interface AgentStepInput {
   goal: string;
   url: string;
   title?: string;
-  /**
-   * Byakugan view of the page: a render-truthful manifest of what is VISIBLE on screen
-   * ("[id] role \"label\"" lines, ~200-800 tokens) on the first step, then a diff of only
-   * what changed ("+"/"-"/"~" lines, or "NO CHANGE") on subsequent steps. Element ids are
-   * stable across steps, so the model can refer to anything it has already seen.
-   */
-  page: string;
   history?: Array<{ action: string; reason?: string }>;
-  /** Cropped screenshot the model requested via look() last turn (data URI). */
+  /** The tab's current screenshot (data URI) — the agent's ONLY view of the page. */
   image?: string;
-  /** Where the screenshot crop sits in viewport CSS px — maps image pixels → clickAt coords. */
-  crop?: { x: number; y: number; w: number; h: number };
-  /** CSS pixel size of the page viewport. */
-  viewport?: { w: number; h: number };
+  /** Pixel size of that screenshot: the coordinate space the model must answer in. */
+  image_size?: { w: number; h: number };
   /** Whether the OS-backed credential tools are available for this tab. */
   credentialAccess?: boolean;
   /** Files the user dropped onto the agent (e.g. a resume) — name + on-disk path the agent may read or upload. */
@@ -32,28 +23,24 @@ export interface AgentStepResult {
     | 'click'
     | 'type'
     | 'press'
-    | 'select'
-    | 'hover'
     | 'scroll'
-    | 'navigate'
-    | 'clickAt'
+    | 'hover'
     | 'drag'
+    | 'navigate'
     | 'research'
     | 'ask'
     | 'wait'
-    | 'look'
     | 'uploadFile'
     | 'findCredentials'
     | 'fillCredential'
     | 'remember'
     | 'done';
-  /** Byakugan manifest element id (click/type/select/hover/uploadFile/look). */
-  id?: number;
+  /** Click/hover/type target in SCREENSHOT pixels. */
+  x?: number;
+  y?: number;
   text?: string;
   /** For "press": one key, e.g. "Enter", "Escape", "Tab". */
   key?: string;
-  /** For "select": the option's visible text or value. */
-  value?: string;
   url?: string;
   direction?: 'down' | 'up';
   /** For "ask": a question for the USER; the run pauses and their answer comes back as an observation. */
@@ -62,10 +49,7 @@ export interface AgentStepResult {
   query?: string;
   /** For "wait": how long to pause (ms) before re-checking the page. */
   ms?: number;
-  /** For "clickAt": absolute viewport pixel where the click lands (canvas/visual targets only). */
-  x?: number;
-  y?: number;
-  /** For "drag": press at (fromX,fromY) and release at (toX,toY), in absolute viewport pixels. */
+  /** For "drag": press at (fromX,fromY) and release at (toX,toY), in screenshot pixels. */
   fromX?: number;
   fromY?: number;
   toX?: number;
@@ -81,27 +65,32 @@ export interface AgentStepResult {
 }
 
 // Kept deliberately short: a small model follows a tight prompt better than a long one.
-const ACTIONS = `JSON only: {"action","id","text","key","value","url","direction","x","y","fromX","fromY","toX","toY","ms","question","query","credentialId","reason"}.
-- click(id) — click element [id]. type(id,text) — focus input [id] and type. select(id,value) — pick a dropdown option by its visible text. press(key) — one key ("Enter","Escape","Tab"). hover(id). scroll(direction "up"|"down").
+const ACTIONS = `JSON only: {"action","x","y","text","key","url","direction","fromX","fromY","toX","toY","ms","question","query","fileIndex","credentialId","reason"}.
+Coordinates are PIXELS IN THE SCREENSHOT you were just given (its size is IMAGE_SIZE). Aim at the CENTRE of what you want to hit.
+- click(x,y) — click that point. hover(x,y) — move the mouse there (opens hover menus).
+- type(text, x, y) — click (x,y) to focus the field, then type text. Omit x,y only to type into what is already focused.
+- press(key) — one key: "Enter", "Escape", "Tab", "Backspace", "ArrowDown".
+- scroll(direction "up"|"down") — the page only shows one screenful; scroll to see the rest.
+- drag(fromX,fromY,toX,toY) — press at the source and release at the destination. REQUIRED to move a piece/slider/card; a click does not move things.
   · Signing in: if CREDENTIAL_ACCESS is true, FIRST use findCredentials(query) with the current website name. It searches only credentials matching this exact page origin and container and returns account metadata (name, username, opaque id), never secrets. Then use fillCredential(credentialId) to fill the selected login directly. Never type password placeholders and never ask the user for a password; if nothing matches, ask them to save a login in Toji.
-- Element actions are VERIFIED: if something (a cookie banner, modal, overlay) covers the target, the action is refused and your next observation says "blocked by <element>" — dismiss the blocker first, then retry. Never repeat an action that was just blocked.
-- look(id?) — get a cropped SCREENSHOT of element [id] (or the whole viewport with no id) as your NEXT observation. Use it for anything flagged "text-blind", a <canvas>/board, an image/chart, or a visual layout the manifest can't capture. Don't request one every turn.
-- clickAt(x,y) — click a raw viewport pixel; drag(fromX,fromY,toX,toY) — press at a source, release at a destination (REQUIRED to MOVE a piece/slider; a click does not move things). Pixel actions are ONLY for visual targets with no [id] (inside a canvas you have look()ed at). If you had a look(id) crop, CROP gives its viewport offset: viewportX = crop.x + imageX * crop.w / imageWidth.
 - research(query) — ask a research sub-agent a question and get concrete step-by-step guidance back as your next observation. Use it when you are STUCK or don't know HOW to do something.
 - ask(question) — pause and ask the USER a question; their answer arrives as your next observation. Use it whenever you need something only the user knows: which account/option to use, a missing credential or personal detail, a verification code, or a judgment call. Asking is cheap and encouraged — NEVER guess or fabricate personal information instead.
-- uploadFile(fileIndex, id) — upload one of the user's dropped FILES (by its fileIndex) into file-input element [id]. To FILL text fields from a file's contents instead, read the file (its path is in FILES) and type the values.
+- uploadFile(fileIndex) — upload one of the user's dropped FILES into the page's file input. To FILL text fields from a file's contents instead, read the file (its path is in FILES) and type the values.
 - remember(text) — save a durable note about the user or this task for future sessions (a preference, a learned site quirk). Keep it short. Don't save secrets or one-off trivia.
-- wait(ms?) — do nothing and re-check; use when it's not your turn or the page is still loading.
+- wait(ms?) — do nothing and look again; use when it's not your turn or the page is still loading.
 - navigate(url). done — only when the GOAL is fully achieved (say why).`;
 
 const RULES = `Rules:
-- The PAGE is the live page THIS turn. Element [id]s are STABLE: an element keeps its id until a "- [id]" line removes it, so you may act on ids from earlier turns that a DIFF did not remove. Never invent an id you were never shown.
-- The manifest shows only the CURRENT VIEWPORT — scroll to reveal more. "…and N more similar" rows are real elements; the ids in their [a-b] range are actionable.
-- NEVER invent URLs, ids, game codes, or paths. Only navigate to a URL the user gave you, one visible in the PAGE, or a site's plain homepage. To find a specific thing on a site, go to its homepage and use the site's own links/search.
-- If the PAGE shows an error (404 / not found), the URL you guessed was wrong — navigate to the site's homepage and use its UI. Do not retry variations of a guessed URL.
-- research guidance is ADVICE, not ground truth: the live PAGE always wins. If guidance names buttons that are not in the PAGE, they do not exist — ignore them.
+- The SCREENSHOT is the live page THIS turn and your ONLY view of it. Act only on what you can actually SEE in it; never act on something you merely remember or assume is there.
+- You see ONE screenful. Anything below the fold does not exist until you scroll(down) and look again.
+- Read coordinates off the image carefully: aim at the centre of the button/field/link, not its edge or its label's first letter.
+- After acting you get a fresh screenshot. If it looks unchanged, your action missed or did nothing — do something DIFFERENT (aim again more carefully, dismiss an overlay, scroll, wait, or research). Never repeat an action that changed nothing.
+- Cookie banners, consent walls and modals block everything underneath: dismiss them FIRST.
+- Native dropdown popups (<select>) are drawn by the OS and CANNOT be captured — after clicking one, use press("ArrowDown")/press("Enter") to choose, or prefer a different control.
+- NEVER invent URLs, game codes, or paths. Only navigate to a URL the user gave you, one visible on the page, or a site's plain homepage. To find a specific thing on a site, go to its homepage and use the site's own links/search.
+- If the page shows an error (404 / not found), the URL you guessed was wrong — navigate to the site's homepage and use its UI. Do not retry variations of a guessed URL.
+- research guidance is ADVICE, not ground truth: the live page always wins. If guidance names buttons that are not on screen, they do not exist — ignore them.
 - Pick ONE action toward the GOAL. Keep going until it is truly complete — do not stop early; only "done" when finished.
-- "NO CHANGE" means your last action changed nothing visible — do something DIFFERENT (dismiss a blocker, scroll, wait, or research); never repeat it.
 - Don't undo progress: never cancel, close, delete, reset, resign, log out, go back, or navigate away unless the GOAL asks.
 - reason < 12 words.`;
 
@@ -110,31 +99,35 @@ const RULES = `Rules:
 // executes the single JSON action they return. This line kills that failure mode.
 const NO_REFUSAL = `You are the decision core of Toji's built-in browser automation. You do NOT call tools and need NO permissions — Toji executes the ONE JSON action you return, then shows you the new page. You already have full control of this real browser tab. NEVER refuse, apologize, or say you can't control the browser / lack tools / lack access — that is false here. Every turn, output exactly one JSON action. If unsure how, use research or look — never decline.`;
 
-const SYSTEM_TEXT = `${NO_REFUSAL}
-
-You operate a real browser tab with a real mouse to achieve the user's GOAL. Each turn you get the PAGE — a render-truthful text view of what is VISIBLE on screen — and choose ONE next action.
-
-How to read the PAGE:
-- The first step is a full manifest: a header line, then "[id] role \"label\"" lines for every interactive element (form values are redacted; checked/selected state remains) and plain lines for visible text.
-- Later steps are a DIFF of the last manifest: "+" appeared, "~" changed, "-" disappeared, "NO CHANGE" = nothing visible changed. Everything not mentioned is unchanged and still valid.
-- "canvas … text-blind; use look(N)" marks pixels-only content (games, charts, cross-origin frames): look(N) to see it, then clickAt/drag raw coordinates inside it.
-
-If MEMORY is present, it holds things you've learned about the user/their tasks — use it. If FILES are present, the user dropped them for you (e.g. a resume); read a file's path to use its contents, or uploadFile it into a file-input.
-
-${ACTIONS}
-
-${RULES}`;
-
 const SYSTEM_VISION = `${NO_REFUSAL}
 
-You operate a real browser tab with a real mouse to achieve the user's GOAL. This turn you ALSO get the SCREENSHOT you requested via look() — a crop of one element or the viewport — alongside the PAGE text view; choose ONE next action.
+You operate a real browser tab with a real mouse and keyboard to achieve the user's GOAL.
 
-- Prefer acting on PAGE element [id]s (click/type/select) — they are exact and verified.
-- Use the screenshot to understand visuals (a board, chart, image). For a visual target with NO [id], use clickAt/drag with viewport pixels; CROP gives the crop's viewport offset and size: viewportX = crop.x + imageX * crop.w / imageWidth (same for y).
+Each turn you SEE a screenshot of the tab exactly as it looks right now, and you choose ONE action. Toji performs it and sends you the next screenshot. Look, act, look, act — that is the whole loop. The screenshot is your only sense: there is no text listing of the page, so read the image and point at what you see.
+
+If MEMORY is present, it holds things you've learned about the user/their tasks — use it. If FILES are present, the user dropped them for you (e.g. a resume); read a file's path to use its contents, or uploadFile it into the page's file input.
 
 ${ACTIONS}
 
 ${RULES}`;
+
+// Before anything is open there is nothing to screenshot, so this one turn is spent
+// choosing where to go. Coordinates are impossible here — only navigate/ask make sense.
+const SYSTEM_BOOTSTRAP = `${NO_REFUSAL}
+
+You operate a real browser tab to achieve the user's GOAL. NO page is open yet, so there is nothing to see this turn — your only job is to decide which URL to open first.
+
+Reply {"action":"navigate","url":"...","reason":"..."} with the site the GOAL needs: the URL the user named, or that site's plain HOMEPAGE. NEVER invent a deep link, game code, or path — open the homepage and navigate with the site's own UI once you can see it.
+If the GOAL names no site and you cannot tell which one to use, reply {"action":"ask","question":"..."}.
+From the next turn on you will SEE a screenshot of the page and act on it.`;
+
+// Fallback for a backend that cannot accept images at all. It has no view of the page, so
+// the only honest move is to say so rather than let it act blind on a page it cannot see.
+const SYSTEM_BLIND = `${NO_REFUSAL}
+
+You operate a real browser tab, but the current model CANNOT see images and Toji's web agent is screenshot-only, so you have NO view of the page this turn.
+
+Do not guess coordinates — a blind click can do real damage. Reply with {"action":"ask","question":"..."} telling the user that browsing needs a vision-capable model (Claude Code or Codex via Yagami), or {"action":"done","reason":"..."} if the goal needs no page interaction.`;
 
 export function sanitize(raw: AgentStepResult | undefined): AgentStepResult {
   const coord = (n: unknown) => (typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : undefined);
@@ -142,22 +135,22 @@ export function sanitize(raw: AgentStepResult | undefined): AgentStepResult {
   // " clickAt ", "FINDCREDENTIALS", etc.). Crucially, an UNRECOGNIZED action must NOT fall back
   // to "done" — that silently terminates the run. We fall back to "wait" so the loop re-checks instead.
   const canon: Record<string, AgentStepResult['action']> = {
-    click: 'click', type: 'type', press: 'press', select: 'select', hover: 'hover', scroll: 'scroll',
-    navigate: 'navigate', clickat: 'clickAt', drag: 'drag', research: 'research',
-    ask: 'ask', wait: 'wait', look: 'look', screenshot: 'look', uploadfile: 'uploadFile',
-    findcredentials: 'findCredentials', fillcredential: 'fillCredential', remember: 'remember', done: 'done'
+    click: 'click', clickat: 'click', tap: 'click', type: 'type', typeat: 'type', press: 'press',
+    key: 'press', hover: 'hover', moveto: 'hover', scroll: 'scroll',
+    navigate: 'navigate', goto: 'navigate', drag: 'drag', dragand: 'drag', research: 'research',
+    ask: 'ask', wait: 'wait', uploadfile: 'uploadFile',
+    findcredentials: 'findCredentials', fillcredential: 'fillCredential', remember: 'remember', done: 'done',
+    // Screenshot-only has no manifest ids, so these no longer exist. They map to the
+    // nearest real behaviour rather than to 'wait', which would silently stall the run:
+    // a screenshot arrives every turn anyway, and select() is done by keyboard.
+    look: 'wait', screenshot: 'wait', select: 'press'
   };
   const rawAction = typeof raw?.action === 'string' ? raw.action.trim().toLowerCase() : '';
   const action = canon[rawAction] ?? 'wait';
-  // Models sometimes put the element id in "index" (the old contract) — accept both.
-  const legacyIndex = (raw as { index?: unknown } | undefined)?.index;
-  const id = typeof raw?.id === 'number' && Number.isFinite(raw.id) ? Math.round(raw.id) : typeof legacyIndex === 'number' && Number.isFinite(legacyIndex) ? Math.round(legacyIndex) : undefined;
   const out: AgentStepResult = {
     action,
-    id,
     text: typeof raw?.text === 'string' ? raw.text : undefined,
     key: typeof raw?.key === 'string' ? raw.key.trim().slice(0, 24) : undefined,
-    value: typeof raw?.value === 'string' ? raw.value.slice(0, 200) : undefined,
     url: typeof raw?.url === 'string' ? raw.url : undefined,
     direction: raw?.direction === 'up' ? 'up' : raw?.direction === 'down' ? 'down' : undefined,
     x: coord(raw?.x),
@@ -181,10 +174,19 @@ export function sanitize(raw: AgentStepResult | undefined): AgentStepResult {
   if (out.action === 'research' && !out.query) out.query = out.question ?? out.text?.slice(0, 300);
   if (out.action === 'ask' && !out.question) out.question = out.query ?? out.text?.slice(0, 300);
   if (out.action === 'remember' && !out.text) out.text = out.query ?? out.question;
-  // fillCredential's opaque id also lands in text/value/query; the vault re-validates it anyway.
+  // fillCredential's opaque id also lands in text/query/value; the vault re-validates it
+  // anyway. `value` is no longer part of the contract but models still emit it, so it is
+  // read off the raw object rather than dropped.
   if (out.action === 'fillCredential' && !out.credentialId) {
-    const fallback = out.text ?? out.value ?? out.query;
+    const rawValue = (raw as { value?: unknown } | undefined)?.value;
+    const fallback = out.text ?? out.query ?? (typeof rawValue === 'string' ? rawValue : undefined);
     if (typeof fallback === 'string' && fallback.trim()) out.credentialId = fallback.trim().slice(0, 200);
+  }
+  // A drag whose endpoints arrived as x/y + toX/toY is still a drag — take the start point
+  // from x/y rather than dropping the action for a missing field.
+  if (out.action === 'drag' && out.fromX === undefined && out.fromY === undefined) {
+    out.fromX = out.x;
+    out.fromY = out.y;
   }
   return out;
 }
@@ -224,44 +226,27 @@ export async function researchHelp(input: { question: string; goal?: string; url
   }
 }
 
+/** True when the configured backend can accept the screenshot this agent runs on. */
+export function webAgentCanSee(): boolean {
+  return modelSupportsVision();
+}
+
 export async function nextAgentAction(input: AgentStepInput): Promise<AgentStepResult> {
   const vision = modelSupportsVision();
   const user = JSON.stringify({
     GOAL: input.goal,
     url: input.url,
     title: input.title ?? '',
-    viewport: input.viewport,
+    IMAGE_SIZE: input.image_size,
     CREDENTIAL_ACCESS: input.credentialAccess || undefined,
     FILES: input.files && input.files.length ? input.files : undefined,
     MEMORY: input.memory && input.memory.trim() ? input.memory.trim() : undefined,
-    CROP: input.image && vision ? input.crop : undefined,
-    // The model asked to look but can't see images (text-only backend). Say so explicitly,
-    // or a small model loops "taking a look…" forever learning nothing each time.
-    NOTE: input.image && !vision ? 'Your model CANNOT see images — "look" does nothing for you. Never use it again; work from the PAGE text instead.' : undefined,
-    PAGE: input.page,
     history: (input.history ?? []).slice(-6)
   });
 
   // A firm nudge appended on a retry: models that reply with prose/refusal on the first pass
   // usually comply when reminded the ONLY valid output is the JSON action.
-  const RETRY_NUDGE = `${user}\n\nREMINDER: Return ONLY the JSON action object — no prose, no refusal. You DO control this browser; pick the single best next action now.`;
-
-  // Vision path: ONLY when the model requested a look() last turn AND actually accepts image
-  // input. Text stays the default sense — that's what keeps per-step cost at manifest/diff size.
-  if (input.image && vision) {
-    try {
-      let raw: AgentStepResult;
-      try {
-        raw = await completeMultimodalJSON<AgentStepResult>({ system: SYSTEM_VISION, userText: user, imageDataUri: input.image, temperature: 0.1, maxTokens: 320 });
-      } catch {
-        // One firm retry before giving up on the vision path.
-        raw = await completeMultimodalJSON<AgentStepResult>({ system: SYSTEM_VISION, userText: RETRY_NUDGE, imageDataUri: input.image, temperature: 0.1, maxTokens: 320 });
-      }
-      return sanitize(raw);
-    } catch (error) {
-      console.warn('[toji] vision agent step failed, falling back to text-only:', error instanceof Error ? error.message : error);
-    }
-  }
+  const RETRY_NUDGE = `${user}\n\nREMINDER: Return ONLY the JSON action object — no prose, no refusal. You DO control this browser; pick the single best next action from the screenshot now.`;
 
   // Unlike prediction/planning/synthesis, a browser action can't be produced by a
   // deterministic heuristic — it's fundamentally model-driven. So if the agent is
@@ -269,13 +254,20 @@ export async function nextAgentAction(input: AgentStepInput): Promise<AgentStepR
   // "wait" step instead of throwing: the client loop pauses and surfaces the reason
   // rather than the route returning a 500.
   try {
-    let raw: AgentStepResult;
-    try {
-      raw = await completeJSON<AgentStepResult>({ system: SYSTEM_TEXT, user, temperature: 0.1, maxTokens: 300 });
-    } catch {
-      // The model returned prose/refused — retry once with a firm reminder to emit JSON only.
-      raw = await completeJSON<AgentStepResult>({ system: SYSTEM_TEXT, user: RETRY_NUDGE, temperature: 0.1, maxTokens: 300 });
+    // The screenshot IS the observation: perception and reasoning are one call.
+    if (input.image && vision) {
+      let raw: AgentStepResult;
+      try {
+        raw = await completeMultimodalJSON<AgentStepResult>({ system: SYSTEM_VISION, userText: user, imageDataUri: input.image, temperature: 0.1, maxTokens: 320 });
+      } catch {
+        raw = await completeMultimodalJSON<AgentStepResult>({ system: SYSTEM_VISION, userText: RETRY_NUDGE, imageDataUri: input.image, temperature: 0.1, maxTokens: 320 });
+      }
+      return sanitize(raw);
     }
+    // A vision backend with no image means no page is open yet: pick where to go.
+    // A backend that cannot see images at all can never drive this agent — say so
+    // rather than let it guess coordinates for a page it has no view of.
+    const raw = await completeJSON<AgentStepResult>({ system: vision ? SYSTEM_BOOTSTRAP : SYSTEM_BLIND, user, temperature: 0.1, maxTokens: 200 });
     return sanitize(raw);
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'agent unavailable';

@@ -54,6 +54,9 @@ contextBridge.exposeInMainWorld('toji', {
   eyesDiff: (webContentsId, maxTokens) => ipcRenderer.invoke('toji:eyes-diff', { webContentsId, maxTokens }),
   eyesAct: (webContentsId, action) => ipcRenderer.invoke('toji:eyes-act', { webContentsId, action }),
   eyesLook: (webContentsId, target) => ipcRenderer.invoke('toji:eyes-look', { webContentsId, ...(target || {}) }),
+  // The screenshot agent's sense: the tab's current pixels plus its CSS viewport size,
+  // so image coordinates can be scaled back to real mouse coordinates.
+  pageScreenshot: (webContentsId, maxLongEdge) => ipcRenderer.invoke('toji:page-screenshot', { webContentsId, maxLongEdge }),
   // Container egress is encoded in the partition name (see policy.cjs).
   clearContainer: (containerId) => ipcRenderer.invoke('toji:clear-container', containerId),
   // Password vault. Note there is no "read a password" call by design: the renderer can

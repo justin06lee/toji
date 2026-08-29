@@ -729,11 +729,16 @@ ipcMain.on('toji:guest-preload-url', (event) => {
 });
 
 // --- Byakugan page perception ------------------------------------------------
-// The web agent's eyes: @justin06lee/byakugan reads what Chromium actually PAINTED
-// (DOMSnapshot layout tree over CDP) into a compact, stable-ID text manifest, emits tiny
-// diffs between steps, verifies every click/type against fresh geometry at dispatch time
-// (blocked actions return {ok:false, blockedBy}), and serves cropped screenshots via look().
-// The package is ESM-only and this file is CJS, so it's loaded via dynamic import().
+// @justin06lee/byakugan reads what Chromium actually PAINTED (DOMSnapshot layout tree over
+// CDP) into a compact, stable-ID text manifest, emits tiny diffs between steps, and verifies
+// actions against fresh geometry at dispatch time. The package is ESM-only and this file is
+// CJS, so it's loaded via dynamic import().
+//
+// The web agent is now SCREENSHOT-ONLY (see toji:page-screenshot): it has no manifest and no
+// element ids, so of the handlers below only eyes-act is on the agent's path, and only for
+// its targetless verbs (press/scroll). observe/diff/look are kept — working and reachable —
+// because they are the whole DOM-perception capability, and dropping them would make going
+// back to (or blending in) manifest perception a rewrite rather than a switch.
 let byakuganPromise = null;
 function loadByakugan() {
   if (!byakuganPromise) {
@@ -839,6 +844,45 @@ ipcMain.handle('toji:eyes-act', async (event, { webContentsId, action }) => {
         return { ok: false, error: `unknown action verb: ${a.verb}` };
     }
   } catch (error) {
+    return { ok: false, error: String((error && error.message) || error) };
+  }
+});
+
+// The screenshot-driven agent's single sense: what the tab looks like right now.
+//
+// Deliberately independent of byakugan — no DOM snapshot, no manifest, no stable ids.
+// It captures over CDP rather than webContents.capturePage() so a BACKGROUND tab (the
+// agent often runs on one) still yields real pixels instead of a blank frame.
+//
+// The shot is in DEVICE pixels (2x on a retina display) and then downscaled for token
+// cost, so it reports the page's CSS viewport separately: the model answers in image
+// pixels and the caller scales those back to CSS px to aim the mouse.
+ipcMain.handle('toji:page-screenshot', async (event, { webContentsId, maxLongEdge }) => {
+  try {
+    if (!senderOwnsTarget(event, webContentsId)) throw new Error('page does not belong to this window');
+    const wc = webContents.fromId(webContentsId);
+    if (!wc || wc.isDestroyed()) throw new Error('page is gone');
+    const dbg = ensureDebugger(wc);
+    const metrics = await dbg.sendCommand('Page.getLayoutMetrics');
+    // cssVisualViewport is the CSS-pixel viewport; older builds only expose visualViewport.
+    const vp = metrics.cssVisualViewport || metrics.visualViewport || {};
+    const viewport = {
+      w: Math.round(vp.clientWidth || metrics.cssLayoutViewport?.clientWidth || 0),
+      h: Math.round(vp.clientHeight || metrics.cssLayoutViewport?.clientHeight || 0)
+    };
+    const { data } = await dbg.sendCommand('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+    let image = nativeImage.createFromBuffer(Buffer.from(data, 'base64'));
+    const size = image.getSize();
+    const longEdge = Math.max(size.width, size.height);
+    const limit = maxLongEdge || 1400;
+    if (longEdge > limit) {
+      const scale = limit / longEdge;
+      image = image.resize({ width: Math.round(size.width * scale), height: Math.round(size.height * scale), quality: 'good' });
+    }
+    const out = image.getSize();
+    return { ok: true, dataUri: image.toDataURL(), width: out.width, height: out.height, viewport };
+  } catch (error) {
+    appendServerLog(`page-screenshot error ${error && error.message}`);
     return { ok: false, error: String((error && error.message) || error) };
   }
 });

@@ -18,8 +18,7 @@ as Work leaves Personal signed out, and a tracker embedded in both sees two unre
 browsers.
 
 It also carries the agent work it started as: a local model can drive any page directly,
-using [byakugan](https://github.com/justin06lee/byakugan) to read what Chromium actually
-painted rather than scraping the DOM.
+working from screenshots of what Chromium actually painted rather than scraping the DOM.
 
 ## Profiles and containers
 
@@ -84,11 +83,14 @@ and are **scoped to the container** they were saved in — a Work credential is 
 in Personal.
 
 Filling a password goes main process → page directly; capturing one goes page → main
-process directly. There is no IPC method that returns a secret, model-facing page manifests
-strip every form value, and the agent has only two credential tools: find accounts matching
-the current site/profile, then ask the vault to fill one by opaque id. Credentials are
-released only for the exact origin they were saved against — no subdomain widening, no
-https→http downgrade — and both origin and owning window are re-checked at fill time.
+process directly. There is no IPC method that returns a secret, and the agent has only two
+credential tools: find accounts matching the current site/profile, then ask the vault to
+fill one by opaque id. Credentials are released only for the exact origin they were saved
+against — no subdomain widening, no https→http downgrade — and both origin and owning
+window are re-checked at fill time. A filled password stays secret from the model for the
+same reason it does from anyone watching your screen: the agent sees a screenshot, and the
+page renders the field as dots. Everything else that is *visible* on the page, though, is
+visible to the model — so treat an agent run as showing that screen to your model provider.
 
 ## Running it
 
@@ -115,10 +117,17 @@ mouse.
 
 ## The agent
 
-A local model can drive any page: click, type, scroll, navigate, upload a file, and take a
-cropped look when it needs to see something. Perception runs through byakugan, which reads
-Chromium's paint output into a compact manifest with stable ids and verifies every action
-against fresh geometry before dispatching it.
+A local model can drive any page: click, type, scroll, drag, navigate, and upload a file.
+
+It works from screenshots. Each turn Toji captures the tab, the model looks at that image
+and answers with one action in the screenshot's own pixel coordinates, Toji scales those to
+the page and dispatches a real mouse or key event, then captures again — look, act, look,
+act. There is no text rendering of the page and no element ids: the agent acts on what it
+can see, which means it must scroll to reach anything below the fold, and native `<select>`
+popups are drawn by the OS outside the page so it picks from those with the keyboard.
+
+This needs a model that accepts images. Claude Code and Codex through Yagami both do;
+a text-only backend will say so rather than click blind.
 
 Inference is zero-config: Toji embeds [yagami](https://github.com/justin06lee/yagami),
 which drives whichever coding-agent CLIs you are already signed into (Claude Code, Codex,

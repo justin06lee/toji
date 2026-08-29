@@ -1,7 +1,13 @@
-// The web agent's perception/action types + the typed bridge to byakugan in the main
-// process (window.toji.eyes*). Perception is no longer scraped in-page: byakugan reads
-// what Chromium actually painted (over CDP) into a stable-ID text manifest and verifies
-// every action against fresh geometry at dispatch time.
+// The web agent's perception/action contract.
+//
+// Perception is a SCREENSHOT and nothing else: every turn the agent sees the tab's
+// current pixels, picks one action, and sees the result. There is no DOM manifest and
+// there are no element ids — the model points at what it can see, in the screenshot's
+// own pixel coordinates, and the client scales those to real mouse coordinates.
+//
+// Consequences worth knowing: the agent can only act on what is on screen (it must
+// scroll to reach the rest), and native <select> popups are drawn by the OS outside the
+// page, so they never appear in a capture.
 
 /** What the /api/agent/step endpoint returns — ONE next action chosen by the model. */
 export interface AgentStepResult {
@@ -9,45 +15,38 @@ export interface AgentStepResult {
     | 'click'
     | 'type'
     | 'press'
-    | 'select'
-    | 'hover'
     | 'scroll'
-    | 'navigate'
-    | 'clickAt'
+    | 'hover'
     | 'drag'
+    | 'navigate'
     | 'research'
     | 'ask'
     | 'wait'
-    | 'look'
     | 'uploadFile'
     | 'findCredentials'
     | 'fillCredential'
     | 'remember'
     | 'done';
-  /** Byakugan manifest element id (click/type/select/hover/uploadFile/look). */
-  id?: number;
-  /** For "type": the text to enter ({{placeholders}} resolved locally, never seen by the model). */
+  /** Click/hover/type target, in SCREENSHOT pixels (scaled to CSS px before dispatch). */
+  x?: number;
+  y?: number;
+  /** For "type": the text to enter. With x/y, the point is clicked first to focus it. */
   text?: string;
   /** For "press": a single key, e.g. "Enter", "Escape", "Tab". */
   key?: string;
-  /** For "select": the option's visible text or value. */
-  value?: string;
   url?: string;
   direction?: 'up' | 'down';
-  /** For "ask": a question for the USER; the run pauses until they answer in the spotlight. */
-  question?: string;
-  /** For "research": a question for the research sub-agent; its answer comes back as an observation. */
-  query?: string;
-  /** For "wait": how long to pause (ms) before re-checking the page. */
-  ms?: number;
-  /** For "clickAt": absolute viewport pixel where the click lands (canvas/visual targets). */
-  x?: number;
-  y?: number;
-  /** For "drag": press at (fromX,fromY) and release at (toX,toY), in absolute viewport pixels. */
+  /** For "drag": press at (fromX,fromY), release at (toX,toY) — screenshot pixels. */
   fromX?: number;
   fromY?: number;
   toX?: number;
   toY?: number;
+  /** For "ask": a question for the USER; the run pauses until they answer in the spotlight. */
+  question?: string;
+  /** For "research": a question for the research sub-agent; its answer comes back as an observation. */
+  query?: string;
+  /** For "wait": how long to pause (ms) before taking the next screenshot. */
+  ms?: number;
   /** For "uploadFile": which dropped file (its index from the FILES list) to upload. */
   fileIndex?: number;
   /** Opaque vault metadata id returned by findCredentials. */
@@ -58,61 +57,34 @@ export interface AgentStepResult {
   error?: boolean;
 }
 
-/** A cheap in-page signature so wait() can poll for change without consuming a byakugan diff. */
+/** A cheap in-page signature so wait() can poll for change without spending a screenshot. */
 export const PAGE_SIGNATURE_JS = `(location.href + '||' + document.title + '||' + Array.from(document.querySelectorAll('a,button,input,[role=button]')).slice(0,40).map(e => { const secret = e instanceof HTMLInputElement && e.type === 'password'; return (e.innerText || (secret ? '[password]' : e.value) || '').trim().slice(0,24); }).join('~'))`;
 
-// --- Byakugan bridge (preload → main process) --------------------------------
+// --- Screenshot bridge (preload → main process) -------------------------------
 
-export interface EyesElement {
-  id: number;
-  role: string;
-  label: string;
-  bounds: { x: number; y: number; w: number; h: number };
-}
-export interface EyesMeta {
-  url: string;
-  title: string;
-  viewport: { width: number; height: number };
-  scrollPct: number;
-  frameCount: number;
-  tokens: number;
-}
-export interface EyesView {
+export interface PageShot {
   ok: boolean;
   error?: string;
-  /** Manifest text (observe / full diff) or the compact diff text ("NO CHANGE" when idle). */
-  text?: string;
-  tokens?: number;
-  /** diff() only: whether it fell back to the full manifest / a navigation happened. */
-  full?: boolean;
-  navigated?: boolean;
-  meta?: EyesMeta;
-  elements?: EyesElement[];
+  /** PNG data URI of the tab's current viewport. */
+  dataUri?: string;
+  /** Size of the image the model sees — the coordinate space it answers in. */
+  width?: number;
+  height?: number;
+  /** The page's CSS-pixel viewport, which is the coordinate space the mouse works in. */
+  viewport?: { w: number; h: number };
 }
-export type EyesActionVerb = 'click' | 'type' | 'press' | 'select' | 'hover' | 'scroll' | 'navigate';
+
+/** Keyboard/scroll verbs that need no target — dispatched by byakugan in the main process. */
+export type EyesActionVerb = 'press' | 'scroll';
 export interface EyesActResult {
   ok: boolean;
   detail?: string;
   error?: string;
-  /** What's covering the target when a verified action is refused (e.g. "div#cookie-banner"). */
-  blockedBy?: string;
-}
-export interface EyesLookResult {
-  ok: boolean;
-  error?: string;
-  dataUri?: string;
-  width?: number;
-  height?: number;
-  tokens?: number;
-  /** Where the crop sits in viewport CSS px, so screenshot pixels map back to clickAt coords. */
-  crop?: { x: number; y: number; w: number; h: number };
 }
 
 interface TojiEyes {
-  eyesObserve?: (webContentsId: number, maxTokens?: number) => Promise<EyesView>;
-  eyesDiff?: (webContentsId: number, maxTokens?: number) => Promise<EyesView>;
-  eyesAct?: (webContentsId: number, action: { verb: EyesActionVerb; id?: number; text?: string; key?: string; value?: string; url?: string; direction?: 'up' | 'down' }) => Promise<EyesActResult>;
-  eyesLook?: (webContentsId: number, target?: { id?: number; rect?: { x: number; y: number; w: number; h: number }; maxLongEdge?: number }) => Promise<EyesLookResult>;
+  pageScreenshot?: (webContentsId: number, maxLongEdge?: number) => Promise<PageShot>;
+  eyesAct?: (webContentsId: number, action: { verb: EyesActionVerb; key?: string; direction?: 'up' | 'down' }) => Promise<EyesActResult>;
 }
 
 function bridge(): TojiEyes | undefined {
@@ -121,22 +93,32 @@ function bridge(): TojiEyes | undefined {
 
 export function eyesAvailable(): boolean {
   const t = bridge();
-  return Boolean(t?.eyesObserve && t.eyesDiff && t.eyesAct && t.eyesLook);
+  return Boolean(t?.pageScreenshot && t.eyesAct);
 }
 
-export function eyesObserve(webContentsId: number, maxTokens?: number): Promise<EyesView> {
-  const fn = bridge()?.eyesObserve;
-  return fn ? fn(webContentsId, maxTokens) : Promise.resolve({ ok: false, error: 'perception bridge unavailable' });
+export function pageScreenshot(webContentsId: number, maxLongEdge?: number): Promise<PageShot> {
+  const fn = bridge()?.pageScreenshot;
+  return fn ? fn(webContentsId, maxLongEdge) : Promise.resolve({ ok: false, error: 'screenshot bridge unavailable' });
 }
-export function eyesDiff(webContentsId: number, maxTokens?: number): Promise<EyesView> {
-  const fn = bridge()?.eyesDiff;
-  return fn ? fn(webContentsId, maxTokens) : Promise.resolve({ ok: false, error: 'perception bridge unavailable' });
-}
-export function eyesAct(webContentsId: number, action: { verb: EyesActionVerb; id?: number; text?: string; key?: string; value?: string; url?: string; direction?: 'up' | 'down' }): Promise<EyesActResult> {
+
+export function eyesAct(webContentsId: number, action: { verb: EyesActionVerb; key?: string; direction?: 'up' | 'down' }): Promise<EyesActResult> {
   const fn = bridge()?.eyesAct;
-  return fn ? fn(webContentsId, action) : Promise.resolve({ ok: false, error: 'perception bridge unavailable' });
+  return fn ? fn(webContentsId, action) : Promise.resolve({ ok: false, error: 'action bridge unavailable' });
 }
-export function eyesLook(webContentsId: number, target?: { id?: number; rect?: { x: number; y: number; w: number; h: number }; maxLongEdge?: number }): Promise<EyesLookResult> {
-  const fn = bridge()?.eyesLook;
-  return fn ? fn(webContentsId, target) : Promise.resolve({ ok: false, error: 'perception bridge unavailable' });
+
+/**
+ * Scale a point from screenshot pixels to page CSS pixels. The capture is downscaled for
+ * token cost and taken in device pixels, so the two spaces rarely match; a model that
+ * answers in CSS px anyway (or in 0..1 fractions) still lands in the right place.
+ */
+export function toPagePoint(x: number, y: number, shot: { width?: number; height?: number; viewport?: { w: number; h: number } }): { x: number; y: number } {
+  const vw = shot.viewport?.w ?? 0;
+  const vh = shot.viewport?.h ?? 0;
+  if (!vw || !vh) return { x: Math.round(x), y: Math.round(y) };
+  // A 0..1 fraction is unambiguous at this scale, and some models answer that way.
+  if (x >= 0 && x <= 1 && y >= 0 && y <= 1) return { x: Math.round(x * vw), y: Math.round(y * vh) };
+  const iw = shot.width || vw;
+  const ih = shot.height || vh;
+  const clamp = (v: number, max: number) => Math.round(Math.max(0, Math.min(max - 1, v)));
+  return { x: clamp((x * vw) / iw, vw), y: clamp((y * vh) / ih, vh) };
 }
