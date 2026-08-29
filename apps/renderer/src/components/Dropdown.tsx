@@ -1,5 +1,6 @@
 import { Check, ChevronDown } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { FIELD } from '../lib/fieldStyles';
 
 export interface DropdownOption<T extends string> {
   value: T;
@@ -51,7 +52,7 @@ export function Dropdown<T extends string>({ value, options, onChange, disabled,
         type="button"
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between gap-2 rounded-lg border border-black/10 bg-transparent px-2.5 py-2 text-left text-[13px] outline-none transition hover:border-black/20 focus:border-black/30 disabled:opacity-50 dark:border-white/12 dark:hover:border-white/20 dark:focus:border-white/30"
+        className={`${FIELD} flex items-center justify-between gap-2 text-left hover:border-black/20 disabled:opacity-50 dark:hover:border-white/20`}
       >
         <span className="flex min-w-0 items-center gap-2">
           {selected?.dotColor && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: selected.dotColor }} />}

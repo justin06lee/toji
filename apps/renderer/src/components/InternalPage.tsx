@@ -30,6 +30,7 @@ import { CONTAINER_COLORS, PROFILE_AVATARS, containerId as makeContainerId, type
 import { VaultUnavailable } from './VaultBar';
 import { ProfileAvatar } from './WindowProfilePicker';
 import { SEARCH_ENGINES, type SearchEngineId } from '../lib/nav';
+import { FIELD, FIELD_BUTTON, FIELD_BUTTON_QUIET, FIELD_MONO, FIELD_TEXTAREA } from '../lib/fieldStyles';
 import { Dropdown, type DropdownOption } from './Dropdown';
 
 
@@ -141,7 +142,7 @@ function WelcomeView({ onOpenUrl, onGetStarted }: { onOpenUrl: (url: string) => 
                 <Puzzle size={13} /> Chrome Web Store
               </button>
             )}
-            <button type="button" onClick={() => void addExt()} className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-black/15 px-2.5 py-1 text-[12px] text-neutral-600 transition hover:border-black/30 dark:border-white/15 dark:text-neutral-300">
+            <button type="button" onClick={() => void addExt()} className={`${FIELD_BUTTON_QUIET} border-dashed border-black/15 text-neutral-600 dark:text-neutral-300`}>
               <Plus size={13} /> Load unpacked…
             </button>
           </div>
@@ -185,7 +186,7 @@ function WelcomeView({ onOpenUrl, onGetStarted }: { onOpenUrl: (url: string) => 
                       type="button"
                       disabled={!b.available || importing !== null}
                       onClick={() => void doImport(b.id)}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 px-2.5 py-1 text-[12px] transition enabled:hover:border-black/30 disabled:opacity-40 dark:border-white/15"
+                      className={FIELD_BUTTON_QUIET}
                     >
                       {importing === b.id ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />} Import bookmarks
                     </button>
@@ -349,7 +350,9 @@ function ContainersSettings({ containers, onChange, onClear }: { containers: Con
               value={container.name}
               onChange={(e) => patch(container.id, { name: e.target.value })}
               aria-label="Container name"
-              className="min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-2 py-1 text-[13px] outline-none hover:border-black/10 focus:border-black/30 dark:hover:border-white/12 dark:focus:border-white/30"
+              /* Reads as plain text until hovered/focused, but keeps the shared field
+                 height so it lines up with the egress dropdown beside it. */
+              className={`${FIELD} min-w-0 flex-1 border-transparent hover:border-black/10 dark:hover:border-white/12`}
             />
             <Dropdown
               value={container.egress}
@@ -361,10 +364,10 @@ function ContainersSettings({ containers, onChange, onClear }: { containers: Con
               type="button"
               onClick={() => patch(container.id, { ephemeral: !container.ephemeral })}
               title={container.ephemeral ? 'Ephemeral: discarded when the last tab closes' : 'Persistent: stays signed in across restarts'}
-              className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] transition ${
+              className={`${FIELD_BUTTON_QUIET} ${
                 container.ephemeral
                   ? 'border-black/20 bg-black/[0.05] dark:border-white/25 dark:bg-white/10'
-                  : 'border-black/10 text-neutral-500 hover:border-black/20 dark:border-white/12 dark:text-neutral-400 dark:hover:border-white/25'
+                  : 'text-neutral-500 dark:text-neutral-400'
               }`}
             >
               <EyeOff size={12} />
@@ -397,13 +400,13 @@ function ContainersSettings({ containers, onChange, onClear }: { containers: Con
           onChange={(e) => setNewName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && add()}
           placeholder="New container name"
-          className="min-w-0 flex-1 rounded-lg border border-black/10 bg-transparent px-2.5 py-1.5 text-[13px] outline-none focus:border-black/30 dark:border-white/12 dark:focus:border-white/30"
+          className={`${FIELD} min-w-0 flex-1`}
         />
         <button
           type="button"
           onClick={add}
           disabled={!newName.trim()}
-          className="inline-flex h-[34px] shrink-0 items-center gap-1.5 rounded-lg bg-neutral-900 px-3 text-[13px] text-white transition hover:opacity-85 disabled:opacity-35 dark:bg-white dark:text-neutral-900"
+          className={FIELD_BUTTON}
         >
           <Plus size={13} />
           Add
@@ -461,7 +464,7 @@ function TorSettings() {
           {running && !status.ready && <span className="shrink-0 text-[12px] tabular-nums text-neutral-400">{status.progress}%</span>}
 
           {status.ready && (
-            <button type="button" onClick={run(bridge().torNewCircuit)} disabled={busy} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-black/10 px-2.5 text-[12px] transition hover:border-black/25 disabled:opacity-40 dark:border-white/12 dark:hover:border-white/30">
+            <button type="button" onClick={run(bridge().torNewCircuit)} disabled={busy} className={FIELD_BUTTON_QUIET}>
               <RefreshCw size={12} className={busy ? 'animate-spin' : undefined} />
               New circuit
             </button>
@@ -470,7 +473,7 @@ function TorSettings() {
             type="button"
             onClick={run(running ? bridge().torStop : bridge().torStart)}
             disabled={busy}
-            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-neutral-900 px-3 text-[12px] text-white transition hover:opacity-85 disabled:opacity-40 dark:bg-white dark:text-neutral-900"
+            className={FIELD_BUTTON}
           >
             {busy && <Loader2 size={12} className="animate-spin" />}
             {running ? 'Stop Tor' : 'Start Tor'}
@@ -556,12 +559,12 @@ function VaultSettings({ containers }: { containers: Container[] }) {
       ) : (
         <>
           <div className="mb-4 flex flex-wrap items-center gap-2">
-            <button type="button" onClick={generate} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-black/10 px-2.5 text-[12px] transition hover:border-black/25 dark:border-white/12 dark:hover:border-white/30">
+            <button type="button" onClick={generate} className={FIELD_BUTTON_QUIET}>
               <RefreshCw size={12} />
               Generate a password
             </button>
             {generated && (
-              <button type="button" onClick={copy} title="Copy to clipboard" className="inline-flex h-8 min-w-0 items-center gap-2 rounded-lg border border-black/10 px-2.5 font-mono text-[12px] transition hover:border-black/25 dark:border-white/12 dark:hover:border-white/30">
+              <button type="button" onClick={copy} title="Copy to clipboard" className={`${FIELD_BUTTON_QUIET} min-w-0 font-mono`}>
                 <span className="truncate">{generated}</span>
                 {copied ? <Check size={12} className="shrink-0 text-neutral-500" /> : <Copy size={12} className="shrink-0 text-neutral-400" />}
               </button>
@@ -620,7 +623,7 @@ function ProviderField({ label, value, onChange, placeholder, secret }: { label:
         placeholder={placeholder}
         spellCheck={false}
         autoComplete="off"
-        className="w-full rounded-lg border border-black/10 bg-transparent px-2.5 py-1.5 font-mono text-[12px] outline-none focus:border-black/30 dark:border-white/12 dark:focus:border-white/30"
+        className={FIELD_MONO}
       />
     </label>
   );
@@ -770,7 +773,7 @@ function AgentSettings() {
   };
 
   const saveButton = (
-    <button type="button" onClick={() => void apply({})} disabled={saving} className="shrink-0 self-end rounded-lg bg-neutral-900 px-3 py-1.5 text-[12px] font-medium text-white transition enabled:hover:opacity-85 disabled:opacity-40 dark:bg-white dark:text-neutral-900">
+    <button type="button" onClick={() => void apply({})} disabled={saving} className={`${FIELD_BUTTON} self-end`}>
       Save
     </button>
   );
@@ -1092,9 +1095,9 @@ function MemorySettings() {
               }
             }}
             placeholder="Add a memory the agent should keep…"
-            className="min-w-0 flex-1 rounded-lg border border-black/10 bg-transparent px-2.5 py-1.5 text-[12.5px] outline-none focus:border-black/30 dark:border-white/12"
+            className={`${FIELD} min-w-0 flex-1`}
           />
-          <button type="button" disabled={!newFact.trim()} onClick={() => void addMemory(newFact.trim()).then(() => { setNewFact(''); void refresh(); })} className="shrink-0 rounded-lg border border-black/10 px-2.5 py-1.5 text-[12px] transition enabled:hover:border-black/30 disabled:opacity-40 dark:border-white/15">
+          <button type="button" disabled={!newFact.trim()} onClick={() => void addMemory(newFact.trim()).then(() => { setNewFact(''); void refresh(); })} className={FIELD_BUTTON_QUIET}>
             Add
           </button>
         </div>
@@ -1122,7 +1125,7 @@ function PinnedField({ label, value, cap, onChange }: { label: string; value: st
         <span>{label}</span>
         <span className={over ? 'text-red-500' : ''}>{value.length}/{cap}</span>
       </span>
-      <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={3} className={`w-full resize-y rounded-lg border bg-transparent px-2.5 py-1.5 text-[12.5px] outline-none ${over ? 'border-red-400' : 'border-black/10 focus:border-black/30 dark:border-white/12'}`} />
+      <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={3} className={`${FIELD_TEXTAREA} ${over ? 'border-red-400' : ''}`} />
     </label>
   );
 }
