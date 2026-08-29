@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { config } from '../config.js';
-import { defaultAgentChoice } from '../agents/agentRuntime.js';
+import { defaultAgentChoice, normalizeAgentChoice } from '../agents/agentRuntime.js';
 import type { ResearchSessionState, UserSettings } from '../types.js';
 
 const sessionsDir = path.join(config.dataDir, 'sessions');
@@ -167,15 +167,10 @@ export function defaultSettings(): UserSettings {
     visualAnalysis: config.enableVisualAnalysis,
     theme: 'dark',
     agent: agentChoice.agent,
-    agentCmd: agentChoice.agentCmd,
     agentModel: agentChoice.agentModel,
     agentThinking: agentChoice.agentThinking,
-    // API backends (Claude API / OpenAI API / self-hosted endpoint) — unconfigured by
-    // default; the user pastes a key or URL in Settings and it lives only in this file.
-    anthropicApiKey: '',
-    anthropicModel: '',
-    openaiApiKey: '',
-    openaiModel: '',
+    // Custom OpenAI-compatible endpoint — unconfigured by default; the user enters a
+    // URL (and optionally a key) in Settings and it lives only in this file.
     localUrl: '',
     localModel: '',
     localApiKey: ''
@@ -183,11 +178,22 @@ export function defaultSettings(): UserSettings {
 }
 
 export async function loadSettings(): Promise<UserSettings> {
+  const defaults = defaultSettings();
   try {
-    const raw = JSON.parse(await fs.readFile(settingsFile, 'utf8')) as Partial<UserSettings>;
-    return { ...defaultSettings(), ...raw };
+    const raw = JSON.parse(await fs.readFile(settingsFile, 'utf8')) as Record<string, unknown>;
+    // Copy only the fields this build knows, so keys written by older builds
+    // (CLI presets, hosted-API keys) don't ride along forever.
+    const settings = { ...defaults };
+    for (const key of Object.keys(defaults) as Array<keyof UserSettings>) {
+      if (key in raw && typeof raw[key] === typeof defaults[key]) {
+        (settings as Record<string, unknown>)[key] = raw[key];
+      }
+    }
+    // Older builds stored backend names that all route through yagami now.
+    settings.agent = normalizeAgentChoice(raw.agent ?? settings.agent);
+    return settings;
   } catch {
-    return defaultSettings();
+    return defaults;
   }
 }
 

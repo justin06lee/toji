@@ -33,7 +33,7 @@ export function VaultPromptBar({
   };
 
   const dismiss = async () => {
-    await bridge().vaultDismiss?.(prompt.webContentsId);
+    if (prompt.status !== 'saved') await bridge().vaultDismiss?.(prompt.webContentsId);
     onDone();
   };
 
@@ -45,6 +45,17 @@ export function VaultPromptBar({
       <span className="min-w-0 flex-1 truncate">
         {error ? (
           <span className="text-rose-600 dark:text-rose-400">Could not save: {error}</span>
+        ) : prompt.status === 'saved' ? (
+          // A password Toji generated was used on this site — it's already in the vault.
+          <>
+            Saved the login for <span className="font-medium">{prompt.username || site}</span>
+            {prompt.username && <span className="text-neutral-400"> on {site}</span>} in{' '}
+            <span className="inline-flex items-center gap-1">
+              <span className="inline-block h-1.5 w-1.5 rounded-full align-middle" style={{ background: container.color }} />
+              {container.name}
+            </span>
+            .
+          </>
         ) : (
           <>
             {prompt.status === 'update' ? 'Update the password' : 'Save the password'} for{' '}
@@ -58,7 +69,7 @@ export function VaultPromptBar({
           </>
         )}
       </span>
-      {!error && (
+      {!error && prompt.status !== 'saved' && (
         <button type="button" onClick={save} disabled={busy} className="inline-flex shrink-0 items-center gap-1 rounded-md bg-neutral-900 px-2 py-1 text-white transition hover:opacity-85 disabled:opacity-40 dark:bg-white dark:text-neutral-900">
           <Check size={11} />
           {prompt.status === 'update' ? 'Update' : 'Save'}

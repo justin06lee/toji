@@ -17,7 +17,7 @@ import { gatherPageSources } from './agents/search.js';
 import { getCachedPage, putCachedPage } from './lib/pageCache.js';
 import { nextAgentAction, researchHelp } from './agents/webAgent.js';
 import { agentAvailable, liveModelName } from './agents/model.js';
-import { apiStatus, detectAgents, getEffectiveAgent, isValidAgentCmd, refreshDetection, setAgentChoice, setApiConfig } from './agents/agentRuntime.js';
+import { agentStatus, refreshDetection, setAgentChoice, setApiConfig } from './agents/agentRuntime.js';
 import { addFact, listFacts, removeFact, readPinned, writePinned, PINNED_CAPS } from './lib/memory.js';
 import { detectBrowsers, importBookmarks } from './lib/browserImport.js';
 import { listBookmarks, addBookmarks, removeBookmark } from './lib/bookmarks.js';
@@ -95,18 +95,13 @@ const settingsPatchSchema = z
     defaultFreshness: z.enum(['auto', 'latest', 'timeless']).optional(),
     visualAnalysis: z.boolean().optional(),
     theme: z.enum(['dark', 'system']).optional(),
-    agent: z.enum(['auto', 'claude', 'codex', 'opencode', 'anthropic', 'openai', 'local', 'off']).optional(),
-    agentCmd: z.string().max(500).refine((val) => !val || isValidAgentCmd(val), { message: 'Invalid agent command: contains unsafe characters or references a disallowed binary' }).optional(),
-    agentModel: z.string().max(120).optional(),
+    agent: z.enum(['yagami', 'local', 'off']).optional(),
+    agentModel: z.string().max(160).optional(),
     agentThinking: z.enum(['default', 'low', 'medium', 'high']).optional(),
-    anthropicApiKey: z.string().max(400).optional(),
-    anthropicModel: z.string().max(120).optional(),
-    openaiApiKey: z.string().max(400).optional(),
-    openaiModel: z.string().max(120).optional(),
     localUrl: z
       .string()
       .max(400)
-      .refine((val) => !val || /^https?:\/\//i.test(val.trim()), { message: 'Self-hosted URL must start with http:// or https://' })
+      .refine((val) => !val || /^https?:\/\//i.test(val.trim()), { message: 'Custom endpoint URL must start with http:// or https://' })
       .optional(),
     localModel: z.string().max(160).optional(),
     localApiKey: z.string().max(400).optional()
@@ -116,7 +111,7 @@ const settingsPatchSchema = z
 // API keys are stored in the local settings.json but never echoed back over HTTP:
 // responses carry a mask (so the UI can show "saved"), and a PATCH whose key value is
 // still the mask leaves the stored key untouched.
-const KEY_FIELDS = ['anthropicApiKey', 'openaiApiKey', 'localApiKey'] as const;
+const KEY_FIELDS = ['localApiKey'] as const;
 const MASK_PREFIX = '••••';
 const maskKey = (value: string) => (value ? `${MASK_PREFIX}${value.slice(-4)}` : '');
 function maskSettings(settings: UserSettings): UserSettings {
@@ -193,13 +188,8 @@ app.patch('/api/settings', async (req, res, next) => {
     const current = await loadSettings();
     const nextSettings: UserSettings = { ...current, ...patch };
     await saveSettings(nextSettings);
-    // Apply the choice + API config immediately so changes take effect without a restart.
-    setAgentChoice({
-      agent: nextSettings.agent,
-      agentCmd: nextSettings.agentCmd,
-      agentModel: nextSettings.agentModel,
-      agentThinking: nextSettings.agentThinking
-    });
+    // Apply the choice + endpoint config immediately so changes take effect without a restart.
+    setAgentChoice({ agent: nextSettings.agent, agentModel: nextSettings.agentModel, agentThinking: nextSettings.agentThinking });
     setApiConfig(nextSettings);
     broadcast({ type: 'settings_update', settings: maskSettings(nextSettings) });
     res.json(maskSettings(nextSettings));
@@ -208,19 +198,14 @@ app.patch('/api/settings', async (req, res, next) => {
   }
 });
 
-// Which coding agents are installed, which API backends are configured, and which
-// command/backend Toji will actually run. The UI uses this for the backend picker.
+// Which yagami harnesses are installed, whether the custom endpoint is configured,
+// and what Toji will actually run. The UI uses this for the backend picker.
 app.get('/api/agents', (_req, res) => {
-  const detected = refreshDetection();
-  const effective = getEffectiveAgent();
+  refreshDetection();
   res.json({
-    detected,
     available: agentAvailable(),
     model: liveModelName(),
-    api: apiStatus(),
-    effective: effective
-      ? { id: effective.id, label: effective.label, source: effective.source, command: [effective.cmd, ...effective.args].join(' ') }
-      : null
+    ...agentStatus()
   });
 });
 
@@ -439,10 +424,7 @@ app.post('/api/agent/step', expensiveRateLimit, async (req, res, next) => {
         image: z.string().max(12_000_000).optional(),
         crop: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }).optional(),
         viewport: z.object({ w: z.number(), h: z.number() }).optional(),
-        credentials: z
-          .array(z.object({ name: z.string().max(60), keys: z.array(z.string().max(60)).max(20), active: z.boolean().optional() }))
-          .max(20)
-          .optional(),
+        credentialAccess: z.boolean().optional(),
         files: z
           .array(z.object({ index: z.number(), name: z.string().max(200), mime: z.string().max(120).optional() }))
           .max(40)
@@ -620,16 +602,11 @@ await ensureDataDirs();
 await researchOrchestrator.hydrate();
 
 // Seed the effective agent from persisted settings (falls back to env-derived
-// defaults on first run), and detect installed agents once at boot.
-detectAgents();
+// defaults on first run), and detect installed yagami harnesses once at boot.
+refreshDetection();
 try {
   const settings = await loadSettings();
-  setAgentChoice({
-    agent: settings.agent,
-    agentCmd: settings.agentCmd,
-    agentModel: settings.agentModel,
-    agentThinking: settings.agentThinking
-  });
+  setAgentChoice({ agent: settings.agent, agentModel: settings.agentModel, agentThinking: settings.agentThinking });
   setApiConfig(settings);
 } catch (error) {
   // Defaults (env-seeded) apply if settings can't be read.

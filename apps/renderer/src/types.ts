@@ -307,10 +307,9 @@ export type ServerEvent = (
   | { type: 'page_sources'; pageId: string; sources: PageSource[] }
 ) & { at?: string };
 
-export type AgentId = 'claude' | 'codex' | 'opencode';
-/** HTTP inference backends: hosted APIs with a pasted key, or any OpenAI-compatible endpoint. */
-export type ApiProvider = 'anthropic' | 'openai' | 'local';
-export type AgentChoice = AgentId | ApiProvider | 'auto' | 'off';
+/** 'yagami' embeds the yagami engine (signed-in coding CLIs, no keys); 'local' is a
+ *  custom OpenAI-compatible endpoint; 'off' forces the deterministic fallbacks. */
+export type AgentChoice = 'yagami' | 'local' | 'off';
 export type ThinkingLevel = 'default' | 'low' | 'medium' | 'high';
 
 export interface UserSettings {
@@ -321,38 +320,23 @@ export interface UserSettings {
   visualAnalysis: boolean;
   theme: 'dark' | 'system';
   agent: AgentChoice;
-  agentCmd: string;
+  /** Yagami model id ('' = the engine's default; supports "provider:model"). */
   agentModel: string;
   agentThinking: ThinkingLevel;
-  /** API keys come back MASKED ('••••xxxx') — the real values never leave the server's
-   *  local settings file. Sending the mask back in a PATCH leaves the stored key as-is. */
-  anthropicApiKey: string;
-  anthropicModel: string;
-  openaiApiKey: string;
-  openaiModel: string;
   localUrl: string;
   localModel: string;
+  /** Comes back MASKED ('••••xxxx') — the real value never leaves the server's local
+   *  settings file. Sending the mask back in a PATCH leaves the stored key as-is. */
   localApiKey: string;
 }
 
-export interface DetectedAgent {
-  id: AgentId;
-  label: string;
-  available: boolean;
-  path: string | null;
-}
-
 export interface AgentsStatus {
-  detected: DetectedAgent[];
   available: boolean;
-  /** Live backend label, e.g. "api: Claude API · claude-opus-4-8" or "cli: opencode". */
+  /** Live backend label, e.g. "Yagami · auto" or "custom endpoint · llama3.2". */
   model: string;
-  api: {
-    anthropic: { configured: boolean; model: string };
-    openai: { configured: boolean; model: string };
-    local: { configured: boolean; url: string; model: string };
-  };
-  effective: { id: AgentId | null; label: string; source: string; command: string } | null;
+  choice: AgentChoice;
+  yagami: { providers: Array<{ id: string; label: string; installed: boolean }>; anyInstalled: boolean; model: string };
+  local: { configured: boolean; url: string; model: string };
 }
 
 export interface AppConfig {

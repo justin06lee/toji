@@ -1,4 +1,4 @@
-import { BookMarked, Boxes, Brain, Check, Compass, Cpu, Download, EyeOff, FileText, KeyRound, Loader2, Paperclip, Plus, Puzzle, RefreshCw, Route, Search, ShieldCheck, Star, Trash2, TriangleAlert, X } from 'lucide-react';
+import { BookMarked, Boxes, Brain, Check, Compass, Copy, Cpu, Download, EyeOff, FileText, KeyRound, Loader2, Paperclip, Plus, Puzzle, RefreshCw, Route, Search, Star, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import {
   addMemory,
@@ -22,19 +22,17 @@ import {
   type PinnedMemory,
   type ReferenceDoc
 } from '../lib/api';
-import type { AgentChoice, AgentId, AgentsStatus, InternalPage as InternalPageKind, ThinkingLevel, UserSettings } from '../types';
-import type { CredentialSet, CredentialStore } from '../lib/credentials';
+import type { AgentChoice, AgentsStatus, InternalPage as InternalPageKind, ThinkingLevel, UserSettings } from '../types';
 import { bridge, type TorStatus, type VaultEntry, type VaultStatus } from '../lib/bridge';
-import { CONTAINER_COLORS, containerId as makeContainerId, type Container, type Egress } from '../lib/containers';
+import { CONTAINER_COLORS, PROFILE_AVATARS, containerId as makeContainerId, type Container, type Egress } from '../lib/containers';
 import { VaultUnavailable } from './VaultBar';
+import { ProfileAvatar } from './WindowProfilePicker';
 import { SEARCH_ENGINES, type SearchEngineId } from '../lib/nav';
 import { Dropdown, type DropdownOption } from './Dropdown';
 
 
 interface InternalPageProps {
   page: InternalPageKind;
-  store: CredentialStore;
-  onChange: (store: CredentialStore) => void;
   onOpenUrl: (url: string) => void;
   onGetStarted: () => void;
   containers: Container[];
@@ -42,14 +40,14 @@ interface InternalPageProps {
   onClearContainer: (containerId: string) => void;
 }
 
-export function InternalPage({ page, store, onChange, onOpenUrl, onGetStarted, containers, onContainersChange, onClearContainer }: InternalPageProps) {
+export function InternalPage({ page, onOpenUrl, onGetStarted, containers, onContainersChange, onClearContainer }: InternalPageProps) {
   return (
     <div className="h-full w-full overflow-y-auto bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
       <div className="mx-auto w-[min(760px,92vw)] px-6 py-12">
         {page === 'welcome' ? (
           <WelcomeView onOpenUrl={onOpenUrl} onGetStarted={onGetStarted} />
         ) : (
-          <SettingsView store={store} onChange={onChange} containers={containers} onContainersChange={onContainersChange} onClearContainer={onClearContainer} />
+          <SettingsView containers={containers} onContainersChange={onContainersChange} onClearContainer={onClearContainer} />
         )}
       </div>
     </div>
@@ -237,45 +235,37 @@ function BookmarksList({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
-const MODELS: Record<AgentId, DropdownOption<string>[]> = {
-  claude: [
-    { value: '', label: 'Default' },
-    { value: 'opus', label: 'Opus' },
-    { value: 'sonnet', label: 'Sonnet' },
-    { value: 'haiku', label: 'Haiku' }
-  ],
-  codex: [
-    { value: '', label: 'Default' },
-    { value: 'gpt-5-codex', label: 'gpt-5-codex' },
-    { value: 'gpt-5', label: 'gpt-5' },
-    { value: 'o3', label: 'o3' }
-  ],
-  opencode: [{ value: '', label: 'Default' }]
-};
 const THINKING: DropdownOption<ThinkingLevel>[] = [
   { value: 'default', label: 'Default' },
   { value: 'low', label: 'Low' },
   { value: 'medium', label: 'Medium' },
   { value: 'high', label: 'High' }
 ];
-const AGENT_LABELS: Record<AgentId, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'opencode' };
-// Claude API model ids ('' = the server default, claude-opus-4-8).
-const ANTHROPIC_MODELS: DropdownOption<string>[] = [
-  { value: '', label: 'Opus 4.8 (default)' },
-  { value: 'claude-sonnet-5', label: 'Sonnet 5' },
-  { value: 'claude-haiku-4-5', label: 'Haiku 4.5' }
-];
-type AgentPick = AgentChoice | 'custom';
+
+/**
+ * The one status mark used across settings: a small neutral dot. Filled = active,
+ * hollow = inactive, pulsing hollow = in progress. No traffic-light colors.
+ */
+function StatusDot({ state }: { state: 'on' | 'busy' | 'off' }) {
+  return (
+    <span
+      aria-hidden
+      className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
+        state === 'on'
+          ? 'bg-neutral-900 dark:bg-white'
+          : state === 'busy'
+            ? 'animate-pulse border border-neutral-400 dark:border-neutral-500'
+            : 'border border-neutral-300 dark:border-neutral-600'
+      }`}
+    />
+  );
+}
 
 function SettingsView({
-  store,
-  onChange,
   containers,
   onContainersChange,
   onClearContainer
 }: {
-  store: CredentialStore;
-  onChange: (s: CredentialStore) => void;
   containers: Container[];
   onContainersChange: (containers: Container[]) => void;
   onClearContainer: (containerId: string) => void;
@@ -288,7 +278,6 @@ function SettingsView({
       <VaultSettings containers={containers} />
       <AgentSettings />
       <SearchSettings />
-      <CredentialsSettings store={store} onChange={onChange} />
       <MemorySettings />
     </div>
   );
@@ -315,6 +304,7 @@ function ContainersSettings({ containers, onChange, onClear }: { containers: Con
       {
         id: makeContainerId(name, containers),
         name,
+        avatar: PROFILE_AVATARS[containers.length % PROFILE_AVATARS.length],
         color: CONTAINER_COLORS[containers.length % CONTAINER_COLORS.length],
         egress: 'direct',
         ephemeral: false
@@ -334,6 +324,18 @@ function ContainersSettings({ containers, onChange, onClear }: { containers: Con
       <div className="divide-y divide-black/[0.07] rounded-xl border border-black/10 dark:divide-white/10 dark:border-white/12">
         {containers.map((container) => (
           <div key={container.id} className="flex flex-wrap items-center gap-3 p-3">
+            <button
+              type="button"
+              onClick={() => {
+                const current = PROFILE_AVATARS.indexOf(container.avatar as (typeof PROFILE_AVATARS)[number]);
+                patch(container.id, { avatar: PROFILE_AVATARS[(current + 1) % PROFILE_AVATARS.length] });
+              }}
+              aria-label={`${container.name} profile picture`}
+              title="Change profile picture"
+              className="shrink-0 rounded-full outline-none transition hover:scale-105 focus-visible:ring-2 focus-visible:ring-neutral-400"
+            >
+              <ProfileAvatar container={container} />
+            </button>
             <input
               type="color"
               aria-label={`${container.name} color`}
@@ -406,8 +408,7 @@ function ContainersSettings({ containers, onChange, onClear }: { containers: Con
         </button>
       </div>
 
-      <p className="mt-3 flex items-start gap-1.5 text-[12px] leading-relaxed text-neutral-400">
-        <Route size={13} className="mt-px shrink-0" />
+      <p className="mt-3 text-[12px] leading-relaxed text-neutral-400">
         Containers set to Tor stay offline until Tor connects &mdash; they will not fall back to a direct connection.
       </p>
     </Section>
@@ -439,7 +440,6 @@ function TorSettings() {
   };
 
   const running = status.state !== 'off' && status.state !== 'error';
-  const dot = status.ready ? 'bg-emerald-500' : running ? 'bg-amber-500' : 'bg-neutral-400';
 
   return (
     <Section icon={<Route size={15} />} title="Tor">
@@ -451,10 +451,10 @@ function TorSettings() {
 
       <div className="rounded-xl border border-black/10 p-3 dark:border-white/12">
         <div className="flex flex-wrap items-center gap-3">
-          <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} />
+          <StatusDot state={status.ready ? 'on' : running ? 'busy' : 'off'} />
           <span className="min-w-0 flex-1 text-[13px]">
             {status.detail}
-            {status.source && <span className="ml-1.5 text-[11px] text-neutral-400">({status.source === 'managed' ? 'Toji-managed' : 'external'})</span>}
+            {status.source === 'external' && <span className="ml-1.5 text-[11px] text-neutral-400">(external)</span>}
           </span>
           {running && !status.ready && <span className="shrink-0 text-[12px] tabular-nums text-neutral-400">{status.progress}%</span>}
 
@@ -476,8 +476,7 @@ function TorSettings() {
         </div>
 
         {status.ready && !status.isolated && (
-          <p className="mt-3 flex items-start gap-1.5 border-t border-black/[0.07] pt-3 text-[12px] leading-relaxed text-amber-600 dark:border-white/10 dark:text-amber-400">
-            <TriangleAlert size={13} className="mt-px shrink-0" />
+          <p className="mt-3 border-t border-black/[0.07] pt-3 text-[12px] leading-relaxed text-neutral-500 dark:border-white/10 dark:text-neutral-400">
             Using a Tor instance that was already running. It offers a single SOCKS port, and Chromium cannot send SOCKS
             credentials, so every Tor container shares its circuits &mdash; they can be linked by their common exit. For
             per-container circuits, quit the other Tor and let Toji manage its own.
@@ -562,7 +561,7 @@ function VaultSettings({ containers }: { containers: Container[] }) {
             {generated && (
               <button type="button" onClick={copy} title="Copy to clipboard" className="inline-flex h-8 min-w-0 items-center gap-2 rounded-lg border border-black/10 px-2.5 font-mono text-[12px] transition hover:border-black/25 dark:border-white/12 dark:hover:border-white/30">
                 <span className="truncate">{generated}</span>
-                {copied ? <Check size={12} className="shrink-0 text-emerald-500" /> : <Download size={12} className="shrink-0 text-neutral-400" />}
+                {copied ? <Check size={12} className="shrink-0 text-neutral-500" /> : <Copy size={12} className="shrink-0 text-neutral-400" />}
               </button>
             )}
           </div>
@@ -625,21 +624,25 @@ function ProviderField({ label, value, onChange, placeholder, secret }: { label:
   );
 }
 
+type AgentPick = AgentChoice | 'alpaca' | 'cerebras';
+
+const AGENT_OPTIONS: DropdownOption<AgentPick>[] = [
+  { value: 'yagami', label: 'Yagami', hint: 'automatic' },
+  { value: 'alpaca', label: 'Alpaca', hint: 'under construction', disabled: true },
+  { value: 'cerebras', label: 'Cerebras', hint: 'under construction', disabled: true },
+  { value: 'local', label: 'Custom endpoint', hint: 'URL + key' },
+  { value: 'off', label: 'Off' }
+];
+
 function AgentSettings() {
   const [status, setStatus] = useState<AgentsStatus | null>(null);
-  const [agent, setAgent] = useState<AgentChoice>('auto');
-  const [agentCmd, setAgentCmd] = useState('');
+  const [agent, setAgent] = useState<AgentChoice>('yagami');
   const [agentModel, setAgentModel] = useState('');
   const [agentThinking, setAgentThinking] = useState<ThinkingLevel>('default');
-  // API backends — keys arrive masked; typing a new value replaces the stored key on save.
-  const [anthropicKey, setAnthropicKey] = useState('');
-  const [anthropicModel, setAnthropicModel] = useState('');
-  const [openaiKey, setOpenaiKey] = useState('');
-  const [openaiModel, setOpenaiModel] = useState('');
+  // Custom endpoint — the key arrives masked; typing a new value replaces it on save.
   const [localUrl, setLocalUrl] = useState('');
   const [localModel, setLocalModel] = useState('');
   const [localKey, setLocalKey] = useState('');
-  const [customOpen, setCustomOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [applyErr, setApplyErr] = useState('');
@@ -647,17 +650,11 @@ function AgentSettings() {
   const refresh = useCallback(async () => {
     const [settings, agents] = await Promise.all([getSettings(), getAgents()]);
     setAgent(settings.agent);
-    setAgentCmd(settings.agentCmd ?? '');
     setAgentModel(settings.agentModel ?? '');
     setAgentThinking(settings.agentThinking ?? 'default');
-    setAnthropicKey(settings.anthropicApiKey ?? '');
-    setAnthropicModel(settings.anthropicModel ?? '');
-    setOpenaiKey(settings.openaiApiKey ?? '');
-    setOpenaiModel(settings.openaiModel ?? '');
     setLocalUrl(settings.localUrl ?? '');
     setLocalModel(settings.localModel ?? '');
     setLocalKey(settings.localApiKey ?? '');
-    setCustomOpen(Boolean(settings.agentCmd?.trim()));
     setStatus(agents);
   }, []);
   useEffect(() => {
@@ -667,20 +664,14 @@ function AgentSettings() {
   const apply = async (patch: Partial<UserSettings>) => {
     const next: Partial<UserSettings> = {
       agent,
-      agentCmd,
-      agentModel,
+      agentModel: agentModel.trim(),
       agentThinking,
-      anthropicApiKey: anthropicKey,
-      anthropicModel,
-      openaiApiKey: openaiKey,
-      openaiModel,
       localUrl: localUrl.trim(),
       localModel: localModel.trim(),
       localApiKey: localKey,
       ...patch
     };
     if (next.agent !== undefined) setAgent(next.agent);
-    if (next.agentCmd !== undefined) setAgentCmd(next.agentCmd);
     if (next.agentModel !== undefined) setAgentModel(next.agentModel);
     if (next.agentThinking !== undefined) setAgentThinking(next.agentThinking);
     setSaving(true);
@@ -688,9 +679,7 @@ function AgentSettings() {
     setApplyErr('');
     try {
       const settings = await saveSettings(next);
-      // Reflect the server's masked keys so we never hold a plaintext key in state longer than needed.
-      setAnthropicKey(settings.anthropicApiKey ?? '');
-      setOpenaiKey(settings.openaiApiKey ?? '');
+      // Reflect the server's masked key so we never hold a plaintext key in state longer than needed.
       setLocalKey(settings.localApiKey ?? '');
       setStatus(await getAgents());
       setSaved(true);
@@ -701,87 +690,53 @@ function AgentSettings() {
     }
   };
 
-  const usingCustom = customOpen || Boolean(agentCmd.trim());
-  const pick: AgentPick = usingCustom ? 'custom' : agent;
-  const detected = status?.detected.filter((d) => d.available) ?? [];
-  const options: DropdownOption<AgentPick>[] = [
-    { value: 'auto', label: 'Auto-detect' },
-    ...detected.map((d) => ({ value: d.id as AgentPick, label: AGENT_LABELS[d.id] })),
-    { value: 'anthropic', label: 'Claude API' },
-    { value: 'openai', label: 'OpenAI API' },
-    { value: 'local', label: 'Self-hosted / local model' },
-    { value: 'custom', label: 'Custom command' },
-    { value: 'off', label: 'Off' }
-  ];
-  const isApiPick = agent === 'anthropic' || agent === 'openai' || agent === 'local';
-  const tunedId: AgentId | null = usingCustom || agent === 'off' || isApiPick ? null : agent === 'auto' ? detected[0]?.id ?? null : agent;
-
   const saveButton = (
     <button type="button" onClick={() => void apply({})} disabled={saving} className="shrink-0 self-end rounded-lg bg-neutral-900 px-3 py-1.5 text-[12px] font-medium text-white transition enabled:hover:opacity-85 disabled:opacity-40 dark:bg-white dark:text-neutral-900">
       Save
     </button>
   );
 
+  const installed = status?.yagami.providers.filter((p) => p.installed) ?? [];
+
   return (
     <Section icon={<Cpu size={16} />} title="AI model">
       <p className="mb-3 text-[12.5px] text-neutral-500">
-        Toji can run on a local coding agent (no keys), your own API key (Claude / OpenAI), or a model you host yourself — Ollama on this
-        machine or an OpenAI-compatible endpoint on your own server. Keys are stored only in Toji&apos;s local settings file and sent
-        nowhere except the provider you pick.
+        Inference runs through yagami: the coding-agent CLIs you are already signed into on this machine, with nothing to
+        configure and no API keys. Or point Toji at your own OpenAI-compatible endpoint.
       </p>
-      <div className="space-y-2 rounded-xl border border-black/10 p-3 dark:border-white/10">
+      <div className="space-y-2.5 rounded-xl border border-black/10 p-3 dark:border-white/10">
         <Dropdown<AgentPick>
-          value={pick}
-          options={options}
+          value={agent}
+          options={AGENT_OPTIONS}
           onChange={(v) => {
-            if (v === 'custom') {
-              setCustomOpen(true);
-              return;
-            }
-            setCustomOpen(false);
-            void apply({ agent: v, agentCmd: '', agentModel: '' });
+            if (v === 'alpaca' || v === 'cerebras') return;
+            void apply({ agent: v });
           }}
         />
-        {usingCustom && (
-          <div className="flex items-center gap-2">
-            <input
-              value={agentCmd}
-              onChange={(e) => setAgentCmd(e.target.value)}
-              placeholder="claude -p --dangerously-skip-permissions"
-              spellCheck={false}
-              className="min-w-0 flex-1 rounded-lg border border-black/10 bg-transparent px-2.5 py-1.5 font-mono text-[12px] outline-none focus:border-black/30 dark:border-white/12 dark:focus:border-white/30"
-            />
-            <button type="button" onClick={() => void apply({ agentCmd: agentCmd.trim() })} disabled={saving} className="shrink-0 rounded-lg bg-neutral-900 px-3 py-1.5 text-[12px] font-medium text-white transition enabled:hover:opacity-85 disabled:opacity-40 dark:bg-white dark:text-neutral-900">
-              Apply
-            </button>
-          </div>
-        )}
-        {agent === 'anthropic' && !usingCustom && (
-          <div className="space-y-2">
+        {agent === 'yagami' && (
+          <div className="space-y-2.5">
+            {status && (
+              <div className="flex flex-wrap gap-x-4 gap-y-1.5 px-0.5 text-[12px] text-neutral-500">
+                {installed.map((p) => (
+                  <span key={p.id} className="inline-flex items-center gap-1.5">
+                    <StatusDot state="on" />
+                    {p.label}
+                  </span>
+                ))}
+                {installed.length === 0 && <span className="inline-flex items-center gap-1.5"><StatusDot state="off" /> No coding CLIs detected</span>}
+              </div>
+            )}
             <div className="flex gap-2">
-              <ProviderField label="API key" value={anthropicKey} onChange={setAnthropicKey} placeholder="sk-ant-…" secret />
-              {saveButton}
-            </div>
-            <div className="flex gap-2">
-              <label className="flex-1">
-                <span className="mb-1 block text-[11px] text-neutral-400">Model</span>
-                <Dropdown<string> value={anthropicModel} options={ANTHROPIC_MODELS} onChange={(v) => void apply({ anthropicModel: v })} />
-              </label>
-              <label className="flex-1">
+              <ProviderField label="Model (optional)" value={agentModel} onChange={setAgentModel} placeholder="auto — or e.g. sonnet, codex:gpt-5.6-sol" />
+              <label className="w-[140px] shrink-0">
                 <span className="mb-1 block text-[11px] text-neutral-400">Thinking</span>
                 <Dropdown<ThinkingLevel> value={agentThinking} options={THINKING} onChange={(v) => void apply({ agentThinking: v })} />
               </label>
+              {saveButton}
             </div>
           </div>
         )}
-        {agent === 'openai' && !usingCustom && (
-          <div className="flex gap-2">
-            <ProviderField label="API key" value={openaiKey} onChange={setOpenaiKey} placeholder="sk-…" secret />
-            <ProviderField label="Model" value={openaiModel} onChange={setOpenaiModel} placeholder="gpt-5.1" />
-            {saveButton}
-          </div>
-        )}
-        {agent === 'local' && !usingCustom && (
+        {agent === 'local' && (
           <div className="space-y-2">
             <ProviderField label="Endpoint URL (OpenAI-compatible)" value={localUrl} onChange={setLocalUrl} placeholder="http://127.0.0.1:11434/v1" />
             <div className="flex gap-2">
@@ -794,31 +749,20 @@ function AgentSettings() {
             </p>
           </div>
         )}
-        {tunedId && (
-          <div className="flex gap-2">
-            <label className="flex-1">
-              <span className="mb-1 block text-[11px] text-neutral-400">Model</span>
-              <Dropdown<string> value={agentModel} options={MODELS[tunedId]} onChange={(v) => void apply({ agentModel: v })} placeholder="Default" />
-            </label>
-            <label className="flex-1">
-              <span className="mb-1 block text-[11px] text-neutral-400">Thinking</span>
-              <Dropdown<ThinkingLevel> value={agentThinking} options={THINKING} onChange={(v) => void apply({ agentThinking: v })} />
-            </label>
-          </div>
-        )}
-        <div className="flex items-center gap-2 text-[12px]">
+        <div className="flex items-center gap-2 text-[12px] text-neutral-500">
           {saving ? (
-            <span className="inline-flex items-center gap-1.5 text-neutral-400"><Loader2 size={12} className="animate-spin" /> Saving…</span>
-          ) : agent === 'off' && !usingCustom ? (
-            <span className="text-neutral-400">Demo mode — no agent</span>
+            <span className="inline-flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Saving…</span>
+          ) : agent === 'off' ? (
+            <span className="inline-flex items-center gap-1.5"><StatusDot state="off" /> Demo mode — no model</span>
           ) : status?.available ? (
-            <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">{saved && <Check size={12} />} Ready — {status.model}</span>
-          ) : isApiPick ? (
-            <span className="text-amber-600 dark:text-amber-400">
-              {agent === 'local' ? 'Enter your endpoint URL and model, then Save' : 'Paste your API key, then Save'}
+            <span className="inline-flex items-center gap-1.5 text-neutral-600 dark:text-neutral-300">
+              <StatusDot state="on" />
+              {saved && <Check size={12} />} Ready — {status.model}
             </span>
+          ) : agent === 'local' ? (
+            <span className="inline-flex items-center gap-1.5"><StatusDot state="off" /> Enter your endpoint URL and model, then Save</span>
           ) : (
-            <span className="text-amber-600 dark:text-amber-400">No agent found — install one, use an API key, or self-host a model</span>
+            <span className="inline-flex items-center gap-1.5"><StatusDot state="off" /> No coding CLI found — install and sign into one (e.g. Claude Code)</span>
           )}
         </div>
         {applyErr && <p className="text-[12px] text-red-500">{applyErr}</p>}
@@ -846,62 +790,6 @@ function SearchSettings() {
             }}
           />
         </label>
-      </div>
-    </Section>
-  );
-}
-
-let cuid = 0;
-const newId = () => `set-${Date.now()}-${(cuid += 1)}`;
-
-function CredentialsSettings({ store, onChange }: { store: CredentialStore; onChange: (s: CredentialStore) => void }) {
-  const [draft, setDraft] = useState<CredentialStore>(store);
-  useEffect(() => setDraft(store), [store]);
-  const dirty = JSON.stringify(draft) !== JSON.stringify(store);
-  const patchSet = (id: string, fn: (s: CredentialSet) => CredentialSet) => setDraft({ ...draft, sets: draft.sets.map((s) => (s.id === id ? fn(s) : s)) });
-
-  return (
-    <Section icon={<KeyRound size={16} />} title="Credentials">
-      <p className="mb-3 flex items-start gap-1.5 text-[12px] leading-5 text-neutral-500">
-        <ShieldCheck size={14} className="mt-0.5 shrink-0 text-emerald-500" />
-        <span>Stored only on this device. The agent picks the right one for the task and fills it into login forms via placeholders like <code className="rounded bg-black/[0.06] px-1 dark:bg-white/10">{'{{password}}'}</code> — the real value is inserted locally and <strong>never sent to the model or over the network</strong>.</span>
-      </p>
-      <div className="space-y-3">
-        {draft.sets.map((set) => (
-          <div key={set.id} className="rounded-xl border border-black/10 p-3 dark:border-white/10">
-            <div className="mb-2 flex items-center gap-2">
-              <input value={set.name} onChange={(e) => patchSet(set.id, (s) => ({ ...s, name: e.target.value }))} className="min-w-0 flex-1 rounded-md bg-transparent px-1.5 py-1 text-[13px] font-medium outline-none focus:bg-black/[0.04] dark:focus:bg-white/5" placeholder="Account name" />
-              <button type="button" onClick={() => setDraft({ activeId: draft.activeId === set.id ? null : draft.activeId, sets: draft.sets.filter((s) => s.id !== set.id) })} aria-label="Delete account" className="inline-flex h-7 w-7 items-center justify-center rounded-md text-neutral-400 transition hover:bg-red-500/10 hover:text-red-500">
-                <Trash2 size={14} />
-              </button>
-            </div>
-            <div className="space-y-1.5">
-              {set.fields.map((f, idx) => (
-                <div key={idx} className="flex items-center gap-2">
-                  <input value={f.key} onChange={(e) => patchSet(set.id, (s) => ({ ...s, fields: s.fields.map((x, i) => (i === idx ? { ...x, key: e.target.value } : x)) }))} placeholder="key (e.g. email)" className="w-32 rounded-md border border-black/10 bg-transparent px-2 py-1 text-[12.5px] outline-none focus:border-black/25 dark:border-white/12" />
-                  <input value={f.value} type="password" autoComplete="off" onChange={(e) => patchSet(set.id, (s) => ({ ...s, fields: s.fields.map((x, i) => (i === idx ? { ...x, value: e.target.value } : x)) }))} placeholder="value" className="min-w-0 flex-1 rounded-md border border-black/10 bg-transparent px-2 py-1 text-[12.5px] outline-none focus:border-black/25 dark:border-white/12" />
-                  <button type="button" onClick={() => patchSet(set.id, (s) => ({ ...s, fields: s.fields.filter((_, i) => i !== idx) }))} aria-label="Remove field" className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-400 transition hover:bg-red-500/10 hover:text-red-500">
-                    <X size={13} />
-                  </button>
-                </div>
-              ))}
-              <button type="button" onClick={() => patchSet(set.id, (s) => ({ ...s, fields: [...s.fields, { key: '', value: '' }] }))} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] text-neutral-500 transition hover:bg-black/[0.05] dark:hover:bg-white/10">
-                <Plus size={12} /> Add field
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="mt-3 flex items-center gap-2">
-        <button type="button" onClick={() => setDraft({ activeId: draft.activeId, sets: [...draft.sets, { id: newId(), name: `Account ${draft.sets.length + 1}`, fields: [{ key: 'email', value: '' }, { key: 'password', value: '' }] }] })} className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-black/15 px-3 py-2 text-[12.5px] text-neutral-600 transition hover:border-black/30 dark:border-white/15 dark:text-neutral-300">
-          <Plus size={14} /> Add account
-        </button>
-        <div className="flex-1" />
-        {dirty && (
-          <button type="button" onClick={() => onChange(draft)} className="rounded-lg bg-neutral-900 px-3.5 py-1.5 text-[12.5px] font-medium text-white transition hover:opacity-85 dark:bg-white dark:text-neutral-900">
-            Save credentials
-          </button>
-        )}
       </div>
     </Section>
   );

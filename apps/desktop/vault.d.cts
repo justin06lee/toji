@@ -2,6 +2,7 @@
 
 export interface VaultEntryMeta {
   id: string;
+  name: string;
   origin: string;
   username: string;
   containerId: string | null;
@@ -28,10 +29,11 @@ export declare class Vault {
   captureStatus(entry: { origin: string; username: string; password: string; containerId?: string | null }): 'new' | 'update' | 'same' | 'ignore';
   remove(id: string): boolean;
   /** The secret, released only for the origin the entry was saved against. */
-  secretFor(id: string, expectedOrigin?: string): { username: string; password: string } | null;
+  secretFor(id: string, expectedOrigin?: string, expectedContainerId?: string | null): { username: string; password: string } | null;
 }
 
 export declare function generatePassword(length?: number, alphabet?: string): string;
 export declare function originOf(url: string): string | null;
+export declare function siteName(origin: string): string;
 export declare function entryMatches(entry: { origin: string; containerId?: string | null } | null, origin: string, containerId?: string | null): boolean;
 export declare const GEN_ALPHABET: string;

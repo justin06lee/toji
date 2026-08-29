@@ -2,8 +2,6 @@
 // renderer also runs in a plain browser tab during `bun run dev:web`, where there is
 // no Electron shell at all, so callers use `bridge().thing?.()` throughout.
 
-import type { Container } from './containers';
-
 export interface TorStatus {
   /** Whether Tor routing is usable right now. Containers on `tor` egress are blocked until it is. */
   ready: boolean;
@@ -24,6 +22,8 @@ export type VaultResult<T> = { ok: true; value: T } | { ok: false; error: string
 /** Credential metadata. Never carries the password. */
 export interface VaultEntry {
   id: string;
+  /** Display name derived from the saved website (for example, "github.com"). */
+  name: string;
   origin: string;
   username: string;
   containerId: string | null;
@@ -46,7 +46,8 @@ export interface VaultPrompt {
   origin: string;
   username: string;
   containerId: string | null;
-  status: 'new' | 'update';
+  /** 'saved' = already committed (a password Toji itself generated); just informational. */
+  status: 'new' | 'update' | 'saved';
 }
 
 export interface VaultStatus {
@@ -65,8 +66,6 @@ export interface TojiBridge {
   webStoreAvailable?: () => Promise<boolean>;
 
   // --- containers ---
-  /** Hand the main process the container table (labelling + Tor circuit assignment). */
-  setContainers?: (containers: Container[]) => void;
   /** Erase every cookie, cache entry and storage bucket a container holds. */
   clearContainer?: (containerId: string) => Promise<boolean>;
 
@@ -75,7 +74,7 @@ export interface TojiBridge {
   // credentials exist and ask for one to be filled, but never receives a secret.
   vaultStatus?: () => Promise<VaultStatus>;
   vaultList?: (containerId?: string | null) => Promise<VaultResult<VaultEntry[]>>;
-  vaultMatches?: (url: string, containerId?: string | null) => Promise<VaultResult<VaultEntry[]>>;
+  vaultMatches?: (webContentsId: number) => Promise<VaultResult<VaultEntry[]>>;
   vaultSave?: (entry: VaultDraft) => Promise<VaultResult<boolean>>;
   vaultDelete?: (id: string) => Promise<VaultResult<boolean>>;
   vaultGenerate?: (length?: number) => Promise<string>;

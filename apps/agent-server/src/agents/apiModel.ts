@@ -1,10 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk';
-import type { ApiBackend, ThinkingLevel } from './agentRuntime.js';
+import type { ApiBackend } from './agentRuntime.js';
 
-// HTTP inference backends for model.ts: the Claude API (official @anthropic-ai/sdk),
-// the OpenAI API, and any OpenAI-compatible endpoint (Ollama / LM Studio / vLLM / a
-// home server). Keys come from the local settings store via agentRuntime.setApiConfig
-// and are only ever sent to the provider the user chose.
+// The custom-endpoint backend: any OpenAI-compatible /chat/completions server
+// (Ollama, LM Studio, vLLM, a home server) reached with a user-entered URL and an
+// optional bearer key. Everything hosted-API-shaped that Toji used to speak
+// directly now routes through the embedded yagami engine instead.
 
 export interface ApiCallOptions {
   system: string;
@@ -15,18 +14,7 @@ export interface ApiCallOptions {
   signal?: AbortSignal;
 }
 
-// One SDK client per key, so a live key change in settings takes effect immediately.
-const anthropicClients = new Map<string, Anthropic>();
-function anthropicClient(apiKey: string): Anthropic {
-  let client = anthropicClients.get(apiKey);
-  if (!client) {
-    client = new Anthropic({ apiKey });
-    anthropicClients.set(apiKey, client);
-  }
-  return client;
-}
-
-function parseDataUri(dataUri: string): { mediaType: 'image/png' | 'image/jpeg' | 'image/webp'; base64: string } {
+export function parseDataUri(dataUri: string): { mediaType: 'image/png' | 'image/jpeg' | 'image/webp'; base64: string } {
   const match = /^data:(image\/(?:png|jpe?g|webp));base64,(.+)$/i.exec(dataUri);
   if (match) {
     const mt = match[1].toLowerCase();
@@ -35,66 +23,6 @@ function parseDataUri(dataUri: string): { mediaType: 'image/png' | 'image/jpeg' 
   return { mediaType: 'image/png', base64: dataUri.replace(/^data:[^,]*,/, '') };
 }
 
-// Toji's "Thinking" setting → Claude adaptive thinking + effort. 'default' sends no
-// thinking config at all (fast, and valid on every model); an explicit level opts into
-// adaptive thinking with that effort — supported on Opus 4.6+/Sonnet 4.6+ class models.
-function anthropicThinkingParams(thinking: ThinkingLevel): Record<string, unknown> {
-  if (thinking === 'default') return {};
-  return { thinking: { type: 'adaptive' }, output_config: { effort: thinking } };
-}
-
-function anthropicMessages(options: ApiCallOptions): Anthropic.MessageParam[] {
-  if (!options.imageDataUri) return [{ role: 'user', content: options.user }];
-  const img = parseDataUri(options.imageDataUri);
-  return [
-    {
-      role: 'user',
-      content: [
-        { type: 'image', source: { type: 'base64', media_type: img.mediaType, data: img.base64 } },
-        { type: 'text', text: options.user }
-      ]
-    }
-  ];
-}
-
-async function anthropicComplete(backend: ApiBackend, options: ApiCallOptions): Promise<string> {
-  const client = anthropicClient(backend.apiKey);
-  const response = await client.messages.create(
-    {
-      model: backend.model,
-      max_tokens: options.maxTokens ?? 1024,
-      system: options.system,
-      ...anthropicThinkingParams(backend.thinking),
-      messages: anthropicMessages(options)
-    },
-    { signal: options.signal }
-  );
-  if (response.stop_reason === 'refusal') throw new Error('Claude declined this request (safety refusal)');
-  return response.content
-    .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-    .map((block) => block.text)
-    .join('');
-}
-
-async function* anthropicStream(backend: ApiBackend, options: ApiCallOptions): AsyncGenerator<string, void, unknown> {
-  const client = anthropicClient(backend.apiKey);
-  const stream = client.messages.stream(
-    {
-      model: backend.model,
-      max_tokens: options.maxTokens ?? 16000,
-      system: options.system,
-      ...anthropicThinkingParams(backend.thinking),
-      messages: anthropicMessages(options)
-    },
-    { signal: options.signal }
-  );
-  for await (const event of stream) {
-    if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') yield event.delta.text;
-  }
-}
-
-// --- OpenAI-compatible chat completions (OpenAI API + self-hosted endpoints) ---
-
 function openaiBody(backend: ApiBackend, options: ApiCallOptions, stream: boolean): Record<string, unknown> {
   const userContent = options.imageDataUri
     ? [
@@ -102,13 +30,10 @@ function openaiBody(backend: ApiBackend, options: ApiCallOptions, stream: boolea
         { type: 'image_url', image_url: { url: options.imageDataUri } }
       ]
     : options.user;
-  const maxTokens = options.maxTokens ?? (stream ? 16000 : 1024);
   return {
     model: backend.model,
     stream,
-    // api.openai.com deprecated max_tokens in favor of max_completion_tokens (required
-    // for gpt-5/o-series); most self-hosted servers still expect max_tokens.
-    ...(backend.provider === 'openai' ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
+    max_tokens: options.maxTokens ?? (stream ? 16000 : 1024),
     messages: [
       { role: 'system', content: options.system },
       { role: 'user', content: userContent }
@@ -133,7 +58,7 @@ async function openaiFetch(backend: ApiBackend, options: ApiCallOptions, stream:
   return response;
 }
 
-async function openaiComplete(backend: ApiBackend, options: ApiCallOptions): Promise<string> {
+export async function apiComplete(backend: ApiBackend, options: ApiCallOptions): Promise<string> {
   const response = await openaiFetch(backend, options, false);
   const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string | null } }> };
   const content = payload.choices?.[0]?.message?.content;
@@ -141,7 +66,7 @@ async function openaiComplete(backend: ApiBackend, options: ApiCallOptions): Pro
   return content;
 }
 
-async function* openaiStream(backend: ApiBackend, options: ApiCallOptions): AsyncGenerator<string, void, unknown> {
+export async function* apiStream(backend: ApiBackend, options: ApiCallOptions): AsyncGenerator<string, void, unknown> {
   const response = await openaiFetch(backend, options, true);
   if (!response.body) throw new Error(`${backend.label} returned no stream body`);
   const reader = response.body.getReader();
@@ -175,19 +100,7 @@ async function* openaiStream(backend: ApiBackend, options: ApiCallOptions): Asyn
   }
 }
 
-// --- Public dispatch ----------------------------------------------------------
-
-export function apiComplete(backend: ApiBackend, options: ApiCallOptions): Promise<string> {
-  return backend.provider === 'anthropic' ? anthropicComplete(backend, options) : openaiComplete(backend, options);
-}
-
-export function apiStream(backend: ApiBackend, options: ApiCallOptions): AsyncGenerator<string, void, unknown> {
-  return backend.provider === 'anthropic' ? anthropicStream(backend, options) : openaiStream(backend, options);
-}
-
-/** Whether the backend can accept an inline image. Hosted APIs: yes (Claude and the
- *  OpenAI vision-capable models take image content parts). Self-hosted: unknown — most
- *  local text models reject image parts with an error, so we stay text-only. */
-export function apiSupportsVision(backend: ApiBackend): boolean {
-  return backend.provider !== 'local';
+/** Custom endpoints are unknown hardware: most local text models reject image parts, so stay text-only. */
+export function apiSupportsVision(_backend: ApiBackend): boolean {
+  return false;
 }

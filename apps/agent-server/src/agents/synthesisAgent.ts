@@ -1,7 +1,6 @@
 import type { LinkCandidate, OverviewCard, SearchResult, SourceCredibility, SourceMapItem, SourceNote, SourceSignal, SynthesisFinding, SynthesisResult, SynthesisSection } from '../types.js';
 import { compactText, fallbackIfEmpty, firstSentences, isAuthorityMixed, isAuthorityPrimary, isAuthorityStrong, normalizeWhitespace, safeHostname, wordCount } from '../lib/text.js';
-import { completeJSON, completeMultimodalJSON } from './model.js';
-import { config } from '../config.js';
+import { completeJSON, completeMultimodalJSON, modelSupportsVision } from './model.js';
 
 interface ExtractedPage {
   title: string;
@@ -99,6 +98,10 @@ export async function summarizeSource(
 
   if (!page.text || page.text.length < 300) return fallback;
 
+  // Screenshots only help when the active backend can actually SEE them. Sandboxed CLI
+  // presets run with tools disabled, so they cannot open an image path — text-only there.
+  const useScreenshot = Boolean(screenshotDataUri) && modelSupportsVision();
+
   try {
     const requestPayload = JSON.stringify({
       query,
@@ -111,7 +114,7 @@ export async function summarizeSource(
         text: compactText(page.text, 9000)
       },
       visualInstruction:
-        screenshotDataUri && config.enableVisualAnalysis
+        useScreenshot
           ? 'Also inspect the browser screenshot. Use it to understand tables, charts, visual hierarchy, or error states, but do not invent facts absent from the page text or image.'
           : 'No screenshot is attached for this source.',
       requiredShape: {
@@ -129,7 +132,7 @@ export async function summarizeSource(
 
     let modelNote: Partial<SourceNote>;
     try {
-      modelNote = screenshotDataUri && config.enableVisualAnalysis
+      modelNote = useScreenshot && screenshotDataUri
         ? await completeMultimodalJSON<Partial<SourceNote>>({
             system:
               'You summarize one web source for a multimodal browser research agent. Extract only evidence relevant to the user query. Use both page text and screenshot. Do not cite facts absent from the supplied source.',

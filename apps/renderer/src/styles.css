@@ -32,23 +32,27 @@ body {
 .drag { -webkit-app-region: drag; }
 .no-drag { -webkit-app-region: no-drag; }
 
-/* Hover-reveal window drag handle: a draggable strip pinned to the very top of the
-   window. Hovering anywhere along the top reveals a downward "notch" with a dot-grid
-   grip — a grabber to move the window, so the omnibox can sit near the top without a
-   static title bar. The whole strip is draggable, not just the notch. */
+/* A native draggable notch rendered only after React detects the pointer near the
+   top. Native drag regions do not reliably emit :hover on macOS, so visibility must
+   not depend on CSS hover state. */
 .drag-strip {
   position: fixed;
   top: 0;
-  left: 0;
-  right: 0;
-  /* Thin enough to sit inside the header's top padding — it must not cover the
-     toolbar buttons, which now start ~10px from the top. */
-  height: 10px;
   z-index: 80;
   -webkit-app-region: drag;
   display: flex;
   justify-content: center;
   align-items: flex-start;
+}
+.drag-strip-side {
+  left: 0;
+  right: 0;
+  height: 10px;
+}
+.drag-strip-tabs {
+  left: 32%;
+  right: 32%;
+  height: 18px;
 }
 .drag-notch {
   /* Grabbable: dragging the visible notch itself moves the window (it stays visible
@@ -63,24 +67,22 @@ body {
   border-top: none;
   border-radius: 0 0 13px 13px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
-  opacity: 0;
-  transform: translateY(-100%);
-  transition: opacity 0.18s ease, transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: toji-drag-notch-in 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .dark .drag-notch {
   background: #171717;
   border-color: rgba(255, 255, 255, 0.14);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
-.drag-strip:hover .drag-notch {
-  opacity: 1;
-  transform: translateY(0);
+@keyframes toji-drag-notch-in {
+  from { opacity: 0; transform: translateY(-100%); }
+  to { opacity: 1; transform: translateY(0); }
 }
 /* The dot-grid grip (the ⠿ "drag dots" pattern). */
 .drag-grip {
   display: grid;
-  grid-template-columns: repeat(3, 3px);
-  grid-auto-rows: 3px;
+  grid-template-columns: repeat(6, 3px);
+  grid-template-rows: repeat(2, 3px);
   gap: 3px;
 }
 .drag-grip i {
@@ -91,13 +93,23 @@ body {
 }
 .dark .drag-grip i { background: rgba(255, 255, 255, 0.42); }
 @media (prefers-reduced-motion: reduce) {
-  .drag-notch { transition: opacity 0.18s ease; }
+  .drag-notch { animation: none; }
 }
 
 /* Indeterminate page-loading bar */
 @keyframes toji-load {
   0% { transform: translateX(-110%); }
   100% { transform: translateX(420%); }
+}
+
+.tab-strip {
+  overscroll-behavior-inline: contain;
+  scroll-behavior: smooth;
+}
+.top-tab-dragging { z-index: 90 !important; }
+.sidebar-tab-dragging { z-index: 50 !important; }
+@media (prefers-reduced-motion: reduce) {
+  .tab-strip { scroll-behavior: auto; }
 }
 
 /* Round color swatches (container accents). Chromium draws the swatch in a shadow

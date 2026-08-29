@@ -1,7 +1,7 @@
 import type { AgentsStatus, AppConfig, PageSource, PredictionResult, ResearchMode, ResearchOptions, ResearchSessionState, ServerEvent, UserSettings } from '../types';
 import type { AgentStepResult } from './agentDom';
 
-const DEFAULT_BASE = 'http://127.0.0.1:8787';
+const DEFAULT_BASE = 'http://127.0.0.1:8788';
 export const API_BASE = import.meta.env.VITE_AGENT_SERVER_URL || DEFAULT_BASE;
 
 function wsUrl() {
@@ -139,7 +139,7 @@ export function agentStep(body: {
   /** Where the screenshot crop sits in viewport CSS px (maps image pixels → clickAt coords). */
   crop?: { x: number; y: number; w: number; h: number };
   viewport?: { w: number; h: number };
-  credentials?: { name: string; keys: string[]; active?: boolean }[];
+  credentialAccess?: boolean;
   files?: { index: number; name: string; mime?: string }[];
   memory?: string;
 }) {

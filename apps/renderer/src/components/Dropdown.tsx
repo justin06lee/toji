@@ -8,6 +8,8 @@ export interface DropdownOption<T extends string> {
   hint?: string;
   /** Optional small status dot color (e.g. availability). */
   dotColor?: string;
+  /** Shown but not selectable (e.g. a feature still under construction). */
+  disabled?: boolean;
 }
 
 interface DropdownProps<T extends string> {
@@ -64,12 +66,17 @@ export function Dropdown<T extends string>({ value, options, onChange, disabled,
               <button
                 key={opt.value}
                 type="button"
+                disabled={opt.disabled}
                 onClick={() => {
                   onChange(opt.value);
                   setOpen(false);
                 }}
                 className={`flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-[13px] transition ${
-                  active ? 'bg-black/[0.05] dark:bg-white/10' : 'hover:bg-black/[0.04] dark:hover:bg-white/[0.07]'
+                  opt.disabled
+                    ? 'cursor-default text-neutral-400 opacity-60 dark:text-neutral-500'
+                    : active
+                      ? 'bg-black/[0.05] dark:bg-white/10'
+                      : 'hover:bg-black/[0.04] dark:hover:bg-white/[0.07]'
                 }`}
               >
                 <span className="flex min-w-0 items-center gap-2">

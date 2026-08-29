@@ -277,30 +277,20 @@ export interface UserSettings {
   defaultFreshness: FreshnessMode;
   visualAnalysis: boolean;
   theme: 'dark' | 'system';
-  /** What powers inference. CLI agents ('claude'|'codex'|'opencode'; 'auto' = first
-   *  detected) spawn a local coding agent; 'anthropic'/'openai' call those APIs with a
-   *  user-saved key; 'local' is any OpenAI-compatible endpoint (Ollama, LM Studio, vLLM,
-   *  a home server). Keys/URLs live only in the local settings.json on disk. */
-  agent: 'auto' | 'claude' | 'codex' | 'opencode' | 'anthropic' | 'openai' | 'local' | 'off';
-  /** Optional full command override (wins over `agent`); prompt piped on stdin. */
-  agentCmd: string;
-  /** Model passed to the selected agent's --model flag. '' = the agent's default. */
+  /** What powers inference. 'yagami' embeds the yagami engine (the signed-in
+   *  coding-agent CLIs on this machine — no keys); 'local' is any OpenAI-compatible
+   *  endpoint (Ollama, LM Studio, vLLM, a home server); 'off' forces the
+   *  deterministic demo/heuristic fallbacks. URL/key live only in settings.json. */
+  agent: 'yagami' | 'local' | 'off';
+  /** Yagami model id ('' = the engine's default; supports "provider:model"). */
   agentModel: string;
-  /** Reasoning/thinking effort for the selected agent. 'default' = omit the flag. */
+  /** Reasoning/thinking effort. 'default' = omit. */
   agentThinking: 'default' | 'low' | 'medium' | 'high';
-  /** Claude API key (sk-ant-…). Stored locally; sent only to api.anthropic.com. */
-  anthropicApiKey: string;
-  /** Claude API model id. '' = claude-opus-4-8. */
-  anthropicModel: string;
-  /** OpenAI API key (sk-…). Stored locally; sent only to api.openai.com. */
-  openaiApiKey: string;
-  /** OpenAI model id. '' = the default. */
-  openaiModel: string;
-  /** Self-hosted model: OpenAI-compatible base URL (e.g. http://127.0.0.1:11434/v1 for Ollama). */
+  /** Custom endpoint: OpenAI-compatible base URL (e.g. http://127.0.0.1:11434/v1 for Ollama). */
   localUrl: string;
-  /** Self-hosted model name (e.g. llama3.2). */
+  /** Custom endpoint model name (e.g. llama3.2). */
   localModel: string;
-  /** Optional bearer token for the self-hosted endpoint. */
+  /** Optional bearer token for the custom endpoint. */
   localApiKey: string;
 }
 

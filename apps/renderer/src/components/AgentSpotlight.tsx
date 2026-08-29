@@ -10,6 +10,8 @@ export interface AgentLogEntry {
 
 interface AgentSpotlightProps {
   target: string; // tab title / host the agent acts on
+  /** Pixels taken by the sidebar — the dialog centers over the remaining page area. */
+  insetLeft?: number;
   running: boolean;
   /** The question the agent is paused on, if any — submissions answer it instead of starting a run. */
   pendingAsk?: string;
@@ -27,7 +29,7 @@ interface AgentSpotlightProps {
 }
 
 /** A macOS-Spotlight-style chat overlay for directing the per-tab web agent. */
-export function AgentSpotlight({ target, running, pendingAsk, log, maxSteps, noLimit, onMaxSteps, onNoLimit, files, onDropFiles, onRemoveFile, onSubmit, onStop, onClose }: AgentSpotlightProps) {
+export function AgentSpotlight({ target, insetLeft = 0, running, pendingAsk, log, maxSteps, noLimit, onMaxSteps, onNoLimit, files, onDropFiles, onRemoveFile, onSubmit, onStop, onClose }: AgentSpotlightProps) {
   const [value, setValue] = useState('');
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -49,12 +51,16 @@ export function AgentSpotlight({ target, running, pendingAsk, log, maxSteps, noL
   }, [onClose]);
 
   return createPortal(
+    // Fast in AND out: the fade runs both directions (exit needs an AnimatePresence
+    // around the caller's conditional render).
     <motion.div
       className="fixed inset-0 z-[120] flex items-center justify-center bg-black/25 p-6 backdrop-blur-[2px]"
+      style={{ paddingLeft: 24 + insetLeft }}
       onMouseDown={onClose}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      transition={{ duration: 0.18, ease: 'easeOut' }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.1, ease: 'easeOut' }}
     >
       <motion.div
         className={`no-drag w-[min(640px,92vw)] overflow-hidden rounded-2xl border bg-white/95 shadow-2xl backdrop-blur-xl transition-colors dark:bg-neutral-900/95 ${dragOver ? 'border-neutral-900/40 dark:border-white/40' : 'border-black/10 dark:border-white/12'}`}
@@ -69,9 +75,10 @@ export function AgentSpotlight({ target, running, pendingAsk, log, maxSteps, noL
           setDragOver(false);
           if (onDropFiles && e.dataTransfer.files.length) onDropFiles(e.dataTransfer.files);
         }}
-        initial={{ opacity: 0, scale: 0.96, y: 10 }}
+        initial={{ opacity: 0, scale: 0.97, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ type: 'spring', stiffness: 280, damping: 30 }}
+        exit={{ opacity: 0, scale: 0.98, y: 6 }}
+        transition={{ duration: 0.12, ease: 'easeOut' }}
       >
         {log.length > 0 && (
           <div ref={logRef} className="max-h-[42vh] space-y-2 overflow-y-auto border-b border-black/[0.06] px-4 py-4 dark:border-white/[0.08]">

@@ -75,15 +75,18 @@ ipcRenderer.on('toji-vault:fill', (_event, { username, password }) => {
 // The submitted password goes straight to the MAIN process (invoke), not to the host
 // renderer via sendToHost — the renderer only ever learns that there is something to
 // save, and for which account. Nothing is stored without an explicit confirmation.
-let lastCaptured = '';
+let lastCaptureAt = 0;
+let lastCapturedAccount = '';
 function captureSubmission() {
   const field = passwordFields()[0];
   if (!field || !field.value) return;
   const userField = usernameFor(field);
   const username = userField ? userField.value : '';
-  const signature = `${location.href}|${username}|${field.value}`;
-  if (signature === lastCaptured) return; // submit + click both fire for one sign-in
-  lastCaptured = signature;
+  const account = `${location.origin}|${username}`;
+  const now = Date.now();
+  if (account === lastCapturedAccount && now - lastCaptureAt < 2000) return; // submit + click often fire for one sign-in
+  lastCapturedAccount = account;
+  lastCaptureAt = now;
   try {
     ipcRenderer.invoke('toji:vault-captured', { url: location.href, username, password: field.value });
   } catch {

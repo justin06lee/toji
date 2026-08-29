@@ -12,15 +12,16 @@
 ---
 
 Toji is a Chromium-based browser built around one idea: the sites you visit should not be
-able to join up who you are. Every tab browses inside a **container** — a named identity
-with its own cookies, storage, cache and network route. Signing into a site as Work leaves
-Personal signed out, and a tracker embedded in both sees two unrelated browsers.
+able to join up who you are. Each window uses a **profile** (internally, a container) — a
+named identity with its own cookies, storage, cache and network route. Signing into a site
+as Work leaves Personal signed out, and a tracker embedded in both sees two unrelated
+browsers.
 
 It also carries the agent work it started as: a local model can drive any page directly,
 using [byakugan](https://github.com/justin06lee/byakugan) to read what Chromium actually
 painted rather than scraping the DOM.
 
-## Containers
+## Profiles and containers
 
 A container is an identity. It owns a Chromium session partition, so nothing crosses
 between them — not cookies, not localStorage, not IndexedDB, not the HTTP auth cache.
@@ -29,9 +30,10 @@ Five ship by default: **Personal**, **Work**, **Shopping**, **Private** (discard
 last tab closes) and **Onion** (routed over Tor). You can add your own, recolor them,
 switch any of them between a direct connection and Tor, and make any of them ephemeral.
 
-The toolbar shows which identity the current tab is using, and tabs outside the default
-container get a colored underline, so you always know who you are. Following a link keeps
-you in the container you were already in.
+Opening a normal window shows a Chrome-style profile chooser, and the window keeps that
+identity for its whole life — one window, one profile. **Cmd/Ctrl+N** opens another
+profile window and **Cmd/Ctrl+Shift+N** opens Private directly. Profiles have editable
+names, colors and avatars.
 
 Each container's egress is encoded in its partition name:
 
@@ -67,8 +69,10 @@ you were already running, it only offers one port — Chromium cannot send SOCKS
 so per-container isolation is unavailable in that mode, and Toji tells you rather than
 implying protection it isn't providing.
 
-`.onion` addresses typed in the omnibox move the tab into a Tor container automatically,
-since a hidden service resolves only through Tor's own resolver.
+`.onion` addresses typed in the omnibox enable Tor for the window automatically, since a
+hidden service resolves only through Tor's own resolver. You can also hold the circular Go
+button until its outline completes; it becomes an onion and all tabs in that window use a
+fresh ephemeral Tor partition. Hold it again to return to the profile's normal route.
 
 WebRTC never volunteers local interface addresses; Tor containers disable non-proxied UDP
 outright.
@@ -79,12 +83,12 @@ Logins are encrypted with your operating system's keychain (via Electron's `safe
 and are **scoped to the container** they were saved in — a Work credential is never offered
 in Personal.
 
-Secrets never enter the browser UI. Filling a password goes main process → page directly;
-capturing one goes page → main process directly. The renderer only ever learns which
-accounts exist and for which site, so neither a compromised renderer nor the AI agent
-driving the browser can read a password. Credentials are released only for the exact origin
-they were saved against — no subdomain widening, no https→http downgrade — and the origin is
-re-checked at fill time so a navigation mid-click cannot redirect one elsewhere.
+Filling a password goes main process → page directly; capturing one goes page → main
+process directly. There is no IPC method that returns a secret, model-facing page manifests
+strip every form value, and the agent has only two credential tools: find accounts matching
+the current site/profile, then ask the vault to fill one by opaque id. Credentials are
+released only for the exact origin they were saved against — no subdomain widening, no
+https→http downgrade — and both origin and owning window are re-checked at fill time.
 
 ## Running it
 
@@ -106,7 +110,8 @@ fails unless they come out of **different relays**.
 
 Enter searches DuckDuckGo (or Google, Bing, Brave, Startpage — your pick) or navigates, the
 way any browser does. **Shift+Enter** hands the query to the model instead, which builds an
-answer page with its sources; the ✨ button does the same thing with the mouse.
+answer page with its sources; the wand beside the Go button does the same thing with the
+mouse.
 
 ## The agent
 
@@ -115,10 +120,11 @@ cropped look when it needs to see something. Perception runs through byakugan, w
 Chromium's paint output into a compact manifest with stable ids and verifies every action
 against fresh geometry before dispatching it.
 
-Inference can come from a local CLI coding agent (Claude Code, Codex, opencode), the
-Anthropic or OpenAI APIs with a key you paste, or any OpenAI-compatible endpoint —
-Ollama, LM Studio, vLLM, or your own server. Keys live in a local settings file and are
-masked whenever they are read back.
+Inference is zero-config: Toji embeds [yagami](https://github.com/justin06lee/yagami),
+which drives whichever coding-agent CLIs you are already signed into (Claude Code, Codex,
+opencode, Gemini CLI, any ACP agent) — no API keys, nothing to paste. If you'd rather use
+your own hardware, point it at any OpenAI-compatible endpoint — Ollama, LM Studio, vLLM,
+or a home server.
 
 The credential vault is deliberately opaque to the agent: it can use a saved login by name
 without ever seeing it.
@@ -144,7 +150,8 @@ Worth being clear, because privacy tools invite assumptions:
 apps/desktop/       Electron main process
   policy.cjs        per-container egress, applied from the partition name
   tor.cjs           Tor lifecycle, SocksPort pool, control port
-  vault.cjs         encrypted credential storage
+  vault.cjs         OS-keychain-backed encrypted credential storage
+  page-redaction.cjs strips form values from agent observations
   guest-preload.cjs runs in every page: login detection and fill
 apps/renderer/      React UI (tabs, containers, settings)
 apps/agent-server/  local HTTP server: inference, page generation, memory

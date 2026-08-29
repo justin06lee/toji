@@ -1,12 +1,12 @@
-import { ArrowLeft, ArrowRight, Copy, FolderPlus, Moon, MousePointer2, PanelLeft, PanelTop, Plus, RefreshCcw, RotateCw, Search, Settings, Sparkles, Sun, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Copy, FolderPlus, Moon, MousePointer2, PanelLeft, PanelTop, Plus, RefreshCcw, RotateCw, Search, Settings, Sun, WandSparkles, X } from 'lucide-react';
 import { AnimatePresence, motion, Reorder } from 'motion/react';
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { AgentSpotlight, type AgentLogEntry } from './components/AgentSpotlight';
-import { ContainerPicker } from './components/ContainerPicker';
+import { WindowProfilePicker } from './components/WindowProfilePicker';
+import { TorHoldButton } from './components/TorHoldButton';
 import { TorStatusBar } from './components/TorStatusBar';
 import { VaultFillButton, VaultPromptBar } from './components/VaultBar';
-import { credentialDirectory, loadCredentials, resolveSecrets, saveCredentials, unresolvedPlaceholders, type CredentialStore } from './lib/credentials';
 import { InternalPage } from './components/InternalPage';
 import { PageView } from './components/PageView';
 import { Sidebar } from './components/Sidebar';
@@ -14,6 +14,7 @@ import { WebView } from './components/WebView';
 import { addMemory, agentResearch, agentStep, fetchPageSources, getReferences, librarian, pageStreamUrl, uploadFile } from './lib/api';
 import { eyesAct, eyesAvailable, eyesDiff, eyesLook, eyesObserve, PAGE_SIGNATURE_JS, type EyesElement } from './lib/agentDom';
 import {
+  CONTAINERS_STORAGE_KEY,
   DEFAULT_CONTAINER_ID,
   findContainer,
   loadContainers,
@@ -24,6 +25,8 @@ import {
 } from './lib/containers';
 import { hostOf, isOnionUrl, looksLikeUrl, toUrl, webSearchUrl, type SearchEngineId } from './lib/nav';
 import { bridge, type TorStatus, type VaultEntry, type VaultPrompt } from './lib/bridge';
+import { replacePristineTabWithWelcome, startBrowsingInTab } from './lib/tabLifecycle';
+import { tabTitle } from './lib/tabPresentation';
 import { GROUP_COLORS, type BrowserTab, type TabGroup } from './types';
 
 interface AgentState {
@@ -47,6 +50,54 @@ const isMac = (window as unknown as { toji?: { platform?: string } }).toji?.plat
 // only for running the renderer in a plain browser during development.
 const isElectron = Boolean((window as unknown as { toji?: unknown }).toji);
 const ICON = `${import.meta.env.BASE_URL}toji-round.png`;
+const STARTUP_CONTAINER_ID = new URLSearchParams(window.location.search).get('container');
+
+/**
+ * The New Tab landing's big search box. Deliberately holds its own text: it is NOT
+ * mirrored into the toolbar omnibox (typing in one showing up in the other read as a
+ * glitch, not a feature).
+ */
+function LandingSearch({ onGo, onAi, torActive, onTorToggle }: { onGo: (value: string) => void; onAi: (value: string) => void; torActive: boolean; onTorToggle?: () => void }) {
+  const [value, setValue] = useState('');
+  const submit = () => {
+    if (value.trim()) onGo(value);
+  };
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center px-6 pb-[9vh]">
+      <img src={ICON} alt="Toji" className="mb-5 h-[72px] w-[72px] rounded-[20px] shadow-sm" />
+      <h1 className="mb-7 text-2xl font-semibold tracking-tight">Toji</h1>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+        className="flex h-14 w-[min(600px,92vw)] items-center rounded-full border border-black/10 bg-white pl-5 pr-1.5 shadow-sm transition dark:border-white/12 dark:bg-neutral-900 dark:focus-within:border-white/30"
+      >
+        <Search size={18} className="shrink-0 text-neutral-400 mr-2.5 mb-0.25" />
+        <input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && e.shiftKey) {
+              e.preventDefault();
+              if (value.trim()) onAi(value);
+            }
+          }}
+          placeholder="search or enter a url"
+          spellCheck={false}
+          autoComplete="off"
+          autoFocus
+          aria-label="Search"
+          className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-neutral-400"
+        />
+        <button type="button" aria-label="Generate an AI page" title="Generate an AI page  ⇧↵" onClick={() => value.trim() && onAi(value)} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-black/10 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/15 dark:hover:text-white mr-1.5">
+          <WandSparkles size={18} />
+        </button>
+        <span className="mr-1"><TorHoldButton active={torActive} onGo={submit} onToggle={onTorToggle} /></span>
+      </form>
+    </div>
+  );
+}
 
 /** A tab's icon: the site's favicon for web tabs (falling back to the Toji mark), else the Toji mark. */
 function TabFavicon({ tab }: { tab: BrowserTab }) {
@@ -66,25 +117,22 @@ function makeTab(groupId: string | null = null, containerId: string = DEFAULT_CO
   return { id: `tab-${Date.now()}-${counter}`, query: '', streamUrl: null, status: 'new', sources: [], groupId, mode: 'page', url: null, reloadKey: 0, contextKey: 0, containerId };
 }
 
-function tabTitle(tab: BrowserTab) {
-  if (tab.internal) return tab.internal === 'settings' ? 'Settings' : 'Welcome to Toji';
-  if (tab.mode === 'web') return tab.title || (tab.url ? hostOf(tab.url) : 'New Tab');
-  const q = tab.query.trim();
-  if (!q) return 'New Tab';
-  return q.length > 24 ? `${q.slice(0, 24)}…` : q;
-}
-
 export function App() {
-  const [tabs, setTabs] = useState<BrowserTab[]>(() => [makeTab()]);
+  const [tabs, setTabs] = useState<BrowserTab[]>(() => [makeTab(null, STARTUP_CONTAINER_ID ?? DEFAULT_CONTAINER_ID)]);
   const [groups, setGroups] = useState<TabGroup[]>([]);
   const [activeId, setActiveId] = useState<string>(() => tabs[0]?.id);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('toji-theme') === 'dark' ? 'dark' : 'light'));
   const [layout, setLayout] = useState<'top' | 'side'>(() => (localStorage.getItem('toji-layout') === 'side' ? 'side' : 'top'));
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem('toji-sidebar') !== 'closed');
-  // Transient "peek": hovering the left edge opens the sidebar as an overlay until the mouse leaves.
   const [sidebarPeek, setSidebarPeek] = useState(false);
+  const [dragHandleVisible, setDragHandleVisible] = useState(false);
+  const [topTabsCrowded, setTopTabsCrowded] = useState(false);
+  const [draggingTopTabId, setDraggingTopTabId] = useState<string | null>(null);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tabId: string } | null>(null);
   const [containers, setContainers] = useState<Container[]>(loadContainers);
+  const [windowContainerId, setWindowContainerId] = useState<string | null>(STARTUP_CONTAINER_ID);
+  const [profilePickerOpen, setProfilePickerOpen] = useState(!STARTUP_CONTAINER_ID);
+  const [forceTor, setForceTor] = useState(false);
   // Bumped when a container is cleared, which strands its old partition and hands the
   // next tab a brand-new store.
   const [containerEpochs, setContainerEpochs] = useState<Record<string, number>>({});
@@ -98,26 +146,52 @@ export function App() {
   activeRef.current = activeId;
   const containersRef = useRef(containers);
   containersRef.current = containers;
+  const windowContainerRef = useRef(windowContainerId);
+  windowContainerRef.current = windowContainerId;
+  const forceTorRef = useRef(forceTor);
+  forceTorRef.current = forceTor;
+  // Bumped every time hold-to-Tor is engaged, so each stint gets a brand-new in-memory
+  // partition — cookies from a previous Tor session in this window can never carry over.
+  const torHoldEpoch = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const topTabStripRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     saveContainers(containers);
-    // The main process enforces egress from the partition name alone, but it still
-    // wants the table for labelling and for the Tor circuit pool.
-    bridge().setContainers?.(containers);
   }, [containers]);
+
+  // Profile edits made in another Toji window should appear here immediately.
+  useEffect(() => {
+    const sync = (event: StorageEvent) => {
+      if (event.key === CONTAINERS_STORAGE_KEY) setContainers(loadContainers());
+    };
+    window.addEventListener('storage', sync);
+    return () => window.removeEventListener('storage', sync);
+  }, []);
+
+  useEffect(() => {
+    if (windowContainerId && containers.some((container) => container.id === windowContainerId)) return;
+    setWindowContainerId(null);
+    setProfilePickerOpen(true);
+  }, [containers, windowContainerId]);
 
   // Tor runs in the main process; mirror its state so the UI can show what is reachable.
   useEffect(() => {
     void bridge().torStatus?.().then(setTorStatus);
     return bridge().onTorStatus?.(setTorStatus);
   }, []);
-
   // A login the user submitted; the password stays in the main process until they say so.
   useEffect(() => bridge().onVaultPrompt?.(setVaultPrompt), []);
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
-  const activeContainer = findContainer(containers, activeTab?.containerId);
+  const baseContainer = findContainer(containers, windowContainerId ?? activeTab?.containerId);
+  const torMode = baseContainer.egress === 'tor' || forceTor;
+  const activeContainer: Container = torMode
+    ? { ...baseContainer, egress: 'tor', ephemeral: forceTor || baseContainer.ephemeral }
+    : baseContainer;
+  useEffect(() => {
+    if (torMode) void bridge().torStart?.();
+  }, [torMode]);
 
   const groupColor = (groupId: string | null) => {
     if (!groupId) return null;
@@ -131,6 +205,40 @@ export function App() {
   }, [theme]);
   useEffect(() => localStorage.setItem('toji-layout', layout), [layout]);
   useEffect(() => localStorage.setItem('toji-sidebar', sidebarOpen ? 'open' : 'closed'), [sidebarOpen]);
+  useEffect(() => {
+    if (layout !== 'top') {
+      setTopTabsCrowded(false);
+      return;
+    }
+    const strip = topTabStripRef.current;
+    if (!strip) return;
+    const measure = () => {
+      const items = Array.from(strip.querySelectorAll<HTMLElement>('[data-testid="top-tab"]'));
+      const occupied = items.reduce((sum, item) => sum + item.getBoundingClientRect().width, 0) + Math.max(0, items.length - 1) * 4;
+      setTopTabsCrowded(strip.clientWidth - occupied < 120);
+    };
+    const frame = requestAnimationFrame(measure);
+    const observer = new ResizeObserver(measure);
+    observer.observe(strip);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [layout, tabs.length]);
+  // Vertical wheel scrolls the horizontal tab strip. Registered natively because React
+  // attaches onWheel as a PASSIVE listener, where preventDefault() is a no-op.
+  useEffect(() => {
+    if (layout !== 'top') return;
+    const strip = topTabStripRef.current;
+    if (!strip) return;
+    const onWheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+      strip.scrollLeft += event.deltaY;
+      event.preventDefault();
+    };
+    strip.addEventListener('wheel', onWheel, { passive: false });
+    return () => strip.removeEventListener('wheel', onWheel);
+  }, [layout]);
   useEffect(() => {
     if (!tabMenu) return;
     const onEsc = (e: KeyboardEvent) => e.key === 'Escape' && setTabMenu(null);
@@ -184,19 +292,55 @@ export function App() {
   /** The Chromium partition a tab browses in: its container's, or a tab-local throwaway. */
   const tabPartition = useCallback(
     (tab: BrowserTab) => {
-      const container = findContainer(containersRef.current, tab.containerId);
-      return tab.contextKey > 0 ? tabSessionPartition(container, tab.contextKey) : partitionFor(container, containerEpochs[container.id] ?? 0);
+      const base = findContainer(containersRef.current, windowContainerRef.current ?? tab.containerId);
+      const container: Container = forceTor ? { ...base, egress: 'tor', ephemeral: true } : base;
+      if (tab.contextKey > 0) return tabSessionPartition(container, tab.contextKey);
+      // Hold-to-Tor sessions are versioned by their own epoch so every stint starts clean.
+      return partitionFor(container, forceTor ? torHoldEpoch.current : containerEpochs[container.id] ?? 0);
     },
-    [containerEpochs]
+    [containerEpochs, forceTor]
   );
 
-  /** Move a tab into another container. Its session changes, so the page reloads. */
-  const setTabContainer = useCallback(
-    (tabId: string, containerId: string) => {
-      patchTab(tabId, (t) => ({ containerId, contextKey: 0, reloadKey: t.reloadKey + 1, status: t.url ? 'loading' : t.status }));
-    },
-    []
-  );
+  /** Select the identity for this entire window; every existing and future tab follows it. */
+  const selectWindowContainer = useCallback((containerId: string) => {
+    // Re-picking the current profile (with no Tor override to unwind) is a no-op —
+    // don't reload every tab just because the picker was opened and dismissed this way.
+    if (containerId === windowContainerRef.current && !forceTorRef.current) {
+      setProfilePickerOpen(false);
+      return;
+    }
+    setWindowContainerId(containerId);
+    setForceTor(false);
+    setProfilePickerOpen(false);
+    setVaultMatches({});
+    setTabs((current) =>
+      current.map((tab) => ({
+        ...tab,
+        containerId,
+        contextKey: 0,
+        reloadKey: tab.reloadKey + 1,
+        status: tab.url ? 'loading' : tab.status
+      }))
+    );
+  }, []);
+
+  /** Engage hold-to-Tor for this window on a brand-new ephemeral session. */
+  const enableForceTor = useCallback(() => {
+    torHoldEpoch.current += 1;
+    setForceTor(true);
+    setTabs((current) => current.map((tab) => ({ ...tab, contextKey: 0, reloadKey: tab.reloadKey + 1, status: tab.url ? 'loading' : tab.status })));
+  }, []);
+
+  const toggleWindowTor = useCallback(() => {
+    const base = findContainer(containersRef.current, windowContainerRef.current ?? undefined);
+    if (base.egress === 'tor') return;
+    if (!forceTorRef.current) {
+      enableForceTor();
+      return;
+    }
+    setForceTor(false);
+    setTabs((current) => current.map((tab) => ({ ...tab, contextKey: 0, reloadKey: tab.reloadKey + 1, status: tab.url ? 'loading' : tab.status })));
+  }, [enableForceTor]);
 
   /** Wipe everything a container has stored, then reload the tabs sitting in it. */
   const clearContainer = useCallback((containerId: string) => {
@@ -234,12 +378,8 @@ export function App() {
         // container physically cannot load it. Move the tab into a Tor container
         // rather than letting it fail with a DNS error.
         if (isOnionUrl(value)) {
-          const tab = tabsRef.current.find((t) => t.id === tabId);
-          const here = findContainer(containersRef.current, tab?.containerId);
-          if (here.egress !== 'tor') {
-            const onion = containersRef.current.find((c) => c.egress === 'tor');
-            if (onion) setTabContainer(tabId, onion.id);
-          }
+          const here = findContainer(containersRef.current, windowContainerRef.current ?? tabsRef.current.find((t) => t.id === tabId)?.containerId);
+          if (here.egress !== 'tor' && !forceTorRef.current) enableForceTor();
         }
         navigateTab(tabId, toUrl(value));
       }
@@ -248,15 +388,32 @@ export function App() {
       else if (opts.ai) generatePage(tabId, value);
       else navigateTab(tabId, webSearchUrl(value, (localStorage.getItem('toji-search-engine') as SearchEngineId | null) ?? 'duckduckgo'));
     },
-    [generatePage, navigateTab, setTabContainer]
+    [enableForceTor, generatePage, navigateTab]
   );
 
   const openTab = useCallback((groupId: string | null = null, containerId?: string) => {
-    const from = tabsRef.current.find((t) => t.id === activeRef.current);
-    const tab = makeTab(groupId, containerId ?? from?.containerId ?? DEFAULT_CONTAINER_ID);
+    const tab = makeTab(groupId, windowContainerRef.current ?? containerId ?? DEFAULT_CONTAINER_ID);
     setTabs((current) => [...current, tab]);
     setActiveId(tab.id);
     requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
+
+  /** Sidebar hold-menu: a fresh group holding a fresh tab. */
+  const openTabInNewGroup = useCallback(() => {
+    const id = `grp-${Date.now()}-${(counter += 1)}`;
+    const tab = makeTab(id, windowContainerRef.current ?? DEFAULT_CONTAINER_ID);
+    setGroups((gs) => [...gs, { id, name: `Group ${gs.length + 1}`, collapsed: false }]);
+    setTabs((current) => [...current, tab]);
+    setActiveId(tab.id);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
+
+  /** Sidebar hold-menu: a fresh tab with the agent spotlight open, ready for an AI task. */
+  const openAgentTab = useCallback(() => {
+    const tab = makeTab(null, windowContainerRef.current ?? DEFAULT_CONTAINER_ID);
+    setTabs((current) => [...current, tab]);
+    setActiveId(tab.id);
+    setSpotlight(tab.id);
   }, []);
 
   // Open (or focus) a built-in Toji page — Settings / Welcome — as a tab.
@@ -267,10 +424,25 @@ export function App() {
       return;
     }
     const from = tabsRef.current.find((t) => t.id === activeRef.current);
-    const tab = makeTab(from?.groupId ?? null, from?.containerId ?? DEFAULT_CONTAINER_ID);
+    // On first launch, Welcome owns the initial blank tab instead of creating a
+    // throwaway New Tab beside it. This also keeps Start browsing in the same tab.
+    const welcomeTabs = page === 'welcome' ? replacePristineTabWithWelcome(tabsRef.current, activeRef.current) : null;
+    if (welcomeTabs && from) {
+      const next = welcomeTabs;
+      tabsRef.current = next;
+      setTabs(next);
+      setActiveId(from.id);
+      return;
+    }
+    const tab = makeTab(from?.groupId ?? null, windowContainerRef.current ?? DEFAULT_CONTAINER_ID);
     tab.internal = page;
     tab.status = 'ready';
-    setTabs((current) => [...current, tab]);
+    // Update the ref synchronously as well as state. React Strict Mode replays mount
+    // effects before a queued state update renders; without this, onboarding could add
+    // the same Welcome tab twice.
+    const next = [...tabsRef.current, tab];
+    tabsRef.current = next;
+    setTabs(next);
     setActiveId(tab.id);
   }, []);
 
@@ -284,7 +456,7 @@ export function App() {
     const from = tabsRef.current.find((t) => t.id === activeRef.current);
     // A link opened from a page stays in that page's container, so following a link
     // never silently moves you into a different identity.
-    const tab = makeTab(from?.groupId ?? null, from?.containerId ?? DEFAULT_CONTAINER_ID);
+    const tab = makeTab(from?.groupId ?? null, windowContainerRef.current ?? DEFAULT_CONTAINER_ID);
     tab.mode = 'web';
     tab.url = url;
     tab.query = url;
@@ -303,8 +475,8 @@ export function App() {
     (id: string) => {
       const current = tabsRef.current;
       if (current.length <= 1) {
-        const toji = (window as unknown as { toji?: { quit?: () => void } }).toji;
-        if (toji?.quit) toji.quit();
+        const toji = (window as unknown as { toji?: { closeWindow?: () => void } }).toji;
+        if (toji?.closeWindow) toji.closeWindow();
         else window.close();
         return;
       }
@@ -399,7 +571,7 @@ export function App() {
     inputRef.current?.blur();
   };
 
-  // Plain Enter asks the AI (generates an answer page); Shift+Enter does a plain web search instead.
+  // Plain Enter searches/navigates like any browser (form submit); Shift+Enter asks the AI for an answer page.
   const onSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter' && event.shiftKey) {
       event.preventDefault();
@@ -483,14 +655,6 @@ export function App() {
     return Number.isFinite(v) && v > 0 ? v : DEFAULT_AGENT_MAX_STEPS;
   });
   const [agentNoLimit, setAgentNoLimit] = useState<boolean>(() => localStorage.getItem('toji.agentNoLimit') === '1');
-  // Local credential vault (renderer-only; secrets are never sent to the model/server).
-  const [credentials, setCredentials] = useState<CredentialStore>(loadCredentials);
-  const credentialsRef = useRef(credentials);
-  useEffect(() => {
-    credentialsRef.current = credentials;
-    saveCredentials(credentials);
-  }, [credentials]);
-
   const agentLimitRef = useRef({ max: agentMaxSteps, noLimit: agentNoLimit });
   useEffect(() => {
     agentLimitRef.current = { max: agentMaxSteps, noLimit: agentNoLimit };
@@ -502,14 +666,15 @@ export function App() {
   /** Messages from a tab's guest preload (see apps/desktop/guest-preload.cjs). */
   const onGuestMessage = useCallback((tabId: string, channel: string, payload: unknown) => {
     if (channel !== 'toji-vault:form') return;
-    const { hasLogin, url } = (payload ?? {}) as { hasLogin?: boolean; url?: string };
-    if (!hasLogin || !url) {
+    const { hasLogin } = (payload ?? {}) as { hasLogin?: boolean };
+    if (!hasLogin) {
       setVaultMatches((m) => (m[tabId]?.length ? { ...m, [tabId]: [] } : m));
       return;
     }
-    const tab = tabsRef.current.find((t) => t.id === tabId);
+    const webContentsId = webviewRefs.current[tabId]?.getWebContentsId?.();
+    if (!webContentsId) return;
     void bridge()
-      .vaultMatches?.(url, tab?.containerId ?? null)
+      .vaultMatches?.(webContentsId)
       .then((result) => setVaultMatches((m) => ({ ...m, [tabId]: result?.ok ? result.value : [] })));
   }, []);
 
@@ -881,7 +1046,7 @@ export function App() {
             image,
             crop,
             viewport: view.meta ? { w: view.meta.viewport.width, h: view.meta.viewport.height } : undefined,
-            credentials: credentialDirectory(credentialsRef.current),
+            credentialAccess: Boolean(bridge().vaultMatches && bridge().vaultFill),
             files: allFiles().map((f) => ({ index: f.index, name: f.name, mime: f.mime })),
             memory
           });
@@ -928,28 +1093,6 @@ export function App() {
           completed = true;
           break;
         }
-        // runJS: the agent's escape hatch — evaluate its code in the page and feed the return
-        // value back as an observation so it can derive things our extraction didn't capture
-        // (e.g. measure a canvas board and compute square coordinates itself).
-        if (action.action === 'runJS' && typeof action.code === 'string') {
-          let result = '(no value)';
-          try {
-            const wrapped = `(() => { try { const __r = (function(){ ${action.code} })(); return __r === undefined ? '(no return)' : (typeof __r === 'string' ? __r : JSON.stringify(__r)); } catch (e) { return 'ERROR: ' + (e && e.message); } })()`;
-            const raw = await wv.executeJavaScript(wrapped, true);
-            result = (typeof raw === 'string' ? raw : JSON.stringify(raw)).slice(0, 1200);
-          } catch {
-            result = 'ERROR: could not run code';
-          }
-          history.push({ action: 'ranJS', reason: `returned: ${result}` });
-          logAgent(tabId, { role: 'agent', text: `Ran code → ${result.slice(0, 200)}` });
-          lastWasVisual = true; // inspecting code shouldn't count as a stuck/visual action
-          step -= 1; // reading the page is cheap — don't burn the action budget
-          if (++waits > 24) {
-            logAgent(tabId, { role: 'system', text: 'Too many inspection steps — stopping.' });
-            break;
-          }
-          continue;
-        }
         // research: summon the research sub-agent for guidance when stuck/unsure, and feed its
         // answer back as an observation. General — works for any task.
         if (action.action === 'research' && typeof action.query === 'string') {
@@ -970,6 +1113,44 @@ export function App() {
             logAgent(tabId, { role: 'system', text: 'Too many non-acting steps — stopping.' });
             break;
           }
+          continue;
+        }
+        // Credential discovery is an explicit, site-scoped tool call. The model receives
+        // only metadata matching the current origin + container, never a global directory
+        // and never a password.
+        if (action.action === 'findCredentials') {
+          const currentUrl = view.meta?.url ?? '';
+          const result = await bridge().vaultMatches?.(wcId);
+          const matches = result?.ok ? result.value : [];
+          const summary = matches.length
+            ? matches.map((entry) => ({ credentialId: entry.id, name: entry.name, username: entry.username }))
+            : [];
+          history.push({ action: 'findCredentials', reason: summary.length ? `matches: ${JSON.stringify(summary)}` : 'no saved login matches this exact website and profile' });
+          logAgent(tabId, { role: 'agent', text: summary.length ? `Found ${summary.length} saved login${summary.length === 1 ? '' : 's'} for ${hostOf(currentUrl)}.` : `No saved login for ${hostOf(currentUrl) || 'this site'}.` });
+          lastWasVisual = true;
+          step -= 1;
+          if (++waits > 24) {
+            logAgent(tabId, { role: 'system', text: 'Too many non-acting steps — stopping.' });
+            break;
+          }
+          continue;
+        }
+        if (action.action === 'fillCredential' && typeof action.credentialId === 'string') {
+          const ok = (await bridge().vaultFill?.(wcId, action.credentialId)) ?? false;
+          history.push({ action: 'fillCredential', reason: ok ? 'saved login filled securely' : 'fill refused: credential, origin, or profile did not match' });
+          logAgent(tabId, { role: ok ? 'agent' : 'system', text: ok ? 'Filled the saved login.' : 'Could not fill that login on this website/profile.' });
+          if (ok) {
+            acted += 1;
+            await delay(700);
+          } else {
+            // A refused fill is free, but capped — a model looping on a bad id must not spin forever.
+            step -= 1;
+            if (++waits > 24) {
+              logAgent(tabId, { role: 'system', text: 'Too many non-acting steps — stopping.' });
+              break;
+            }
+          }
+          lastWasVisual = !ok;
           continue;
         }
         // ask: the agent needs something only the user knows (which account, a missing credential,
@@ -1076,25 +1257,6 @@ export function App() {
           }
           continue;
         }
-        // Backstop: never type a {{placeholder}} that doesn't resolve to a saved credential — the
-        // literal text would land in the page (e.g. "{{email}}" typed into Gmail). Bounce it back
-        // to the model with the real credential directory so it asks the user instead.
-        if (action.action === 'type' && unresolvedPlaceholders(action.text || '', credentialsRef.current).length) {
-          const missing = unresolvedPlaceholders(action.text || '', credentialsRef.current);
-          const dir = credentialDirectory(credentialsRef.current);
-          const have = dir.length
-            ? `The ONLY saved credentials are: ${dir.map((d) => `"${d.name}" (keys: ${d.keys.join(', ')})`).join('; ')}`
-            : 'The user has NO saved credentials';
-          logAgent(tabId, { role: 'system', text: `No saved credential matches ${missing.join(', ')} — the agent needs to ask you instead.` });
-          history.push({ action: 'note', reason: `refused to type ${missing.join(', ')}: no such credential. ${have}. Use ask(question) to get what you need from the user.`.slice(0, 400) });
-          lastWasVisual = true; // nothing was executed — don't trip the stuck detector
-          step -= 1; // a blocked action shouldn't burn the budget — the retry is the real step
-          if (++waits > 24) {
-            logAgent(tabId, { role: 'system', text: 'Too many non-acting steps — stopping.' });
-            break;
-          }
-          continue;
-        }
         try {
           if (action.action === 'navigate' && action.url) {
             navigateTab(tabId, toUrl(action.url));
@@ -1117,7 +1279,7 @@ export function App() {
             // query) — bounce it back to the model instead of sending a bogus verb to byakugan.
             const verb = action.action;
             if (verb !== 'click' && verb !== 'type' && verb !== 'press' && verb !== 'select' && verb !== 'hover' && verb !== 'scroll') {
-              history.push({ action: 'note', reason: `your "${verb}" action was missing its required field (research needs query, ask needs question, remember needs text, runJS needs code) — resend it complete` });
+              history.push({ action: 'note', reason: `your "${verb}" action was missing its required field (research needs query, ask needs question, remember needs text, fillCredential needs credentialId) — resend it complete` });
               lastWasVisual = true;
               step -= 1;
               if (++waits > 24) {
@@ -1141,9 +1303,7 @@ export function App() {
             // the main process re-derives fresh coordinates itself.
             const b = typeof action.id === 'number' ? boundsById.get(action.id) : undefined;
             if (b) await glideCursor(tabId, Math.round(b.x + b.w / 2), Math.round(b.y + b.h / 2));
-            // Substitute {{credential}} placeholders with the real secret HERE — at the last
-            // moment, locally. The resolved value goes into the page, never to the model.
-            const typed = verb === 'type' ? resolveSecrets(String(action.text ?? ''), credentialsRef.current) : undefined;
+            const typed = verb === 'type' ? String(action.text ?? '') : undefined;
             const res = await eyesAct(wcId, { verb, id: action.id, text: typed, key: action.key, value: action.value, direction: action.direction });
             if (!res.ok) {
               const why = `${res.error ?? 'action failed'}${res.blockedBy ? ` — blocked by ${res.blockedBy}` : ''}`;
@@ -1200,32 +1360,42 @@ export function App() {
     setTabs((current) => current.map((tab) => (tab.id === activeRef.current && tab.mode === 'page' && tab.query.trim() ? { ...tab, streamUrl: pageStreamUrl(tab.query, next), status: 'loading' } : tab)));
   }, [theme]);
 
-  const isLanding = activeTab?.status === 'new';
   const canReload = Boolean(activeTab && (activeTab.url || activeTab.query.trim()));
 
   const iconBtn =
     'no-drag inline-flex items-center justify-center rounded-full text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-black/5 dark:hover:bg-white/10 transition-colors disabled:opacity-35 disabled:pointer-events-none';
 
-  // A thin always-present drag region pinned to the very top of the window. Hovering
-  // near the top slides a small "grip" pill down to signal you can grab here to move
-  // the window — so the omnibox can sit flush at the top without a static title bar.
-  // A thin invisible strip along the very top edge: hovering it pops down a little notch
-  // handle (the ⠿ grip), and grabbing either the strip or the notch moves the window.
-  const windowDragHandle = (
-    <div className="drag-strip" aria-hidden>
+  // The handle is itself a native drag region. Its reveal boundary is implemented by
+  // capture-phase listeners on the existing tabs, so revealing it never puts an
+  // invisible click-blocking layer over close buttons or other controls.
+  const windowDragHandle = (placement: 'side' | 'tabs') => (
+    <div className={`drag-strip drag-strip-${placement}`} data-testid="window-drag-handle" aria-hidden>
       <span className="drag-notch">
         <span className="drag-grip">
-          {Array.from({ length: 9 }, (_, i) => (
+          {Array.from({ length: 12 }, (_, i) => (
             <i key={i} />
           ))}
         </span>
       </span>
     </div>
   );
-
   const torBar = activeContainer.egress === 'tor' ? <TorStatusBar container={activeContainer} status={torStatus} /> : null;
   const vaultBar = vaultPrompt ? (
     <VaultPromptBar prompt={vaultPrompt} container={findContainer(containers, vaultPrompt.containerId ?? undefined)} onDone={() => setVaultPrompt(null)} />
+  ) : null;
+  const profilePicker = profilePickerOpen ? (
+    <WindowProfilePicker
+      containers={containers}
+      currentId={windowContainerId}
+      onSelect={selectWindowContainer}
+      onContainersChange={setContainers}
+      onClose={windowContainerId ? () => setProfilePickerOpen(false) : undefined}
+      onManage={() => {
+        if (!windowContainerRef.current) selectWindowContainer(DEFAULT_CONTAINER_ID);
+        else setProfilePickerOpen(false);
+        openInternal('settings');
+      }}
+    />
   ) : null;
 
   const addressRow = (
@@ -1242,15 +1412,6 @@ export function App() {
       <button type="button" aria-label="Reload" disabled={!canReload} onClick={reloadActive} className={`${iconBtn} h-9 w-9 border border-black/[0.08] dark:border-white/10`}>
         <RotateCw size={14} />
       </button>
-      <ContainerPicker
-        containers={containers}
-        active={activeContainer}
-        torReady={torStatus.ready}
-        onSelect={(id) => activeTab && setTabContainer(activeTab.id, id)}
-        onNewTabIn={(id) => openTab(activeTab?.groupId ?? null, id)}
-        onClear={clearContainer}
-        onManage={() => openInternal('settings')}
-      />
       <form onSubmit={onSubmit} className="no-drag flex h-9 flex-1 items-center rounded-full border border-black/[0.09] bg-black/[0.03] pl-3.5 pr-1 transition focus-within:bg-transparent dark:border-white/12 dark:bg-white/[0.04] dark:focus-within:border-white/30">
         <Search size={15} className="shrink-0 text-neutral-400 mr-2.5 mb-0.25" />
         <input
@@ -1258,7 +1419,7 @@ export function App() {
           value={activeTab?.query ?? ''}
           onChange={(e) => activeTab && patchTab(activeTab.id, { query: e.target.value })}
           onKeyDown={onSearchKeyDown}
-          placeholder="Search or enter a URL  —  ⇧↵ to ask the model"
+          placeholder="search or enter a url"
           spellCheck={false}
           autoComplete="off"
           aria-label="Search"
@@ -1266,11 +1427,9 @@ export function App() {
         />
         {activeTab && <VaultFillButton matches={vaultMatches[activeTab.id] ?? []} onFill={(entryId) => fillCredential(activeTab.id, entryId)} />}
         <button type="button" aria-label="Generate an AI page" title="Generate an AI page  ⇧↵" onClick={() => activeTab && go(activeTab.id, activeTab.query, { ai: true })} className="inline-flex h-7 w-7 mr-1 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-black/10 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/15 dark:hover:text-white">
-          <Sparkles size={15} />
+          <WandSparkles size={15} />
         </button>
-        <button type="submit" aria-label="Go" className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-white transition hover:opacity-85 dark:bg-white dark:text-neutral-900">
-          <ArrowRight size={15} />
-        </button>
+        <TorHoldButton compact active={torMode} onGo={() => activeTab && go(activeTab.id, activeTab.query)} onToggle={baseContainer.egress === 'tor' ? undefined : toggleWindowTor} />
       </form>
       <button type="button" aria-label="Toggle tab layout" title={layout === 'side' ? 'Top tabs' : 'Side tabs'} onClick={() => setLayout((l) => (l === 'side' ? 'top' : 'side'))} className={`${iconBtn} h-9 w-9 border border-black/[0.08] dark:border-white/10`}>
         {layout === 'side' ? <PanelTop size={14} /> : <PanelLeft size={14} />}
@@ -1284,32 +1443,15 @@ export function App() {
     </div>
   );
 
-  const landing = (
-    <div className="flex flex-1 flex-col items-center justify-center px-6 pb-[9vh]">
-      <img src={ICON} alt="Toji" className="mb-5 h-[72px] w-[72px] rounded-[20px] shadow-sm" />
-      <h1 className="mb-7 text-2xl font-semibold tracking-tight">Toji</h1>
-      <form onSubmit={onSubmit} className="flex h-14 w-[min(600px,92vw)] items-center rounded-full border border-black/10 bg-white pl-5 pr-1.5 shadow-sm transition dark:border-white/12 dark:bg-neutral-900 dark:focus-within:border-white/30">
-        <Search size={18} className="shrink-0 text-neutral-400 mr-2.5 mb-0.25" />
-        <input
-          value={activeTab?.query ?? ''}
-          onChange={(e) => activeTab && patchTab(activeTab.id, { query: e.target.value })}
-          onKeyDown={onSearchKeyDown}
-          placeholder="Search or enter a URL  —  ⇧↵ to ask the model…"
-          spellCheck={false}
-          autoComplete="off"
-          autoFocus
-          aria-label="Search"
-          className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-neutral-400"
-        />
-        <button type="button" aria-label="Generate an AI page" title="Generate an AI page  ⇧↵" onClick={() => activeTab && go(activeTab.id, activeTab.query, { ai: true })} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-black/10 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/15 dark:hover:text-white mr-1.5">
-          <Sparkles size={18} />
-        </button>
-        <button type="submit" aria-label="Go" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-white transition hover:opacity-85 dark:bg-white dark:text-neutral-900 mr-1">
-          <ArrowRight size={18} />
-        </button>
-      </form>
-    </div>
-  );
+  const landing = activeTab ? (
+    <LandingSearch
+      key={activeTab.id}
+      torActive={torMode}
+      onTorToggle={baseContainer.egress === 'tor' ? undefined : toggleWindowTor}
+      onGo={(value) => go(activeTab.id, value)}
+      onAi={(value) => go(activeTab.id, value, { ai: true })}
+    />
+  ) : null;
 
   const viewport = (
     <main className="relative flex min-h-0 flex-1">
@@ -1329,15 +1471,15 @@ export function App() {
             <div key={tab.id} className={`absolute inset-0 ${visibility}`}>
               <InternalPage
                 page={tab.internal}
-                store={credentials}
-                onChange={setCredentials}
                 containers={containers}
                 onContainersChange={setContainers}
                 onClearContainer={clearContainer}
                 onOpenUrl={openWebTab}
                 onGetStarted={() => {
                   localStorage.setItem('toji-onboarded', '1');
-                  closeTab(tab.id);
+                  patchTab(tab.id, startBrowsingInTab(tab));
+                  setActiveId(tab.id);
+                  requestAnimationFrame(() => inputRef.current?.focus());
                 }}
               />
             </div>
@@ -1347,7 +1489,7 @@ export function App() {
           return (
             <div key={tab.id} className={`absolute inset-0 ${visibility}`}>
               <WebView
-                key={`${tab.id}:${tab.reloadKey}:${tab.contextKey}:${tab.containerId}`}
+                key={`${tab.id}:${tab.reloadKey}:${tab.contextKey}:${tab.containerId}:${torMode ? 'tor' : 'direct'}`}
                 url={tab.url}
                 partition={tabPartition(tab)}
                 loading={tab.status === 'loading'}
@@ -1411,6 +1553,9 @@ export function App() {
       return (
         <AgentSpotlight
           target={target}
+          // Center over the page area, not the whole window — lined up with the omnibox
+          // behind it even while the sidebar takes the left edge.
+          insetLeft={layout === 'side' && sidebarOpen ? 240 : 0}
           running={Boolean(agent?.running)}
           pendingAsk={agent?.ask}
           log={agent?.log ?? []}
@@ -1517,8 +1662,6 @@ export function App() {
       );
     })();
 
-  // The sidebar element — reused both pinned-open and as the transient edge "peek". While
-  // peeking, the collapse button becomes a PIN: pressing it keeps the sidebar open for good.
   const sidebarEl = (peek = false) => (
     <Sidebar
       tabs={tabs}
@@ -1528,6 +1671,8 @@ export function App() {
       onSelect={setActiveId}
       onClose={closeTab}
       onNewTab={openTab}
+      onNewGroup={openTabInNewGroup}
+      onNewAgentTab={openAgentTab}
       onToggleCollapse={() => {
         setSidebarOpen(peek);
         setSidebarPeek(false);
@@ -1546,32 +1691,46 @@ export function App() {
           return cur.map((t) => (t.groupId ? t : ordered[k++] ?? t));
         })
       }
+      onPointerActivity={() => setDragHandleVisible(true)}
+      onPointerLeave={() => setDragHandleVisible(false)}
     />
   );
 
+  // The picker only ever shows before this window has an identity (fresh window, or
+  // its profile was deleted underneath it) — a window's profile is fixed once chosen,
+  // so there is no mid-session picker and nothing underneath worth keeping mounted.
+  if (profilePickerOpen) {
+    return (
+      <div className="relative h-screen bg-white dark:bg-neutral-950">
+        <div className="drag fixed inset-x-0 top-0 z-50 h-16" data-testid="profile-drag-region" aria-hidden />
+        {profilePicker}
+      </div>
+    );
+  }
+
   if (layout === 'side') {
     return (
-      <div className="flex h-screen flex-col bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
-        {windowDragHandle}
-        <header className="drag shrink-0 border-b border-black/[0.07] px-3 pt-2.5 pb-2.5 dark:border-white/10">
+      <div
+        className="flex h-screen flex-col bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100"
+        onMouseLeave={() => setDragHandleVisible(false)}
+      >
+        {(sidebarOpen || sidebarPeek) && dragHandleVisible && windowDragHandle('side')}
+        <header className="drag relative shrink-0 border-b border-black/[0.07] px-3 pt-2.5 pb-2.5 dark:border-white/10">
           {addressRow}
-          {torBar && <div className="mt-2">{torBar}</div>}
-        {vaultBar && <div className="mt-2">{vaultBar}</div>}
           {vaultBar && <div className="mt-2">{vaultBar}</div>}
+          {torBar}
         </header>
         <div className="relative flex min-h-0 flex-1">
           {sidebarOpen && sidebarEl()}
           {viewport}
           {!sidebarOpen && (
             <>
-              {/* Thin left-edge trigger: hover to peek the sidebar open. */}
-              <div className="absolute left-0 top-0 z-[70] h-full w-2" onMouseEnter={() => setSidebarPeek(true)} />
+              <div className="absolute left-0 top-0 z-[70] h-full w-3" data-testid="sidebar-peek-trigger" onMouseEnter={() => setSidebarPeek(true)} />
               <AnimatePresence>
                 {sidebarPeek && (
                   <motion.div
-                    // Looks exactly like the pinned sidebar (opaque, same border), just sliding
-                    // in from the edge — no floating panel, no shadow.
                     className="absolute left-0 top-0 z-[75] flex h-full bg-white dark:bg-neutral-950"
+                    data-testid="sidebar-peek"
                     onMouseLeave={() => setSidebarPeek(false)}
                     initial={{ x: -240 }}
                     animate={{ x: 0 }}
@@ -1585,7 +1744,7 @@ export function App() {
             </>
           )}
         </div>
-        {agentSpotlight}
+        <AnimatePresence>{agentSpotlight}</AnimatePresence>
         {agentCursorEl}
         {tabContextMenu}
       </div>
@@ -1593,37 +1752,66 @@ export function App() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
-      {windowDragHandle}
-      <header className="drag shrink-0 border-b border-black/[0.07] px-3 pt-2.5 pb-2.5 dark:border-white/10">
+    <div
+      className="flex h-screen flex-col bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100"
+      onMouseLeave={() => setDragHandleVisible(false)}
+    >
+      {topTabsCrowded && dragHandleVisible && windowDragHandle('tabs')}
+      <header className="drag relative shrink-0 border-b border-black/[0.07] px-3 pt-2.5 pb-2.5 dark:border-white/10">
         {/* Tabs sit at the very top (offset past the macOS traffic lights); the omnibox lives
             just beneath them, flush left since nothing overlaps it there. */}
         {/* Tabs are drag-reorderable along the X axis only (they live in a horizontal strip). */}
-        <Reorder.Group as="div" axis="x" values={tabs} onReorder={setTabs} className={`flex h-9 select-none items-center gap-1 overflow-x-auto ${isMac ? 'pl-[78px]' : ''}`}>
+        <div
+          className="flex h-9"
+          data-testid="top-tab-hover-boundary"
+          onMouseMoveCapture={() => {
+            if (topTabsCrowded) setDragHandleVisible(true);
+          }}
+          onMouseLeave={() => setDragHandleVisible(false)}
+        >
+          {isMac && <div aria-hidden className="w-[82px] shrink-0" />}
+          <Reorder.Group
+            ref={topTabStripRef}
+            as="div"
+            axis="x"
+            values={tabs}
+            onReorder={setTabs}
+            layoutScroll
+            data-testid="top-tab-strip"
+            className="tab-strip flex min-w-0 flex-1 select-none items-center gap-1 overflow-x-auto overflow-y-hidden"
+          >
           {tabs.map((tab) => {
             const color = groupColor(tab.groupId);
-            // Firefox-style container hint: a colored underline on any tab that isn't in
-            // the default container, so you can never mistake which identity you're in.
-            const container = findContainer(containers, tab.containerId);
-            const containerAccent = container.id === DEFAULT_CONTAINER_ID ? null : container.color;
             return (
               <Reorder.Item
                 as="div"
                 key={tab.id}
                 value={tab}
+                dragConstraints={topTabStripRef}
+                dragElastic={0}
+                dragMomentum={false}
+                data-testid="top-tab"
+                data-tab-id={tab.id}
                 onClick={() => setActiveId(tab.id)}
+                onDragStart={() => {
+                  setDraggingTopTabId(tab.id);
+                  setActiveId(tab.id);
+                }}
+                onDragEnd={() => setDraggingTopTabId(null)}
                 onContextMenu={(e: React.MouseEvent<HTMLDivElement>) => {
                   e.preventDefault();
                   setActiveId(tab.id);
                   setTabMenu({ x: e.clientX, y: e.clientY, tabId: tab.id });
                 }}
-                whileDrag={{ scale: 1.03, cursor: 'grabbing' }}
-                title={container.id === DEFAULT_CONTAINER_ID ? undefined : `${tabTitle(tab)} — ${container.name}`}
-                className={`no-drag group relative flex h-8 min-w-[120px] max-w-[210px] cursor-grab items-center gap-2 overflow-hidden rounded-xl px-2.5 transition-colors ${
-                  tab.id === activeId ? 'bg-black/[0.06] dark:bg-white/[0.12]' : 'text-neutral-500 hover:bg-black/[0.035] dark:text-neutral-400 dark:hover:bg-white/[0.06]'
+                whileDrag={{ cursor: 'grabbing', zIndex: 90 }}
+                className={`no-drag group relative flex h-8 w-[210px] min-w-[120px] max-w-[210px] flex-[1_1_210px] cursor-grab items-center gap-2 overflow-hidden rounded-xl px-2.5 transition-colors ${
+                  draggingTopTabId === tab.id
+                    ? 'top-tab-dragging bg-black/[0.06] dark:bg-white/[0.12]'
+                    : tab.id === activeId
+                      ? 'bg-black/[0.06] dark:bg-white/[0.12]'
+                      : 'bg-black/[0.02] text-neutral-500 hover:bg-black/[0.035] dark:bg-white/[0.03] dark:text-neutral-400 dark:hover:bg-white/[0.06]'
                 }`}
               >
-                {containerAccent && <span aria-hidden className="pointer-events-none absolute inset-x-1.5 bottom-0 h-[2px] rounded-full" style={{ background: containerAccent }} />}
                 {color ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} /> : <TabFavicon tab={tab} />}
                 <span className="flex-1 truncate text-[13px]">{tabTitle(tab)}</span>
                 {agents[tab.id]?.running && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500" title="Agent working" />}
@@ -1631,6 +1819,7 @@ export function App() {
                 <button
                   type="button"
                   aria-label="Close tab"
+                  onPointerDown={(event) => event.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation();
                     closeTab(tab.id);
@@ -1642,16 +1831,26 @@ export function App() {
               </Reorder.Item>
             );
           })}
-          <button type="button" aria-label="New tab" onClick={() => openTab(null)} className={`${iconBtn} h-8 w-8 shrink-0`}>
-            <Plus size={16} />
-          </button>
-        </Reorder.Group>
+          {/* New-tab sits right beside the last tab; once the row fills up it pins to the corner. */}
+          {!topTabsCrowded && (
+            <button type="button" aria-label="New tab" onClick={() => openTab(null)} className={`${iconBtn} ml-0.5 h-8 w-8 shrink-0`}>
+              <Plus size={16} />
+            </button>
+          )}
+          </Reorder.Group>
+          {topTabsCrowded && (
+            <button type="button" aria-label="New tab" onClick={() => openTab(null)} className={`${iconBtn} ml-1.5 h-8 w-8 shrink-0`}>
+              <Plus size={16} />
+            </button>
+          )}
+        </div>
         {/* Same 10px rhythm as the header's top/bottom padding, so all three gaps match. */}
         <div className="mt-2.5">{addressRow}</div>
-        {torBar && <div className="mt-2">{torBar}</div>}
+        {vaultBar && <div className="mt-2">{vaultBar}</div>}
+        {torBar}
       </header>
       {viewport}
-      {agentSpotlight}
+      <AnimatePresence>{agentSpotlight}</AnimatePresence>
       {agentCursorEl}
       {tabContextMenu}
     </div>

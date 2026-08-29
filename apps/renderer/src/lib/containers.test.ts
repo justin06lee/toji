@@ -4,6 +4,7 @@ import {
   DEFAULT_CONTAINERS,
   containerId,
   findContainer,
+  normalizeContainers,
   parsePartition,
   partitionFor,
   tabSessionPartition,
@@ -93,6 +94,41 @@ describe('findContainer', () => {
     expect(findContainer(DEFAULT_CONTAINERS, 'work').name).toBe('Work');
     expect(findContainer(DEFAULT_CONTAINERS, 'nope')).toBe(DEFAULT_CONTAINERS[0]);
     expect(findContainer(DEFAULT_CONTAINERS, undefined)).toBe(DEFAULT_CONTAINERS[0]);
+  });
+});
+
+describe('normalizeContainers', () => {
+  it('repairs malformed fields and restores shortcut profiles', () => {
+    const result = normalizeContainers([{ id: 'personal', name: '  Home  ', egress: 'broken' }, { id: '../bad', name: 'Bad' }]);
+    expect(result.find((container) => container.id === 'personal')).toEqual(
+      expect.objectContaining({ name: 'Home', egress: 'direct', ephemeral: false, builtin: true, avatar: 'profiles/personal.svg' })
+    );
+    expect(result.some((container) => container.id === 'private')).toBe(true);
+    expect(result.some((container) => container.id === 'onion')).toBe(true);
+    expect(result.some((container) => container.id === '../bad')).toBe(false);
+  });
+
+  it('migrates the old built-in emoji avatars to artwork', () => {
+    const result = normalizeContainers([{ ...DEFAULT_CONTAINERS[0], avatar: '👤' }]);
+    expect(result.find((container) => container.id === 'personal')?.avatar).toBe('profiles/personal.svg');
+  });
+
+  it('migrates the retired PNG portraits to the current artwork', () => {
+    const result = normalizeContainers([
+      { ...DEFAULT_CONTAINERS[0], avatar: 'profiles/personal.png' },
+      { id: 'custom', name: 'Custom', egress: 'direct', ephemeral: false, avatar: 'profiles/work.png' }
+    ]);
+    expect(result.find((container) => container.id === 'personal')?.avatar).toBe('profiles/personal.svg');
+    expect(result.find((container) => container.id === 'custom')?.avatar).toBe('profiles/work.svg');
+  });
+
+  it('deduplicates ids so one profile maps to one session policy', () => {
+    const result = normalizeContainers([
+      { id: 'work', name: 'First', egress: 'direct', ephemeral: false },
+      { id: 'work', name: 'Second', egress: 'tor', ephemeral: true }
+    ]);
+    expect(result.filter((container) => container.id === 'work')).toHaveLength(1);
+    expect(result.find((container) => container.id === 'work')?.name).toBe('First');
   });
 });
 

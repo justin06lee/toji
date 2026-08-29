@@ -19,23 +19,16 @@ function numEnv(name: string, fallback: number) {
 
 const projectRoot = process.cwd();
 
-// Toji's "model" is a local CLI coding agent (Claude Code, Codex, opencode, …)
-// driven in non-interactive print mode. `agent` selects a built-in preset; set it
-// to 'off' to force Toji's deterministic demo/heuristic fallbacks. `agentCmd` is a
-// full command override (e.g. "claude -p --dangerously-skip-permissions") that wins
-// over the preset — useful to pin an absolute binary path in a packaged app where
-// the GUI process has a minimal PATH.
-const rawAgent = (process.env.TOJI_AGENT ?? 'claude').trim().toLowerCase();
+// Toji's "model" is the embedded yagami engine (the signed-in coding-agent CLIs on
+// this machine — no keys) or a custom OpenAI-compatible endpoint configured in the
+// UI. TOJI_AGENT=off forces the deterministic demo/heuristic fallbacks; any legacy
+// value (claude/codex/opencode/…) means yagami now, which drives those same CLIs.
+const rawAgent = (process.env.TOJI_AGENT ?? 'yagami').trim().toLowerCase();
 
 export const config = {
   appName: 'Toji',
-  port: numEnv('PORT', 8787),
-  agent: (['claude', 'codex', 'opencode', 'off'].includes(rawAgent) ? rawAgent : 'claude') as
-    | 'claude'
-    | 'codex'
-    | 'opencode'
-    | 'off',
-  agentCmd: (process.env.TOJI_AGENT_CMD ?? '').trim(),
+  port: numEnv('PORT', 8788),
+  agent: (rawAgent === 'off' ? 'off' : rawAgent === 'local' ? 'local' : 'yagami') as 'yagami' | 'local' | 'off',
   agentTimeoutMs: Math.max(5_000, numEnv('TOJI_AGENT_TIMEOUT_MS', 120_000)),
   maxAgentTabs: Math.max(1, numEnv('MAX_AGENT_TABS', 8)),
   maxSpeculativeTabs: Math.max(0, numEnv('MAX_SPECULATIVE_TABS', 2)),
@@ -55,7 +48,7 @@ export const config = {
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 Toji/0.2'
 };
 
-// Whether a CLI agent is actually available is resolved at runtime by agentRuntime
-// (it depends on detection + user settings, not just env), so there is no static
-// isLiveModelEnabled here — use agentAvailable() from agentRuntime/model instead.
+// Whether a backend is actually available is resolved at runtime by agentRuntime
+// (it depends on harness detection + user settings, not just env), so there is no
+// static isLiveModelEnabled here — use agentAvailable() from agentRuntime/model.
 export const isBraveSearchEnabled = config.searchProvider === 'brave' && Boolean(config.braveSearchApiKey);

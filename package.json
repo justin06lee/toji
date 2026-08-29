@@ -13,11 +13,14 @@
     "electron",
     "esbuild"
   ],
+  "overrides": {
+    "adm-zip": "0.6.0"
+  },
   "scripts": {
     "dev": "concurrently -k -n server,web,electron -c auto \"bun run dev:server\" \"bun run dev:web\" \"bun run dev:electron\"",
     "dev:web": "vite --host 127.0.0.1 --port 5173",
     "dev:server": "tsx watch apps/agent-server/src/index.ts",
-    "dev:electron": "wait-on tcp:5173 tcp:8787 && cross-env ELECTRON_START_URL=http://127.0.0.1:5173 electron apps/desktop/main.cjs",
+    "dev:electron": "wait-on tcp:5173 tcp:8788 && cross-env ELECTRON_START_URL=http://127.0.0.1:5173 electron apps/desktop/main.cjs",
     "build": "bun run typecheck && bun run build:server && bun run build:web",
     "build:server": "tsc -p tsconfig.server.json",
     "build:web": "vite build",
@@ -32,7 +35,7 @@
     "smoke": "tsx scripts/smoke.ts",
     "tor:check": "node scripts/tor-live-check.cjs",
     "e2e:demo": "tsx scripts/e2e-demo.ts",
-    "start:app": "concurrently -k -n server,desktop -c auto \"bun run start:server\" \"wait-on tcp:8787 && electron apps/desktop/main.cjs\"",
+    "start:app": "concurrently -k -n server,desktop -c auto \"bun run start:server\" \"wait-on tcp:8788 && electron apps/desktop/main.cjs\"",
     "package": "bun run build && electron-builder",
     "package:dir": "bun run build && electron-builder --dir",
     "check": "bun run typecheck && bun run smoke && bun run build && bun run e2e:demo"
@@ -75,16 +78,14 @@
       "package.json",
       "apps/desktop/**/*",
       "dist/renderer/**/*",
-      "dist/server/**/*",
-      ".env.local",
-      ".env"
+      "dist/server/**/*"
     ],
     "asar": false
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.110.0",
     "@fontsource/poppins": "^5.2.7",
     "@justin06lee/byakugan": "^0.2.1",
+    "@justin06lee/yagami": "0.5.0",
     "@vitejs/plugin-react": "6.0.3",
     "cors": "2.8.6",
     "dotenv": "17.4.2",
@@ -106,9 +107,9 @@
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@types/ws": "8.18.1",
-    "concurrently": "10.0.3",
+    "concurrently": "10.0.5",
     "cross-env": "10.1.0",
-    "electron": "42.5.0",
+    "electron": "42.5.1",
     "electron-builder": "^26.0.0",
     "tailwindcss": "^4.3.1",
     "tsx": "4.22.4",

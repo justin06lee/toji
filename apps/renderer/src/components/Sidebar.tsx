@@ -1,7 +1,7 @@
-import { ChevronDown, ChevronRight, PanelLeftClose, PanelLeftOpen, Plus, X } from 'lucide-react';
-import { useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { Reorder } from 'motion/react';
-import { hostOf } from '../lib/nav';
+import { ChevronDown, ChevronRight, FolderPlus, PanelLeftClose, PanelLeftOpen, Plus, WandSparkles, X } from 'lucide-react';
+import { useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
+import { motion, Reorder } from 'motion/react';
+import { tabTitle } from '../lib/tabPresentation';
 import { GROUP_COLORS, type BrowserTab, type TabGroup } from '../types';
 
 const ICON = `${import.meta.env.BASE_URL}toji-round.png`;
@@ -13,6 +13,10 @@ interface SidebarProps {
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
   onNewTab: (groupId: string | null) => void;
+  /** Hold-menu action: a fresh tab inside a fresh group. */
+  onNewGroup?: () => void;
+  /** Hold-menu action: a fresh tab with the AI agent ready. */
+  onNewAgentTab?: () => void;
   /** True while the sidebar is the transient hover "peek" — the collapse button becomes a pin. */
   peek?: boolean;
   onToggleCollapse: () => void;
@@ -22,11 +26,9 @@ interface SidebarProps {
   onTabContextMenu: (tabId: string, x: number, y: number) => void;
   /** Reorder the ungrouped tabs (drag along the Y axis). */
   onReorderUngrouped?: (ordered: BrowserTab[]) => void;
-}
-
-function tabLabel(tab: BrowserTab) {
-  if (tab.mode === 'web') return tab.title || (tab.url ? hostOf(tab.url) : 'New Tab');
-  return tab.query.trim() || 'New Tab';
+  /** Reveal the native window handle while the pointer is anywhere over the sidebar. */
+  onPointerActivity?: () => void;
+  onPointerLeave?: () => void;
 }
 
 function TabRow({
@@ -35,7 +37,8 @@ function TabRow({
   indent,
   onSelect,
   onClose,
-  onContext
+  onContext,
+  dragging = false
 }: {
   tab: BrowserTab;
   active: boolean;
@@ -43,13 +46,14 @@ function TabRow({
   onSelect: () => void;
   onClose: () => void;
   onContext: (e: ReactMouseEvent) => void;
+  dragging?: boolean;
 }) {
   return (
     <div
       onClick={onSelect}
       onContextMenu={onContext}
-      className={`no-drag group/tab flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2 ${indent ? 'ml-4' : ''} ${
-        active ? 'bg-black/[0.06] dark:bg-white/[0.12]' : 'text-neutral-500 hover:bg-black/[0.035] dark:text-neutral-400 dark:hover:bg-white/[0.06]'
+      className={`no-drag group/tab flex h-8 items-center gap-2 rounded-lg px-2 ${indent ? 'ml-4 cursor-pointer' : 'cursor-grab active:cursor-grabbing'} ${
+        dragging || active ? 'bg-black/[0.06] dark:bg-white/[0.12]' : 'text-neutral-500 hover:bg-black/[0.035] dark:text-neutral-400 dark:hover:bg-white/[0.06]'
       }`}
     >
       {tab.mode === 'web' && tab.favicon ? (
@@ -57,16 +61,17 @@ function TabRow({
       ) : (
         <img src={ICON} alt="" aria-hidden className="h-4 w-4 shrink-0 rounded-[5px]" />
       )}
-      <span className={`flex-1 truncate text-[13px] ${active ? 'text-neutral-900 dark:text-neutral-100' : ''}`}>{tabLabel(tab)}</span>
+      <span className={`flex-1 truncate text-[13px] ${active ? 'text-neutral-900 dark:text-neutral-100' : ''}`}>{tabTitle(tab)}</span>
       {tab.status === 'loading' && <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-[1.5px] border-current/30 border-t-current" />}
       <button
         type="button"
         aria-label="Close tab"
+        onPointerDown={(event) => event.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation();
           onClose();
         }}
-        className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-md text-neutral-400 opacity-0 transition group-hover/tab:opacity-100 hover:bg-black/10 hover:text-neutral-900 dark:hover:bg-white/15 dark:hover:text-white"
+        className={`inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-md text-neutral-400 transition hover:bg-black/10 hover:text-neutral-900 dark:hover:bg-white/15 dark:hover:text-white ${active ? 'opacity-100' : 'opacity-0 group-hover/tab:opacity-100'}`}
       >
         <X size={12} />
       </button>
@@ -74,22 +79,116 @@ function TabRow({
   );
 }
 
-export function Sidebar({ tabs, groups, activeId, onSelect, onClose, onNewTab, peek, onToggleCollapse, onToggleGroup, onRenameGroup, onRemoveGroup, onTabContextMenu, onReorderUngrouped }: SidebarProps) {
+/**
+ * The new-tab affordance living directly under the last tab. A click opens a tab; a
+ * HOLD charges the same ring as the Tor button, then the plus morphs into three
+ * actions: new tab, new tab in a new group, and a new AI tab.
+ */
+function SidebarNewButton({ onNewTab, onNewGroup, onNewAgentTab }: { onNewTab: () => void; onNewGroup?: () => void; onNewAgentTab?: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const [charging, setCharging] = useState(false);
+  const timer = useRef<number | null>(null);
+  const suppressClick = useRef(false);
+  const diameter = 28;
+  const radius = diameter / 2 - 1.5;
+  const circumference = 2 * Math.PI * radius;
+
+  const stop = () => {
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = null;
+    setCharging(false);
+  };
+  const down = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    suppressClick.current = false;
+    setCharging(true);
+    timer.current = window.setTimeout(() => {
+      suppressClick.current = true;
+      setCharging(false);
+      setExpanded(true);
+    }, 900);
+  };
+
+  const item =
+    'inline-flex h-7 w-7 items-center justify-center rounded-lg text-neutral-500 transition hover:bg-black/[0.05] hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-neutral-100';
+
+  const act = (fn?: () => void) => () => {
+    setExpanded(false);
+    fn?.();
+  };
+
+  return (
+    <div className="no-drag mt-0.5 flex h-8 items-center px-0.5" onMouseLeave={() => setExpanded(false)}>
+      {expanded ? (
+        <motion.div initial={{ opacity: 0, x: -4 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.12, ease: 'easeOut' }} className="flex items-center gap-1">
+          <button type="button" aria-label="New tab" title="New tab" onClick={act(onNewTab)} className={item}>
+            <Plus size={15} />
+          </button>
+          <button type="button" aria-label="New tab in a new group" title="New tab in a new group" onClick={act(onNewGroup)} className={item}>
+            <FolderPlus size={15} />
+          </button>
+          <button type="button" aria-label="New AI tab" title="New AI tab" onClick={act(onNewAgentTab)} className={item}>
+            <WandSparkles size={15} />
+          </button>
+        </motion.div>
+      ) : (
+        <button
+          type="button"
+          aria-label="New tab. Hold for more"
+          title="New tab — hold for more"
+          onPointerDown={down}
+          onPointerUp={stop}
+          onPointerCancel={stop}
+          onPointerLeave={stop}
+          onClick={() => {
+            if (suppressClick.current) {
+              suppressClick.current = false;
+              return;
+            }
+            onNewTab();
+          }}
+          className="relative inline-flex h-7 w-7 touch-none select-none items-center justify-center rounded-full text-neutral-500 transition hover:bg-black/[0.05] hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-neutral-100"
+        >
+          <Plus size={15} />
+          <svg className="pointer-events-none absolute inset-0 -rotate-90 overflow-visible" width={diameter} height={diameter} viewBox={`0 0 ${diameter} ${diameter}`} aria-hidden>
+            <circle
+              cx={diameter / 2}
+              cy={diameter / 2}
+              r={radius}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeDasharray={circumference}
+              strokeDashoffset={charging ? 0 : circumference}
+              className={charging ? 'transition-[stroke-dashoffset] duration-[900ms] ease-linear' : 'transition-none'}
+            />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function Sidebar({ tabs, groups, activeId, onSelect, onClose, onNewTab, onNewGroup, onNewAgentTab, peek, onToggleCollapse, onToggleGroup, onRenameGroup, onRemoveGroup, onTabContextMenu, onReorderUngrouped, onPointerActivity, onPointerLeave }: SidebarProps) {
   const contextHandler = (tabId: string) => (e: ReactMouseEvent) => {
     e.preventDefault();
     onTabContextMenu(tabId, e.clientX, e.clientY);
   };
   const [editingId, setEditingId] = useState<string | null>(null);
+  const ungroupedListRef = useRef<HTMLDivElement>(null);
   const ungrouped = tabs.filter((t) => !t.groupId);
-  // Row pitch for drag bounds: h-8 rows (32px) + space-y-0.5 gaps (2px).
-  const ROW_PITCH = 34;
 
   return (
-    <aside className="drag flex w-60 shrink-0 select-none flex-col border-r border-black/[0.07] bg-black/[0.015] dark:border-white/10 dark:bg-white/[0.02]">
-      <div className="no-drag flex items-center gap-1 px-2 py-2">
-        <button type="button" onClick={() => onNewTab(null)} className="flex flex-1 items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13px] text-neutral-500 transition-colors hover:bg-black/5 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-neutral-100">
-          <Plus size={15} /> New tab
-        </button>
+    // While peeking, the sidebar must NOT be a native drag region: drag regions swallow
+    // mouse events, which made the peek instantly read "pointer left" and slam shut.
+    <aside
+      className={`${peek ? '' : 'drag '}relative flex w-60 shrink-0 select-none flex-col border-r border-black/[0.07] bg-black/[0.015] dark:border-white/10 dark:bg-white/[0.02]`}
+      data-testid="sidebar"
+      onMouseMoveCapture={onPointerActivity}
+      onMouseLeave={onPointerLeave}
+    >
+      {!peek && <div className="drag absolute inset-y-0 left-0 z-20 w-3" data-testid="sidebar-drag-edge" aria-hidden />}
+      <div className="no-drag ml-3 flex items-center justify-end py-2 pr-2">
         <button
           type="button"
           aria-label={peek ? 'Show sidebar' : 'Hide sidebar'}
@@ -101,7 +200,7 @@ export function Sidebar({ tabs, groups, activeId, onSelect, onClose, onNewTab, p
         </button>
       </div>
 
-      <div className="no-drag flex-1 space-y-0.5 overflow-y-auto px-2 pb-2">
+      <div className="no-drag ml-3 flex-1 space-y-0.5 overflow-y-auto pr-2 pb-2">
         {groups.map((group, index) => {
           const color = GROUP_COLORS[index % GROUP_COLORS.length];
           const groupTabs = tabs.filter((t) => t.groupId === group.id);
@@ -152,23 +251,37 @@ export function Sidebar({ tabs, groups, activeId, onSelect, onClose, onNewTab, p
 
         {ungrouped.length > 0 && groups.length > 0 && <div className="my-1 border-t border-black/[0.06] dark:border-white/[0.06]" />}
         {/* Ungrouped tabs drag-reorder along the Y axis only (vertical list). */}
-        <Reorder.Group as="div" axis="y" values={ungrouped} onReorder={(o) => onReorderUngrouped?.(o)} className="space-y-0.5">
-          {ungrouped.map((tab, index) => (
-            <Reorder.Item
-              as="div"
-              key={tab.id}
-              value={tab}
-              // Hard stop at the list's start (no sliding under the "New tab" row above);
-              // downward is unbounded so a tab can be dragged to the bottom of the window.
-              dragConstraints={{ top: -index * ROW_PITCH, bottom: window.innerHeight }}
-              dragElastic={0}
-              className="cursor-grab"
-            >
-              <TabRow tab={tab} active={tab.id === activeId} indent={false} onSelect={() => onSelect(tab.id)} onClose={() => onClose(tab.id)} onContext={contextHandler(tab.id)} />
-            </Reorder.Item>
+        <Reorder.Group ref={ungroupedListRef} as="div" axis="y" values={ungrouped} onReorder={(o) => onReorderUngrouped?.(o)} layoutScroll data-testid="sidebar-tab-list" className="space-y-0.5">
+          {ungrouped.map((tab) => (
+            <DraggableTabRow key={tab.id} tab={tab} active={tab.id === activeId} constraintsRef={ungroupedListRef} onSelect={() => onSelect(tab.id)} onClose={() => onClose(tab.id)} onContext={contextHandler(tab.id)} />
           ))}
         </Reorder.Group>
+        <SidebarNewButton onNewTab={() => onNewTab(null)} onNewGroup={onNewGroup} onNewAgentTab={onNewAgentTab} />
       </div>
     </aside>
+  );
+}
+
+function DraggableTabRow({ tab, active, constraintsRef, onSelect, onClose, onContext }: { tab: BrowserTab; active: boolean; constraintsRef: RefObject<HTMLDivElement | null>; onSelect: () => void; onClose: () => void; onContext: (e: ReactMouseEvent) => void }) {
+  const [dragging, setDragging] = useState(false);
+  return (
+    <Reorder.Item
+      as="div"
+      value={tab}
+      data-testid="sidebar-tab"
+      data-tab-id={tab.id}
+      dragConstraints={constraintsRef}
+      dragElastic={0}
+      dragMomentum={false}
+      onDragStart={() => {
+        setDragging(true);
+        onSelect();
+      }}
+      onDragEnd={() => setDragging(false)}
+      whileDrag={{ zIndex: 50 }}
+      className={`relative rounded-lg ${dragging ? 'sidebar-tab-dragging bg-black/[0.06] dark:bg-white/[0.12]' : ''}`}
+    >
+      <TabRow tab={tab} active={active} indent={false} dragging={dragging} onSelect={onSelect} onClose={onClose} onContext={onContext} />
+    </Reorder.Item>
   );
 }

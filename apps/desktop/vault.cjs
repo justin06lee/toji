@@ -4,9 +4,8 @@
 //
 //  1. Secrets never enter the renderer. The renderer can list entries (origin,
 //     username, which container) and ask for one to be *filled*, but the password
-//     itself goes main process → guest page directly. A compromised renderer, or an
-//     AI agent driving the UI, can therefore see which accounts exist without ever
-//     being able to read one.
+//     itself goes main process → guest page directly. Model-facing page observations
+//     are separately stripped of all form values before they leave the main process.
 //
 //  2. Credentials are scoped to a container. A login saved in Work is not offered in
 //     Personal, because those are different identities — offering it there would undo
@@ -50,6 +49,15 @@ function originOf(url) {
     return parsed.origin;
   } catch {
     return null;
+  }
+}
+
+/** Human-facing credential name derived from the exact saved origin. */
+function siteName(origin) {
+  try {
+    return new URL(origin).hostname.replace(/^www\./i, '') || origin;
+  } catch {
+    return origin;
   }
 }
 
@@ -106,14 +114,25 @@ class Vault {
     if (!this.available()) throw new Error('no OS encryption available');
     fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
     const encrypted = this.safeStorage.encryptString(JSON.stringify(this.entries ?? []));
-    fs.writeFileSync(this.file, encrypted, { mode: 0o600 });
+    const temporary = `${this.file}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    try {
+      fs.writeFileSync(temporary, encrypted, { mode: 0o600 });
+      fs.renameSync(temporary, this.file);
+    } catch (error) {
+      try {
+        fs.unlinkSync(temporary);
+      } catch {
+        // The temporary file may never have been created.
+      }
+      throw error;
+    }
   }
 
   /** Entry metadata only — never the password. This is what the renderer may see. */
   list(containerId) {
     return this.load()
       .filter((entry) => !containerId || entry.containerId === containerId)
-      .map(({ id, origin, username, containerId: cid, updatedAt, note }) => ({ id, origin, username, containerId: cid, updatedAt, note }))
+      .map(({ id, origin, username, containerId: cid, updatedAt, note }) => ({ id, name: siteName(origin), origin, username, containerId: cid, updatedAt, note }))
       .sort((a, b) => a.origin.localeCompare(b.origin) || a.username.localeCompare(b.username));
   }
 
@@ -123,7 +142,7 @@ class Vault {
     if (!origin) return [];
     return this.load()
       .filter((entry) => entryMatches(entry, origin, containerId))
-      .map(({ id, origin: o, username, containerId: cid }) => ({ id, origin: o, username, containerId: cid }));
+      .map(({ id, origin: o, username, containerId: cid }) => ({ id, name: siteName(o), origin: o, username, containerId: cid }));
   }
 
   save({ id, origin, username, password, containerId, note }) {
@@ -182,15 +201,19 @@ class Vault {
    * entry is only ever released for the origin it was saved against, so a redirect or
    * a navigation between the click and the fill cannot redirect a credential elsewhere.
    */
-  secretFor(id, expectedOrigin) {
+  secretFor(id, expectedOrigin, expectedContainerId) {
     const entry = this.load().find((e) => e.id === id);
     if (!entry) return null;
     if (expectedOrigin && entry.origin !== originOf(expectedOrigin)) {
       this.log(`[vault] refused fill: ${entry.origin} does not match ${expectedOrigin}`);
       return null;
     }
+    if (expectedContainerId && entry.containerId && entry.containerId !== expectedContainerId) {
+      this.log(`[vault] refused fill: ${entry.containerId} does not match container ${expectedContainerId}`);
+      return null;
+    }
     return { username: entry.username, password: entry.password };
   }
 }
 
-module.exports = { Vault, generatePassword, originOf, entryMatches, GEN_ALPHABET };
+module.exports = { Vault, generatePassword, originOf, siteName, entryMatches, GEN_ALPHABET };

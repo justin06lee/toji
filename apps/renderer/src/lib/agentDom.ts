@@ -15,12 +15,13 @@ export interface AgentStepResult {
     | 'navigate'
     | 'clickAt'
     | 'drag'
-    | 'runJS'
     | 'research'
     | 'ask'
     | 'wait'
     | 'look'
     | 'uploadFile'
+    | 'findCredentials'
+    | 'fillCredential'
     | 'remember'
     | 'done';
   /** Byakugan manifest element id (click/type/select/hover/uploadFile/look). */
@@ -35,8 +36,6 @@ export interface AgentStepResult {
   direction?: 'up' | 'down';
   /** For "ask": a question for the USER; the run pauses until they answer in the spotlight. */
   question?: string;
-  /** For "runJS": JavaScript to evaluate in the page; its return value comes back as an observation. */
-  code?: string;
   /** For "research": a question for the research sub-agent; its answer comes back as an observation. */
   query?: string;
   /** For "wait": how long to pause (ms) before re-checking the page. */
@@ -51,6 +50,8 @@ export interface AgentStepResult {
   toY?: number;
   /** For "uploadFile": which dropped file (its index from the FILES list) to upload. */
   fileIndex?: number;
+  /** Opaque vault metadata id returned by findCredentials. */
+  credentialId?: string;
   done?: boolean;
   reason?: string;
   /** The model returned prose/refused instead of a JSON action; the loop counts these to stop a spin. */
@@ -58,7 +59,7 @@ export interface AgentStepResult {
 }
 
 /** A cheap in-page signature so wait() can poll for change without consuming a byakugan diff. */
-export const PAGE_SIGNATURE_JS = `(location.href + '||' + document.title + '||' + Array.from(document.querySelectorAll('a,button,input,[role=button]')).slice(0,40).map(e => (e.innerText||e.value||'').trim().slice(0,24)).join('~'))`;
+export const PAGE_SIGNATURE_JS = `(location.href + '||' + document.title + '||' + Array.from(document.querySelectorAll('a,button,input,[role=button]')).slice(0,40).map(e => { const secret = e instanceof HTMLInputElement && e.type === 'password'; return (e.innerText || (secret ? '[password]' : e.value) || '').trim().slice(0,24); }).join('~'))`;
 
 // --- Byakugan bridge (preload → main process) --------------------------------
 

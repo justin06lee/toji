@@ -19,8 +19,8 @@ export interface AgentStepInput {
   crop?: { x: number; y: number; w: number; h: number };
   /** CSS pixel size of the page viewport. */
   viewport?: { w: number; h: number };
-  /** Saved credential sets by name + field keys (NEVER values) the agent may fill via {{placeholder}}. */
-  credentials?: { name: string; keys: string[]; active?: boolean }[];
+  /** Whether the OS-backed credential tools are available for this tab. */
+  credentialAccess?: boolean;
   /** Files the user dropped onto the agent (e.g. a resume) — name + on-disk path the agent may read or upload. */
   files?: { index: number; name: string; mime?: string }[];
   /** Compact memory digest (from the librarian) of things worth remembering for this goal. */
@@ -38,12 +38,13 @@ export interface AgentStepResult {
     | 'navigate'
     | 'clickAt'
     | 'drag'
-    | 'runJS'
     | 'research'
     | 'ask'
     | 'wait'
     | 'look'
     | 'uploadFile'
+    | 'findCredentials'
+    | 'fillCredential'
     | 'remember'
     | 'done';
   /** Byakugan manifest element id (click/type/select/hover/uploadFile/look). */
@@ -57,8 +58,6 @@ export interface AgentStepResult {
   direction?: 'down' | 'up';
   /** For "ask": a question for the USER; the run pauses and their answer comes back as an observation. */
   question?: string;
-  /** For "runJS": JavaScript to evaluate in the page; its return value comes back as an observation. */
-  code?: string;
   /** For "research": a question for the research sub-agent; its answer comes back as an observation. */
   query?: string;
   /** For "wait": how long to pause (ms) before re-checking the page. */
@@ -73,6 +72,8 @@ export interface AgentStepResult {
   toY?: number;
   /** For "uploadFile": which dropped file (its index from the FILES list) to upload. */
   fileIndex?: number;
+  /** Opaque metadata id returned by findCredentials; never a secret. */
+  credentialId?: string;
   done?: boolean;
   reason?: string;
   /** Set when the model returned prose/refused instead of a JSON action (client counts these to stop a spin). */
@@ -80,13 +81,12 @@ export interface AgentStepResult {
 }
 
 // Kept deliberately short: a small model follows a tight prompt better than a long one.
-const ACTIONS = `JSON only: {"action","id","text","key","value","url","direction","x","y","fromX","fromY","toX","toY","ms","question","reason"}.
+const ACTIONS = `JSON only: {"action","id","text","key","value","url","direction","x","y","fromX","fromY","toX","toY","ms","question","query","credentialId","reason"}.
 - click(id) — click element [id]. type(id,text) — focus input [id] and type. select(id,value) — pick a dropdown option by its visible text. press(key) — one key ("Enter","Escape","Tab"). hover(id). scroll(direction "up"|"down").
-  · Signing in / filling personal info: FIRST check CREDENTIALS. It lists every saved login set by name + field keys (never values), e.g. [{"name":"Primary","keys":["email","password"],"active":true},{"name":"School","keys":["email","password"]}] — those keys are the ONLY {{placeholders}} that exist. Pick the set that best matches the user's request ("my school email" → the "School" set), then type its placeholder: {{key}} uses the ACTIVE set, {{SetName:key}} uses a named set (e.g. {{School:email}}). The real value is filled in locally — you never see it. If CREDENTIALS is absent/empty or has no matching set/key, do NOT invent a placeholder or type a made-up value — use ask(question) to get what you need from the user. Never fabricate emails, usernames, or personal data; never ask for a password (ask the user to save it as a credential instead).
+  · Signing in: if CREDENTIAL_ACCESS is true, FIRST use findCredentials(query) with the current website name. It searches only credentials matching this exact page origin and container and returns account metadata (name, username, opaque id), never secrets. Then use fillCredential(credentialId) to fill the selected login directly. Never type password placeholders and never ask the user for a password; if nothing matches, ask them to save a login in Toji.
 - Element actions are VERIFIED: if something (a cookie banner, modal, overlay) covers the target, the action is refused and your next observation says "blocked by <element>" — dismiss the blocker first, then retry. Never repeat an action that was just blocked.
 - look(id?) — get a cropped SCREENSHOT of element [id] (or the whole viewport with no id) as your NEXT observation. Use it for anything flagged "text-blind", a <canvas>/board, an image/chart, or a visual layout the manifest can't capture. Don't request one every turn.
 - clickAt(x,y) — click a raw viewport pixel; drag(fromX,fromY,toX,toY) — press at a source, release at a destination (REQUIRED to MOVE a piece/slider; a click does not move things). Pixel actions are ONLY for visual targets with no [id] (inside a canvas you have look()ed at). If you had a look(id) crop, CROP gives its viewport offset: viewportX = crop.x + imageX * crop.w / imageWidth.
-- runJS(code) — evaluate JavaScript in the page and get its return value back as your next observation. Your ESCAPE HATCH: read page state the manifest misses (e.g. a <canvas> board — measure its rect and compute cell coordinates, then clickAt/drag those). Make the code RETURN a value.
 - research(query) — ask a research sub-agent a question and get concrete step-by-step guidance back as your next observation. Use it when you are STUCK or don't know HOW to do something.
 - ask(question) — pause and ask the USER a question; their answer arrives as your next observation. Use it whenever you need something only the user knows: which account/option to use, a missing credential or personal detail, a verification code, or a judgment call. Asking is cheap and encouraged — NEVER guess or fabricate personal information instead.
 - uploadFile(fileIndex, id) — upload one of the user's dropped FILES (by its fileIndex) into file-input element [id]. To FILL text fields from a file's contents instead, read the file (its path is in FILES) and type the values.
@@ -115,7 +115,7 @@ const SYSTEM_TEXT = `${NO_REFUSAL}
 You operate a real browser tab with a real mouse to achieve the user's GOAL. Each turn you get the PAGE — a render-truthful text view of what is VISIBLE on screen — and choose ONE next action.
 
 How to read the PAGE:
-- The first step is a full manifest: a header line, then "[id] role \"label\"" lines for every interactive element (with input values, checked/selected state) and plain lines for visible text.
+- The first step is a full manifest: a header line, then "[id] role \"label\"" lines for every interactive element (form values are redacted; checked/selected state remains) and plain lines for visible text.
 - Later steps are a DIFF of the last manifest: "+" appeared, "~" changed, "-" disappeared, "NO CHANGE" = nothing visible changed. Everything not mentioned is unchanged and still valid.
 - "canvas … text-blind; use look(N)" marks pixels-only content (games, charts, cross-origin frames): look(N) to see it, then clickAt/drag raw coordinates inside it.
 
@@ -136,15 +136,16 @@ ${ACTIONS}
 
 ${RULES}`;
 
-function sanitize(raw: AgentStepResult | undefined): AgentStepResult {
+export function sanitize(raw: AgentStepResult | undefined): AgentStepResult {
   const coord = (n: unknown) => (typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : undefined);
   // Normalize the action case-insensitively to its canonical name (models return "Click",
-  // " clickAt ", "RUNJS", etc.). Crucially, an UNRECOGNIZED action must NOT fall back to "done"
-  // — that silently terminates the run. We fall back to "wait" so the loop re-checks instead.
+  // " clickAt ", "FINDCREDENTIALS", etc.). Crucially, an UNRECOGNIZED action must NOT fall back
+  // to "done" — that silently terminates the run. We fall back to "wait" so the loop re-checks instead.
   const canon: Record<string, AgentStepResult['action']> = {
     click: 'click', type: 'type', press: 'press', select: 'select', hover: 'hover', scroll: 'scroll',
-    navigate: 'navigate', clickat: 'clickAt', drag: 'drag', runjs: 'runJS', research: 'research',
-    ask: 'ask', wait: 'wait', look: 'look', screenshot: 'look', uploadfile: 'uploadFile', remember: 'remember', done: 'done'
+    navigate: 'navigate', clickat: 'clickAt', drag: 'drag', research: 'research',
+    ask: 'ask', wait: 'wait', look: 'look', screenshot: 'look', uploadfile: 'uploadFile',
+    findcredentials: 'findCredentials', fillcredential: 'fillCredential', remember: 'remember', done: 'done'
   };
   const rawAction = typeof raw?.action === 'string' ? raw.action.trim().toLowerCase() : '';
   const action = canon[rawAction] ?? 'wait';
@@ -166,10 +167,10 @@ function sanitize(raw: AgentStepResult | undefined): AgentStepResult {
     toX: coord(raw?.toX),
     toY: coord(raw?.toY),
     ms: typeof raw?.ms === 'number' && Number.isFinite(raw.ms) ? raw.ms : undefined,
-    code: typeof raw?.code === 'string' ? raw.code.slice(0, 4000) : undefined,
     query: typeof raw?.query === 'string' ? raw.query.slice(0, 300) : undefined,
     question: typeof raw?.question === 'string' ? raw.question.slice(0, 300) : undefined,
     fileIndex: typeof raw?.fileIndex === 'number' && raw.fileIndex >= 0 ? Math.round(raw.fileIndex) : undefined,
+    credentialId: typeof raw?.credentialId === 'string' ? raw.credentialId.trim().slice(0, 200) : undefined,
     // Only a genuine "done" action ends the run — never a stray done:true beside a real action.
     done: action === 'done',
     reason: typeof raw?.reason === 'string' ? raw.reason.slice(0, 100) : undefined
@@ -180,6 +181,11 @@ function sanitize(raw: AgentStepResult | undefined): AgentStepResult {
   if (out.action === 'research' && !out.query) out.query = out.question ?? out.text?.slice(0, 300);
   if (out.action === 'ask' && !out.question) out.question = out.query ?? out.text?.slice(0, 300);
   if (out.action === 'remember' && !out.text) out.text = out.query ?? out.question;
+  // fillCredential's opaque id also lands in text/value/query; the vault re-validates it anyway.
+  if (out.action === 'fillCredential' && !out.credentialId) {
+    const fallback = out.text ?? out.value ?? out.query;
+    if (typeof fallback === 'string' && fallback.trim()) out.credentialId = fallback.trim().slice(0, 200);
+  }
   return out;
 }
 
@@ -225,13 +231,13 @@ export async function nextAgentAction(input: AgentStepInput): Promise<AgentStepR
     url: input.url,
     title: input.title ?? '',
     viewport: input.viewport,
-    CREDENTIALS: input.credentials && input.credentials.length ? input.credentials : undefined,
+    CREDENTIAL_ACCESS: input.credentialAccess || undefined,
     FILES: input.files && input.files.length ? input.files : undefined,
     MEMORY: input.memory && input.memory.trim() ? input.memory.trim() : undefined,
     CROP: input.image && vision ? input.crop : undefined,
     // The model asked to look but can't see images (text-only backend). Say so explicitly,
     // or a small model loops "taking a look…" forever learning nothing each time.
-    NOTE: input.image && !vision ? 'Your model CANNOT see images — "look" does nothing for you. Never use it again; work from the PAGE text and runJS instead.' : undefined,
+    NOTE: input.image && !vision ? 'Your model CANNOT see images — "look" does nothing for you. Never use it again; work from the PAGE text instead.' : undefined,
     PAGE: input.page,
     history: (input.history ?? []).slice(-6)
   });

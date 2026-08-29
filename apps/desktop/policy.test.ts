@@ -30,9 +30,9 @@ describe('parsePartition agrees across the IPC boundary', () => {
 const fakeSession = () => ({ setProxy: vi.fn().mockResolvedValue(undefined), webRequest: { onBeforeRequest: vi.fn() } });
 
 describe('applySessionPolicy', () => {
-  it('leaves direct containers unproxied and installs no kill switch', () => {
+  it('leaves direct containers unproxied even while Tor is ready', () => {
     const sess = fakeSession();
-    const label = policy.applySessionPolicy(sess, 'persist:toji-c-personal-direct', { isReady: () => false, socksPortFor: () => 9060 });
+    const label = policy.applySessionPolicy(sess, 'persist:toji-c-personal-direct', { isReady: () => true, socksPortFor: () => 9060 });
     expect(label).toBe('direct:personal');
     expect(sess.setProxy).toHaveBeenCalledWith({ mode: 'direct' });
     expect(sess.webRequest.onBeforeRequest).not.toHaveBeenCalled();

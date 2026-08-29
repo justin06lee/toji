@@ -146,6 +146,22 @@ describe('Vault', () => {
     expect(vault.secretFor(id, 'http://example.com')).toBeNull();
   });
 
+  it('releases a secret only inside the container it belongs to', () => {
+    const vault = makeVault();
+    vault.save({ origin: 'https://example.com', username: 'ada', password: 'hunter2', containerId: 'work' });
+    const { id } = vault.list()[0];
+    expect(vault.secretFor(id, 'https://example.com/login', 'work')?.password).toBe('hunter2');
+    expect(vault.secretFor(id, 'https://example.com/login', 'personal')).toBeNull();
+  });
+
+  it('names metadata after the website without exposing a secret', () => {
+    const vault = makeVault();
+    vault.save({ origin: 'https://www.example.com/login', username: 'ada', password: 'hunter2', containerId: 'work' });
+    expect(vault.matchesFor('https://www.example.com/login', 'work')).toEqual([
+      expect.objectContaining({ name: 'example.com', username: 'ada' })
+    ]);
+  });
+
   it('removes entries', () => {
     const vault = makeVault();
     vault.save({ origin: 'https://example.com', username: 'ada', password: 'x', containerId: null });

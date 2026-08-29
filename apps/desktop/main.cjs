@@ -3,11 +3,17 @@ const { spawn } = require('node:child_process');
 const { applySessionPolicy, applyWebRtcPolicy, parsePartition } = require('./policy.cjs');
 const { TorController } = require('./tor.cjs');
 const { Vault, generatePassword } = require('./vault.cjs');
+const { redactManifestValues } = require('./page-redaction.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+
+// electron-chrome-web-store reads app.getName() for its install button label.
+// Keep the human-facing product name independent of the internal package id.
+app.setName('Toji');
 
 const isDev = Boolean(process.env.ELECTRON_START_URL);
-const SERVER_PORT = 8787;
+const SERVER_PORT = 8788;
 const APP_ICON_PATH = path.join(__dirname, 'build', 'icon.png');
 let serverProcess = null;
 
@@ -206,15 +212,6 @@ function setupExtensions() {
 // falling back to the direct connection. Constructed lazily because it needs app paths.
 let tor = { isReady: () => false, socksPortFor: () => null, status: { ready: false, state: 'off', progress: 0, detail: 'Tor is not running', source: null } };
 
-// The renderer's container table, for labelling and Tor circuit assignment only —
-// never for deciding egress (that comes from the partition name).
-let containerTable = [];
-ipcMain.on('toji:set-containers', (_event, containers) => {
-  if (!Array.isArray(containers)) return;
-  containerTable = containers;
-  startTorIfNeeded(containers);
-});
-
 // Electron gives no public API for a session's own partition name, so remember it
 // when we hand one out and read it back here.
 const sessionPartitions = new WeakMap();
@@ -236,8 +233,20 @@ function applyContainerPolicy(sess, partition) {
  * 'session-created' would be too late and too blind: that event carries no partition.
  */
 function attachContainerPolicy(hostContents) {
-  hostContents.on('will-attach-webview', (_event, _webPreferences, params) => {
-    if (!params || !params.partition) return;
+  hostContents.on('will-attach-webview', (event, webPreferences, params) => {
+    if (!params || !parsePartition(params.partition)) {
+      event.preventDefault();
+      appendServerLog('blocked webview without a valid Toji container partition');
+      return;
+    }
+    // The renderer chooses the URL and container, but not the guest's security boundary.
+    // Reassert these here so a renderer regression cannot turn page content into Node code.
+    webPreferences.nodeIntegration = false;
+    webPreferences.contextIsolation = true;
+    webPreferences.sandbox = true;
+    webPreferences.webSecurity = true;
+    webPreferences.allowRunningInsecureContent = false;
+    webPreferences.preload = path.join(__dirname, 'guest-preload.cjs');
     applyContainerPolicy(session.fromPartition(params.partition), params.partition);
   });
   hostContents.on('did-attach-webview', (_event, guest) => {
@@ -250,9 +259,9 @@ function attachContainerPolicy(hostContents) {
 }
 
 // --- Password vault ----------------------------------------------------------
-// Secrets live only in the main process. The renderer may list entries and ask for one
-// to be filled, but a password travels main → guest page and is never handed to the
-// renderer — so neither a compromised renderer nor the AI agent can read one.
+// Secrets live only in the main process. The renderer may list metadata and ask for one
+// to be filled, but password data travels main → guest page and is never returned through
+// IPC. Model-facing page manifests redact all form values (see page-redaction.cjs).
 
 let vault = null;
 function getVault() {
@@ -286,10 +295,37 @@ ipcMain.handle('toji:vault-status', () => {
   return result.ok ? { available: true, count: result.value } : { available: true, count: 0, error: result.error };
 });
 ipcMain.handle('toji:vault-list', (_event, containerId) => vaultTry((v) => v.list(containerId)));
-ipcMain.handle('toji:vault-matches', (_event, { url, containerId }) => vaultTry((v) => v.matchesFor(url, containerId)));
+ipcMain.handle('toji:vault-matches', (event, webContentsId) => {
+  if (!senderOwnsTarget(event, webContentsId)) return { ok: false, error: 'page does not belong to this window' };
+  const wc = webContents.fromId(Number(webContentsId));
+  return vaultTry((v) => v.matchesFor(wc.getURL(), containerOf(wc)));
+});
 ipcMain.handle('toji:vault-save', (_event, entry) => vaultTry((v) => v.save(entry)));
 ipcMain.handle('toji:vault-delete', (_event, id) => vaultTry((v) => v.remove(id)));
-ipcMain.handle('toji:vault-generate', (_event, length) => generatePassword(Math.min(Math.max(Number(length) || 20, 8), 128)));
+
+// Passwords Toji generated recently. When one of these is later submitted on a page,
+// the user clearly meant to use it — save it straight away instead of prompting.
+const GENERATED_TTL_MS = 15 * 60 * 1000;
+const recentGenerated = new Map(); // password → generated-at timestamp
+function rememberGenerated(password) {
+  const now = Date.now();
+  for (const [value, at] of recentGenerated) {
+    if (now - at > GENERATED_TTL_MS) recentGenerated.delete(value);
+  }
+  recentGenerated.set(password, now);
+  // Bounded: the map only ever holds what the user generated in the last stretch.
+  while (recentGenerated.size > 32) recentGenerated.delete(recentGenerated.keys().next().value);
+}
+function wasGenerated(password) {
+  const at = recentGenerated.get(password);
+  return typeof at === 'number' && Date.now() - at <= GENERATED_TTL_MS;
+}
+
+ipcMain.handle('toji:vault-generate', (_event, length) => {
+  const password = generatePassword(Math.min(Math.max(Number(length) || 20, 8), 128));
+  rememberGenerated(password);
+  return password;
+});
 
 /** The container a guest webContents belongs to, derived from its session's partition. */
 function containerOf(wc) {
@@ -306,28 +342,45 @@ function containerOf(wc) {
 // Keyed by webContents id. The renderer is told only the origin and username.
 const pendingCaptures = new Map();
 
-ipcMain.handle('toji:vault-captured', (event, { url, username, password }) => {
+ipcMain.handle('toji:vault-captured', (event, { username, password }) => {
   const wc = event.sender;
+  const url = wc.getURL();
   const containerId = containerOf(wc);
   const result = vaultTry((v) => v.captureStatus({ origin: url, username, password, containerId }));
   if (!result.ok || result.value === 'ignore' || result.value === 'same') return false;
 
+  const owner = windowForContents(wc);
+  const notify = (status) => {
+    if (owner && !owner.isDestroyed()) {
+      owner.webContents.send('toji:vault-prompt', {
+        webContentsId: wc.id,
+        origin: require('./vault.cjs').originOf(url),
+        username: username || '',
+        containerId,
+        status
+      });
+    }
+  };
+
+  // A password Toji itself generated needs no confirmation — the user asked for it
+  // moments ago and just used it. Save immediately and tell the renderer it's done.
+  if (wasGenerated(password)) {
+    const saved = vaultTry((v) => v.save({ origin: url, username, password, containerId }));
+    if (saved.ok) {
+      notify('saved');
+      return true;
+    }
+  }
+
   pendingCaptures.set(wc.id, { url, username, password, containerId });
   wc.once('destroyed', () => pendingCaptures.delete(wc.id));
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('toji:vault-prompt', {
-      webContentsId: wc.id,
-      origin: require('./vault.cjs').originOf(url),
-      username: username || '',
-      containerId,
-      status: result.value
-    });
-  }
+  notify(result.value);
   return true;
 });
 
 // Commit a held credential. The secret never left the main process.
-ipcMain.handle('toji:vault-commit', (_event, webContentsId) => {
+ipcMain.handle('toji:vault-commit', (event, webContentsId) => {
+  if (!senderOwnsTarget(event, webContentsId)) return { ok: false, error: 'page does not belong to this window' };
   const pending = pendingCaptures.get(webContentsId);
   if (!pending) return { ok: false, error: 'nothing to save' };
   pendingCaptures.delete(webContentsId);
@@ -335,15 +388,16 @@ ipcMain.handle('toji:vault-commit', (_event, webContentsId) => {
     v.save({ origin: pending.url, username: pending.username, password: pending.password, containerId: pending.containerId })
   );
 });
-ipcMain.handle('toji:vault-dismiss', (_event, webContentsId) => pendingCaptures.delete(webContentsId));
+ipcMain.handle('toji:vault-dismiss', (event, webContentsId) => senderOwnsTarget(event, webContentsId) && pendingCaptures.delete(webContentsId));
 
 // Fill a credential into a guest page. The origin is re-checked here against the page's
 // CURRENT url, so a navigation between the user's click and this call cannot steer a
 // password to a different site.
-ipcMain.handle('toji:vault-fill', (_event, { webContentsId, entryId }) => {
+ipcMain.handle('toji:vault-fill', (event, { webContentsId, entryId }) => {
+  if (!senderOwnsTarget(event, webContentsId)) return false;
   const wc = webContents.fromId(webContentsId);
   if (!wc || wc.isDestroyed()) return false;
-  const result = vaultTry((v) => v.secretFor(entryId, wc.getURL()));
+  const result = vaultTry((v) => v.secretFor(entryId, wc.getURL(), containerOf(wc)));
   if (!result.ok || !result.value) return false;
   wc.send('toji-vault:fill', result.value);
   return true;
@@ -352,7 +406,9 @@ ipcMain.handle('toji:vault-fill', (_event, { webContentsId, entryId }) => {
 // --- Tor ---------------------------------------------------------------------
 
 function broadcastTorStatus(status) {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('toji:tor-status', status);
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('toji:tor-status', status);
+  }
 }
 
 function setupTor() {
@@ -401,14 +457,6 @@ ipcMain.handle('toji:tor-new-circuit', async () => {
   return ok;
 });
 
-// Start Tor on demand: the first time the renderer registers a container that wants it,
-// rather than paying the bootstrap cost for users who never browse over Tor.
-function startTorIfNeeded(containers) {
-  if (!Array.isArray(containers)) return;
-  if (!containers.some((c) => c && c.egress === 'tor')) return;
-  if (tor.status && (tor.status.state === 'off' || tor.status.state === 'error')) void tor.start();
-}
-
 // Wipe everything a container has stored. The renderer simultaneously bumps the
 // container's epoch, so live tabs land on a fresh partition rather than this one.
 ipcMain.handle('toji:clear-container', async (_event, containerId) => {
@@ -436,14 +484,44 @@ function resolveDataDir() {
   return process.env.TOJI_DATA_DIR ?? loadTojiEnv().TOJI_DATA_DIR ?? path.join(app.getPath('userData'), 'data');
 }
 
-let mainWindow = null;
+const appWindows = new Set();
 
-// Open an http(s) link inside Toji (as a new web tab) instead of an external browser.
-function openInToji(url) {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('toji:open-url', url);
+function focusedWindow() {
+  return BrowserWindow.getFocusedWindow() || [...appWindows].find((win) => !win.isDestroyed()) || null;
 }
 
-function createWindow() {
+function windowForContents(contents) {
+  if (!contents) return focusedWindow();
+  return exactWindowForContents(contents) || focusedWindow();
+}
+
+function exactWindowForContents(contents) {
+  if (!contents) return null;
+  return BrowserWindow.fromWebContents(contents.hostWebContents || contents);
+}
+
+/** Prevent one profile window from inspecting, driving, or filling another one's tab. */
+function senderOwnsTarget(event, webContentsId) {
+  const id = Number(webContentsId);
+  if (!Number.isInteger(id)) return false;
+  let target = null;
+  try {
+    target = webContents.fromId(id);
+  } catch {
+    return false; // fail closed on a malformed id instead of rejecting the whole IPC call
+  }
+  const senderWindow = exactWindowForContents(event && event.sender);
+  const targetWindow = exactWindowForContents(target);
+  return Boolean(target && !target.isDestroyed() && senderWindow && targetWindow && senderWindow.id === targetWindow.id);
+}
+
+// Open an http(s) link inside Toji (as a new web tab) instead of an external browser.
+function openInToji(url, targetWindow = focusedWindow()) {
+  const win = targetWindow;
+  if (win && !win.isDestroyed()) win.webContents.send('toji:open-url', url);
+}
+
+function createWindow(containerId = null) {
   const win = new BrowserWindow({
     width: 1480,
     height: 960,
@@ -464,19 +542,22 @@ function createWindow() {
       webviewTag: true
     }
   });
-  mainWindow = win;
+  appWindows.add(win);
+  win.on('closed', () => appWindows.delete(win));
   attachContainerPolicy(win.webContents);
 
   // In production the bundled agent server serves the renderer over http:// so it
   // loads correctly (no file:// CSP/CORS issues) and is same-origin with the API.
-  const startUrl = isDev ? process.env.ELECTRON_START_URL : `http://127.0.0.1:${SERVER_PORT}/`;
+  const startUrl = new URL(isDev ? process.env.ELECTRON_START_URL : `http://127.0.0.1:${SERVER_PORT}/`);
+  if (containerId) startUrl.searchParams.set('container', containerId);
 
   // Keep the top-level app frame pinned to the renderer; never let it navigate away.
   win.webContents.on('will-navigate', (event, url) => {
-    if (url !== startUrl) event.preventDefault();
+    if (url !== startUrl.toString()) event.preventDefault();
   });
 
-  win.loadURL(startUrl).catch((err) => appendServerLog(`loadURL failed: ${err && err.message}`));
+  win.loadURL(startUrl.toString()).catch((err) => appendServerLog(`loadURL failed: ${err && err.message}`));
+  return win;
 }
 
 // Detecting a tap of the Option/Alt key. A <webview> is a separate web-contents and
@@ -484,10 +565,10 @@ function createWindow() {
 // web-contents from the main process instead — this is why the agent bar toggle works even
 // while a page is focused or the agent is running. "Tap" = press + release with no other key
 // in between and within 400ms, so Option-as-a-modifier (typing accents, shortcuts) still works.
-let altDown = false;
-let altUsed = false;
-let altDownAt = 0;
 function watchOptionTap(contents) {
+  let altDown = false;
+  let altUsed = false;
+  let altDownAt = 0;
   contents.on('before-input-event', (_e, input) => {
     const isAlt = input.code === 'AltLeft' || input.code === 'AltRight';
     if (input.type === 'keyDown' || input.type === 'rawKeyDown') {
@@ -503,8 +584,9 @@ function watchOptionTap(contents) {
     } else if (input.type === 'keyUp' && isAlt) {
       const tapped = altDown && !altUsed && Date.now() - altDownAt < 400;
       altDown = false;
-      if (tapped && mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('toji:toggle-agent');
+      const win = windowForContents(contents);
+      if (tapped && win && !win.isDestroyed()) {
+        win.webContents.send('toji:toggle-agent');
       }
     }
   });
@@ -514,12 +596,24 @@ function watchOptionTap(contents) {
 // opens inside Toji as a new web tab (http/https); other schemes go to the OS.
 app.on('web-contents-created', (_event, contents) => {
   watchOptionTap(contents);
-  // Drop the per-tab session from partitionSessions when its webContents is torn down.
-  // Toji tabs are 1:1 partition-per-webview (popups are denied and reopened as new tabs
-  // with their own partitions), so a destroyed webContents' session has no other live users.
+  // Container tabs intentionally share a session partition. Drop it only after the last
+  // webContents using that exact session is gone; deleting it when any one tab closed made
+  // surviving tabs miss later Tor proxy/circuit updates.
+  let contentsSession = null;
+  try {
+    contentsSession = contents.session;
+  } catch {
+    /* unavailable during very early creation */
+  }
   contents.on('destroyed', () => {
     try {
-      if (contents.session && contents.session !== session.defaultSession) partitionSessions.delete(contents.session);
+      if (
+        contentsSession &&
+        contentsSession !== session.defaultSession &&
+        !webContents.getAllWebContents().some((other) => !other.isDestroyed() && other.session === contentsSession)
+      ) {
+        partitionSessions.delete(contentsSession);
+      }
     } catch {
       /* session already gone */
     }
@@ -528,10 +622,10 @@ app.on('web-contents-created', (_event, contents) => {
     try {
       const scheme = new URL(url).protocol;
       if (scheme === 'http:' || scheme === 'https:') {
-        openInToji(url);
+        openInToji(url, windowForContents(contents));
         return { action: 'deny' };
       }
-      shell.openExternal(url);
+      if (scheme === 'mailto:') void shell.openExternal(url);
     } catch {
       // Ignore malformed URLs rather than handing them to the OS.
     }
@@ -539,8 +633,8 @@ app.on('web-contents-created', (_event, contents) => {
   });
 });
 
-// The renderer asks to quit when the last tab is closed.
-ipcMain.on('toji:quit', () => app.quit());
+// Closing the final tab closes only its window; other profile windows keep running.
+ipcMain.on('toji:close-window', (event) => windowForContents(event.sender)?.close());
 
 // Register Toji as the OS handler for http/https (the macOS "default browser").
 ipcMain.handle('toji:set-default-browser', () => {
@@ -586,6 +680,12 @@ ipcMain.handle('toji:list-extensions', () => {
 });
 // Whether real Chrome Web Store installs are wired up (the package loaded successfully).
 ipcMain.handle('toji:web-store-available', () => Boolean(webStore));
+
+// A sandboxed preload cannot import node:path/node:url. Resolve the guest preload here,
+// where Node APIs belong, and return only the file URL needed by the renderer.
+ipcMain.on('toji:guest-preload-url', (event) => {
+  event.returnValue = pathToFileURL(path.join(__dirname, 'guest-preload.cjs')).toString();
+});
 
 // --- Byakugan page perception ------------------------------------------------
 // The web agent's eyes: @justin06lee/byakugan reads what Chromium actually PAINTED
@@ -648,22 +748,24 @@ function eyesFor(webContentsId) {
 // model-facing content travels as manifest/diff TEXT.
 const pickElements = (manifest) => manifest.elements.map((e) => ({ id: e.id, role: e.role, label: e.label, bounds: e.bounds }));
 
-ipcMain.handle('toji:eyes-observe', async (_event, { webContentsId, maxTokens }) => {
+ipcMain.handle('toji:eyes-observe', async (event, { webContentsId, maxTokens }) => {
   try {
+    if (!senderOwnsTarget(event, webContentsId)) throw new Error('page does not belong to this window');
     const eyes = await eyesFor(webContentsId);
     const m = await eyes.observe(maxTokens ? { maxTokens } : undefined);
-    return { ok: true, text: m.text, tokens: m.meta.tokens, meta: m.meta, elements: pickElements(m) };
+    return { ok: true, text: redactManifestValues(m.text), tokens: m.meta.tokens, meta: m.meta, elements: pickElements(m) };
   } catch (error) {
     appendServerLog(`eyes-observe error ${error && error.message}`);
     return { ok: false, error: String((error && error.message) || error) };
   }
 });
 
-ipcMain.handle('toji:eyes-diff', async (_event, { webContentsId, maxTokens }) => {
+ipcMain.handle('toji:eyes-diff', async (event, { webContentsId, maxTokens }) => {
   try {
+    if (!senderOwnsTarget(event, webContentsId)) throw new Error('page does not belong to this window');
     const eyes = await eyesFor(webContentsId);
     const d = await eyes.diff(maxTokens ? { maxTokens } : undefined);
-    return { ok: true, text: d.text, tokens: d.tokens, full: d.full, navigated: d.navigated, meta: d.manifest.meta, elements: pickElements(d.manifest) };
+    return { ok: true, text: redactManifestValues(d.text), tokens: d.tokens, full: d.full, navigated: d.navigated, meta: d.manifest.meta, elements: pickElements(d.manifest) };
   } catch (error) {
     appendServerLog(`eyes-diff error ${error && error.message}`);
     return { ok: false, error: String((error && error.message) || error) };
@@ -672,8 +774,9 @@ ipcMain.handle('toji:eyes-diff', async (_event, { webContentsId, maxTokens }) =>
 
 // Verified input dispatch on manifest IDs. A blocked/failed action comes back as
 // {ok:false, error, blockedBy} — the renderer feeds that to the model as an observation.
-ipcMain.handle('toji:eyes-act', async (_event, { webContentsId, action }) => {
+ipcMain.handle('toji:eyes-act', async (event, { webContentsId, action }) => {
   try {
+    if (!senderOwnsTarget(event, webContentsId)) throw new Error('page does not belong to this window');
     const eyes = await eyesFor(webContentsId);
     const a = action || {};
     switch (a.verb) {
@@ -701,8 +804,9 @@ ipcMain.handle('toji:eyes-act', async (_event, { webContentsId, action }) => {
 
 // Cropped, downscaled screenshot of one element (by manifest id) or a viewport region —
 // the agent's escalation sense for canvas / images / text-blind iframes.
-ipcMain.handle('toji:eyes-look', async (_event, { webContentsId, id, rect, maxLongEdge }) => {
+ipcMain.handle('toji:eyes-look', async (event, { webContentsId, id, rect, maxLongEdge }) => {
   try {
+    if (!senderOwnsTarget(event, webContentsId)) throw new Error('page does not belong to this window');
     const eyes = await eyesFor(webContentsId);
     let target = typeof id === 'number' ? id : rect;
     if (!target && target !== 0) {
@@ -724,8 +828,9 @@ ipcMain.handle('toji:eyes-look', async (_event, { webContentsId, id, rect, maxLo
 // Set a local file onto a <input type=file> inside a guest <webview>. The renderer
 // can't do this (security), so we drive it via the Chrome DevTools Protocol on the
 // guest's webContents. Best-effort: targets the Nth file input on the page.
-ipcMain.handle('toji:upload-file-input', async (_event, { webContentsId, filePath, inputIndex, elementId }) => {
+ipcMain.handle('toji:upload-file-input', async (event, { webContentsId, filePath, inputIndex, elementId }) => {
   try {
+    if (!senderOwnsTarget(event, webContentsId)) return false;
     const wc = webContents.fromId(webContentsId);
     if (!wc) return false;
     // Only allow files the app itself produced (uploads/references under the data dir). Without
@@ -771,7 +876,7 @@ ipcMain.handle('toji:upload-file-input', async (_event, { webContentsId, filePat
 function buildAppMenu() {
   const isMacOS = process.platform === 'darwin';
   const send = (channel) => {
-    const win = BrowserWindow.getFocusedWindow() || mainWindow;
+    const win = focusedWindow();
     if (win && !win.isDestroyed()) win.webContents.send(channel);
   };
   const template = [
@@ -779,6 +884,9 @@ function buildAppMenu() {
     {
       label: 'File',
       submenu: [
+        { label: 'New Window', accelerator: 'CmdOrCtrl+N', click: () => createWindow() },
+        { label: 'New Private Window', accelerator: 'CmdOrCtrl+Shift+N', click: () => createWindow('private') },
+        { type: 'separator' },
         { label: 'New Tab', accelerator: 'CmdOrCtrl+T', click: () => send('toji:new-tab') },
         { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: () => send('toji:close-tab') },
         { type: 'separator' },

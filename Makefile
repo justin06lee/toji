@@ -7,7 +7,7 @@ DEST    := /Applications/$(APP).app
 UNPACKED = release/mac-arm64/$(APP).app
 
 .DEFAULT_GOAL := all
-.PHONY: all deps app dev build install uninstall update check tor-check typecheck test dmg clean
+.PHONY: all deps app dev build stop install uninstall update check tor-check typecheck test dmg clean
 
 all: install ## Install deps, build, install to /Applications, and launch
 
@@ -20,14 +20,20 @@ build: deps ## Type-check and build the renderer + server bundles
 app: build ## Package an unpacked .app (no installer)
 	@bunx electron-builder --dir
 
-install: app ## Put the app in /Applications and launch it
+stop: ## Stop the installed app and wait until its main process exits
+	@osascript -e 'quit app "$(APP)"' 2>/dev/null || true
+	@i=0; while pgrep -x "$(APP)" >/dev/null && [ $$i -lt 100 ]; do sleep 0.1; i=$$((i + 1)); done; \
+		if pgrep -x "$(APP)" >/dev/null; then echo "error: $(APP) did not quit; refusing to replace a running app" >&2; exit 1; fi
+
+install: app stop ## Put the app in /Applications and launch it
 	@rm -rf "$(DEST)"
 	@cp -R "$(UNPACKED)" "$(DEST)" 2>/dev/null || cp -R release/mac-*/$(APP).app "$(DEST)"
 	@echo "installed $(DEST)"
 	@open "$(DEST)"
+	@i=0; until curl -fsS http://127.0.0.1:8788/health >/dev/null 2>&1 || [ $$i -ge 100 ]; do sleep 0.2; i=$$((i + 1)); done; \
+		if ! curl -fsS http://127.0.0.1:8788/health >/dev/null 2>&1; then echo "error: $(APP) launched but its local server did not become healthy" >&2; exit 1; fi
 
-uninstall: ## Quit the app and remove it from /Applications
-	@osascript -e 'quit app "$(APP)"' 2>/dev/null || true
+uninstall: stop ## Quit the app and remove it from /Applications
 	@rm -rf "$(DEST)"
 	@echo "removed $(DEST)"
 
