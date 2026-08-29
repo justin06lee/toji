@@ -12,7 +12,7 @@ import { PageView } from './components/PageView';
 import { Sidebar } from './components/Sidebar';
 import { WebView } from './components/WebView';
 import { addMemory, agentResearch, agentStep, fetchPageSources, getReferences, librarian, pageStreamUrl, uploadFile } from './lib/api';
-import { eyesAct, eyesAvailable, eyesDiff, eyesLook, eyesObserve, PAGE_SIGNATURE_JS, type EyesElement } from './lib/agentDom';
+import { eyesAct, eyesAvailable, pageScreenshot, toPagePoint, PAGE_SIGNATURE_JS } from './lib/agentDom';
 import {
   CONTAINERS_STORAGE_KEY,
   DEFAULT_CONTAINER_ID,
@@ -876,10 +876,25 @@ export function App() {
     [glideCursor]
   );
 
-  // Run the agent loop on a specific tab. Perception + element actions go through byakugan
-  // (main process, over CDP): a render-truthful manifest on step 1 and tiny diffs after,
-  // with every click/type verified against fresh geometry — blocked actions come back as
-  // "blocked by <element>" observations instead of clicking through.
+  // Type into whatever currently has focus, as real key events. Screenshot mode has no
+  // element ids to target, so text always goes to the focus a click just established.
+  const typeText = useCallback(async (tabId: string, text: string) => {
+    const wv = webviewRefs.current[tabId];
+    if (!wv) return false;
+    try {
+      for (const ch of text) {
+        wv.sendInputEvent({ type: 'char', keyCode: ch });
+        await delay(12);
+      }
+    } catch {
+      return false;
+    }
+    return true;
+  }, []);
+
+  // Run the agent loop on a specific tab: screenshot → action → screenshot → action.
+  // The model's ONLY view of the page is the capture, and it answers in that image's
+  // pixel coordinates, which are scaled to CSS px and dispatched as real mouse/key input.
   const runAgent = useCallback(
     async (tabId: string, goal: string) => {
       agentCancel.current[tabId] = false;
@@ -906,23 +921,13 @@ export function App() {
         /* references are optional */
       }
       const allFiles = () => [...(agentFilesRef.current[tabId] ?? []), ...references];
-      // Perception state: observe once (full manifest), then diff every step — byakugan holds the
-      // stable-ID map in the main process. boundsById aims the animated cursor at act targets.
-      let observedOnce = false;
-      const boundsById = new Map<number, { x: number; y: number; w: number; h: number }>();
-      // A look() the model requested last turn: null = none, {} = whole viewport, {id} = element crop.
-      let pendingLook: { id?: number } | null = null;
-      let stuck = 0;
       let waits = 0;
-      let emptyViews = 0; // consecutive element-less manifests (SPA still hydrating)
+      let shotFailures = 0; // consecutive screenshots that came back empty/failed
       let completed = false;
       let acted = 0; // real (non-wait) actions performed so far
       let doneOverrides = 0; // times we've rejected a premature "done"
       let stepFailures = 0; // consecutive model-call failures
       let refusals = 0; // consecutive prose/refusal responses (model returned non-JSON)
-      // Visual actions (clicking a canvas/board) change pixels but not the DOM, so the
-      // signature can't see their effect — don't let them trip the "stuck" detector.
-      let lastWasVisual = false;
       // Loop until the goal is done (or the user Stops). The cap is just a runaway backstop;
       // the user can raise it or turn it off entirely in the spotlight.
       const { max, noLimit } = agentLimitRef.current;
@@ -940,7 +945,8 @@ export function App() {
               goal,
               url: 'about:blank',
               title: 'New Tab',
-              page: '(no page is open in this tab yet)',
+              // No image: there is no page to capture yet, so this turn is deliberately
+              // the one step the agent takes without seeing anything.
               // The server accepts at most 20 history entries — send the most recent ones.
               history: [...history.slice(-19), { action: 'note', reason: 'No website is open yet. Use "navigate" with the URL the goal needs to begin.' }]
             });
@@ -989,72 +995,32 @@ export function App() {
           logAgent(tabId, { role: 'system', text: 'Page perception is unavailable — the agent needs the Toji desktop app.' });
           break;
         }
-        // Perceive through byakugan: a full render-truthful manifest on the first step, then only
-        // a DIFF of what changed ("NO CHANGE" when idle) — byakugan itself falls back to a full
-        // manifest on navigation or large change, and keeps element ids stable across steps.
-        const view = observedOnce ? await eyesDiff(wcId) : await eyesObserve(wcId);
+        // The one observation of the turn: what this tab looks like right now. Captured
+        // over CDP, so a background tab yields real pixels rather than a blank frame.
+        const shot = await pageScreenshot(wcId);
         if (agentCancel.current[tabId]) break;
-        if (!view.ok || typeof view.text !== 'string') {
-          stepFailures += 1;
-          if (stepFailures >= 5) {
-            logAgent(tabId, { role: 'system', text: `Could not read this page${view.error ? ` (${view.error})` : ''} — stopping.` });
+        if (!shot.ok || !shot.dataUri) {
+          shotFailures += 1;
+          if (shotFailures >= 5) {
+            logAgent(tabId, { role: 'system', text: `Could not see this page${shot.error ? ` (${shot.error})` : ''} — stopping.` });
             break;
           }
-          await delay(600 * stepFailures);
+          await delay(600 * shotFailures);
           step -= 1;
           continue;
         }
-        observedOnce = true;
-        // SPAs (lichess, gmail, …) often finish "loading" before they render anything —
-        // an empty manifest right after navigation means "not hydrated yet", not "blank
-        // page". Re-observe briefly instead of asking the model to act on nothing.
-        if ((view.elements?.length ?? 0) === 0 && emptyViews < 4) {
-          emptyViews += 1;
-          observedOnce = false; // next perception is a fresh full manifest
-          await delay(900);
-          step -= 1;
-          continue;
-        }
-        if (view.elements?.length) emptyViews = 0;
-        for (const el of view.elements ?? ([] as EyesElement[])) boundsById.set(el.id, el.bounds);
-        // Stuck detection straight from the diff: "NO CHANGE" right after a real page action means
-        // the action did nothing visible; three in a row means we're stuck. (The model sees the
-        // same "NO CHANGE" as its PAGE, so it gets the signal too.)
-        const noChange = view.text.trim() === 'NO CHANGE';
-        if (step > 0 && noChange && !lastWasVisual) {
-          stuck += 1;
-        } else if (step > 0 && !noChange) {
-          stuck = 0;
-        }
-        if (stuck >= 3) {
-          logAgent(tabId, { role: 'system', text: "The page isn't responding to actions — stopping." });
-          break;
-        }
-        // A look() the model requested last turn: capture the crop now — an element crop
-        // when it named an id, else the whole visible viewport.
-        let image: string | undefined;
-        let crop: { x: number; y: number; w: number; h: number } | undefined;
-        if (pendingLook) {
-          const lk = await eyesLook(wcId, typeof pendingLook.id === 'number' ? { id: pendingLook.id } : undefined);
-          if (lk.ok && lk.dataUri) {
-            image = lk.dataUri;
-            crop = lk.crop;
-          } else {
-            history.push({ action: 'note', reason: `look failed: ${lk.error ?? 'could not capture'}` });
-          }
-          pendingLook = null;
-        }
+        shotFailures = 0;
+        const image = shot.dataUri;
+        const imageSize = shot.width && shot.height ? { w: shot.width, h: shot.height } : undefined;
         let action;
         try {
           action = await agentStep({
             goal,
-            url: view.meta?.url ?? '',
-            title: view.meta?.title,
-            page: view.text,
+            url: wv.getURL?.() ?? '',
+            title: wv.getTitle?.(),
             history: history.slice(-20),
             image,
-            crop,
-            viewport: view.meta ? { w: view.meta.viewport.width, h: view.meta.viewport.height } : undefined,
+            image_size: imageSize,
             credentialAccess: Boolean(bridge().vaultMatches && bridge().vaultFill),
             files: allFiles().map((f) => ({ index: f.index, name: f.name, mime: f.mime })),
             memory
@@ -1108,7 +1074,7 @@ export function App() {
           logAgent(tabId, { role: 'agent', text: `Researching: ${action.query}` });
           let answer = '';
           try {
-            const r = await agentResearch({ question: action.query, goal, url: view.meta?.url });
+            const r = await agentResearch({ question: action.query, goal, url: wv.getURL?.() ?? '' });
             answer = r.answer || '';
           } catch {
             answer = '';
@@ -1116,7 +1082,6 @@ export function App() {
           const text = answer ? answer : 'No useful guidance found.';
           history.push({ action: 'researched', reason: `${action.query} → ${text}` });
           logAgent(tabId, { role: 'agent', text: `Guidance → ${text.slice(0, 240)}` });
-          lastWasVisual = true;
           step -= 1; // research is an info-gathering step, not an action
           if (++waits > 24) {
             logAgent(tabId, { role: 'system', text: 'Too many non-acting steps — stopping.' });
@@ -1128,7 +1093,7 @@ export function App() {
         // only metadata matching the current origin + container, never a global directory
         // and never a password.
         if (action.action === 'findCredentials') {
-          const currentUrl = view.meta?.url ?? '';
+          const currentUrl = wv.getURL?.() ?? '';
           const result = await bridge().vaultMatches?.(wcId);
           const matches = result?.ok ? result.value : [];
           const summary = matches.length
@@ -1136,7 +1101,6 @@ export function App() {
             : [];
           history.push({ action: 'findCredentials', reason: summary.length ? `matches: ${JSON.stringify(summary)}` : 'no saved login matches this exact website and profile' });
           logAgent(tabId, { role: 'agent', text: summary.length ? `Found ${summary.length} saved login${summary.length === 1 ? '' : 's'} for ${hostOf(currentUrl)}.` : `No saved login for ${hostOf(currentUrl) || 'this site'}.` });
-          lastWasVisual = true;
           step -= 1;
           if (++waits > 24) {
             logAgent(tabId, { role: 'system', text: 'Too many non-acting steps — stopping.' });
@@ -1159,7 +1123,6 @@ export function App() {
               break;
             }
           }
-          lastWasVisual = !ok;
           continue;
         }
         // ask: the agent needs something only the user knows (which account, a missing credential,
@@ -1177,22 +1140,7 @@ export function App() {
           setAgents((a) => ({ ...a, [tabId]: { ...a[tabId], running: a[tabId]?.running ?? true, log: a[tabId]?.log ?? [], ask: undefined } }));
           if (answer === null || agentCancel.current[tabId]) break;
           history.push({ action: 'asked user', reason: `${question} → ${answer}`.slice(0, 400) });
-          lastWasVisual = true; // pausing for input mustn't trip the stuck detector
           step -= 1; // asking is free
-          continue;
-        }
-        // look: the agent decided it needs to SEE pixels — a cropped screenshot of one element
-        // (or the viewport) is captured and attached next turn.
-        if (action.action === 'look') {
-          pendingLook = { id: typeof action.id === 'number' ? action.id : undefined };
-          logAgent(tabId, { role: 'agent', text: typeof action.id === 'number' ? `Looking at [${action.id}]…` : 'Taking a look…' });
-          history.push({ action: 'note', reason: 'look requested — the screenshot will be attached next turn' });
-          lastWasVisual = true;
-          step -= 1; // requesting a look is free
-          if (++waits > 24) {
-            logAgent(tabId, { role: 'system', text: 'Too many non-acting steps — stopping.' });
-            break;
-          }
           continue;
         }
         // remember: persist a durable fact for future sessions (Hermes-style memory).
@@ -1202,7 +1150,6 @@ export function App() {
           memory = `${memory}\n- ${note}`.slice(-1400); // reflect it immediately this run too
           logAgent(tabId, { role: 'agent', text: `Remembered: ${note.slice(0, 120)}` });
           history.push({ action: 'remembered', reason: note.slice(0, 80) });
-          lastWasVisual = true;
           step -= 1; // remembering is free
           if (++waits > 24) {
             logAgent(tabId, { role: 'system', text: 'Too many non-acting steps — stopping.' });
@@ -1220,7 +1167,8 @@ export function App() {
           let ok = false;
           if (file && toji?.uploadToFileInput) {
             try {
-              ok = await toji.uploadToFileInput(wcId, file.path, 0, typeof action.id === 'number' ? action.id : undefined);
+              // No manifest ids in screenshot mode, so this targets the page's first file input.
+              ok = await toji.uploadToFileInput(wcId, file.path, 0, undefined);
             } catch {
               ok = false;
             }
@@ -1258,10 +1206,25 @@ export function App() {
             if (s !== base) break;
           }
           history.push({ action: 'wait', reason: action.reason });
-          lastWasVisual = true; // a no-op wait must not trip the stuck detector
           step -= 1; // don't burn a real step on waiting
           if (waits > 24) {
             logAgent(tabId, { role: 'system', text: 'Waited a long time without progress — stopping.' });
+            break;
+          }
+          continue;
+        }
+        // Coordinates arrive in the screenshot's pixel space; the mouse works in the page's
+        // CSS pixels, so every point is scaled through the capture that produced it.
+        const point = (x: unknown, y: unknown) =>
+          typeof x === 'number' && typeof y === 'number' ? toPagePoint(x, y, shot) : undefined;
+        const target = point(action.x, action.y);
+        // A pointing action with no point is unusable — bounce it back rather than
+        // clicking (0,0), which lands on whatever happens to be in the corner.
+        if ((action.action === 'click' || action.action === 'hover') && !target) {
+          history.push({ action: 'note', reason: `${action.action} needs x and y in screenshot pixels — look again and give the centre of the target` });
+          step -= 1;
+          if (++waits > 24) {
+            logAgent(tabId, { role: 'system', text: 'Too many non-acting steps — stopping.' });
             break;
           }
           continue;
@@ -1270,26 +1233,32 @@ export function App() {
           if (action.action === 'navigate' && action.url) {
             navigateTab(tabId, toUrl(action.url));
             await delay(2000);
-          } else if (action.action === 'clickAt' && typeof action.x === 'number' && typeof action.y === 'number') {
-            // Raw pixel click for visual targets (canvas/board) with no manifest element.
-            await realClickAt(tabId, action.x, action.y);
+          } else if (action.action === 'click' && target) {
+            await realClickAt(tabId, target.x, target.y);
             await delay(1100);
+          } else if (action.action === 'hover' && target) {
+            await glideCursor(tabId, target.x, target.y);
+            await delay(700);
+          } else if (action.action === 'type') {
+            // Click first when a point is given, so the text lands in the intended field.
+            if (target) {
+              await realClickAt(tabId, target.x, target.y);
+              await delay(350);
+            }
+            await typeText(tabId, String(action.text ?? ''));
+            await delay(600);
           } else if (action.action === 'drag') {
-            if (typeof action.fromX === 'number' && typeof action.fromY === 'number' && typeof action.toX === 'number' && typeof action.toY === 'number') {
-              await realDrag(tabId, { x: action.fromX, y: action.fromY }, { x: action.toX, y: action.toY });
+            const from = point(action.fromX, action.fromY);
+            const to = point(action.toX, action.toY);
+            if (from && to) {
+              await realDrag(tabId, from, to);
               await delay(1100);
             }
           } else {
-            // Element/keyboard actions dispatched by byakugan in the main process: geometry is
-            // re-resolved at click time and the target hit-tested, so a covered element is
-            // REFUSED with {blockedBy} instead of clicked through.
-            // Only real page verbs may reach the dispatcher. Anything else landing here is a
-            // free-form action that arrived missing its required field (e.g. research with no
-            // query) — bounce it back to the model instead of sending a bogus verb to byakugan.
+            // press/scroll need no target and are dispatched in the main process.
             const verb = action.action;
-            if (verb !== 'click' && verb !== 'type' && verb !== 'press' && verb !== 'select' && verb !== 'hover' && verb !== 'scroll') {
+            if (verb !== 'press' && verb !== 'scroll') {
               history.push({ action: 'note', reason: `your "${verb}" action was missing its required field (research needs query, ask needs question, remember needs text, fillCredential needs credentialId) — resend it complete` });
-              lastWasVisual = true;
               step -= 1;
               if (++waits > 24) {
                 logAgent(tabId, { role: 'system', text: 'Too many non-acting steps — stopping.' });
@@ -1297,36 +1266,10 @@ export function App() {
               }
               continue;
             }
-            const needsId = verb === 'click' || verb === 'type' || verb === 'select' || verb === 'hover';
-            if (needsId && typeof action.id !== 'number') {
-              history.push({ action: 'note', reason: `${verb} needs an element id from the PAGE — e.g. click(17)` });
-              lastWasVisual = true;
-              step -= 1;
-              if (++waits > 24) {
-                logAgent(tabId, { role: 'system', text: 'Too many non-acting steps — stopping.' });
-                break;
-              }
-              continue;
-            }
-            // Glide the visible cursor to the target — purely cosmetic; the verified dispatch in
-            // the main process re-derives fresh coordinates itself.
-            const b = typeof action.id === 'number' ? boundsById.get(action.id) : undefined;
-            if (b) await glideCursor(tabId, Math.round(b.x + b.w / 2), Math.round(b.y + b.h / 2));
-            const typed = verb === 'type' ? String(action.text ?? '') : undefined;
-            const res = await eyesAct(wcId, { verb, id: action.id, text: typed, key: action.key, value: action.value, direction: action.direction });
+            const res = await eyesAct(wcId, { verb, key: action.key, direction: action.direction });
             if (!res.ok) {
-              const why = `${res.error ?? 'action failed'}${res.blockedBy ? ` — blocked by ${res.blockedBy}` : ''}`;
-              // A stale id (element gone from the live page — dynamic sites churn constantly)
-              // means the model's picture is out of date: re-ground it with a fresh FULL
-              // manifest next turn instead of another diff against the world it mispredicted.
-              const stale = (res.error ?? '').includes('no such element');
-              if (stale) observedOnce = false;
-              logAgent(tabId, { role: 'system', text: `Couldn't ${verb}${typeof action.id === 'number' ? ` [${action.id}]` : ''}: ${why}` });
-              history.push({
-                action: `${verb}${typeof action.id === 'number' ? ` [${action.id}]` : ''} FAILED`,
-                reason: `${why}. ${stale ? 'That element is gone — a fresh PAGE manifest follows; pick from it.' : 'Deal with the blocker or pick a different element.'}`.slice(0, 300)
-              });
-              lastWasVisual = true; // nothing changed on the page
+              logAgent(tabId, { role: 'system', text: `Couldn't ${verb}: ${res.error ?? 'action failed'}` });
+              history.push({ action: `${verb} FAILED`, reason: (res.error ?? 'action failed').slice(0, 200) });
               step -= 1; // a refused action shouldn't burn the budget — the retry is the real step
               if (++waits > 24) {
                 logAgent(tabId, { role: 'system', text: 'Too many blocked/non-acting steps — stopping.' });
@@ -1334,21 +1277,17 @@ export function App() {
               }
               continue;
             }
-            if (verb === 'click') setAgentCursor((c) => (c ? { ...c, tick: c.tick + 1 } : c)); // ripple
-            await delay(verb === 'click' ? 1100 : verb === 'type' ? 900 : verb === 'scroll' ? 700 : 500);
+            await delay(verb === 'scroll' ? 700 : 500);
           }
         } catch {
-          // keep going; the next diff reflects reality
+          // keep going; the next screenshot reflects reality
         }
         acted += 1;
-        // Canvas clicks/drags change pixels but often not the layout tree — don't trip "stuck".
-        lastWasVisual = action.action === 'clickAt' || action.action === 'drag';
+        const at = target ? ` ${target.x},${target.y}` : '';
         const label =
-          action.action === 'clickAt'
-            ? `clickAt ${Math.round(action.x ?? 0)},${Math.round(action.y ?? 0)}`
-            : action.action === 'drag'
-                ? `drag ${Math.round(action.fromX ?? 0)},${Math.round(action.fromY ?? 0)}→${Math.round(action.toX ?? 0)},${Math.round(action.toY ?? 0)}`
-                : `${action.action}${typeof action.id === 'number' ? ` [${action.id}]` : ''}${action.key ? ` ${action.key}` : ''}`;
+          action.action === 'drag'
+            ? `drag ${Math.round(action.fromX ?? 0)},${Math.round(action.fromY ?? 0)}→${Math.round(action.toX ?? 0)},${Math.round(action.toY ?? 0)}`
+            : `${action.action}${at}${action.key ? ` ${action.key}` : ''}`;
         history.push({ action: label, reason: action.reason });
       }
       setAgentCursor(null);

@@ -445,13 +445,10 @@ app.post('/api/agent/step', expensiveRateLimit, async (req, res, next) => {
         goal: z.string().min(1).max(600),
         url: z.string().max(2000),
         title: z.string().max(400).optional(),
-        // Byakugan manifest/diff text — already token-capped by the producer (default 800 tokens
-        // ≈ 3200 chars); the generous cap here is just a transport guard.
-        page: z.string().max(40_000),
         history: z.array(z.object({ action: z.string(), reason: z.string().optional() })).max(20).optional(),
+        // The tab's screenshot — the agent's only view of the page.
         image: z.string().max(12_000_000).optional(),
-        crop: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }).optional(),
-        viewport: z.object({ w: z.number(), h: z.number() }).optional(),
+        image_size: z.object({ w: z.number(), h: z.number() }).optional(),
         credentialAccess: z.boolean().optional(),
         files: z
           .array(z.object({ index: z.number(), name: z.string().max(200), mime: z.string().max(120).optional() }))

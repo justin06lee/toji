@@ -141,14 +141,11 @@ export function agentStep(body: {
   goal: string;
   url: string;
   title?: string;
-  /** Byakugan view of the page: the full manifest (first step) or a diff of what changed since. */
-  page: string;
   history?: Array<{ action: string; reason?: string }>;
-  /** Cropped screenshot from a look() request last turn (data URI). */
+  /** The tab's current screenshot (data URI) — the agent's only view of the page. */
   image?: string;
-  /** Where the screenshot crop sits in viewport CSS px (maps image pixels → clickAt coords). */
-  crop?: { x: number; y: number; w: number; h: number };
-  viewport?: { w: number; h: number };
+  /** Pixel size of that screenshot: the coordinate space the model answers in. */
+  image_size?: { w: number; h: number };
   credentialAccess?: boolean;
   files?: { index: number; name: string; mime?: string }[];
   memory?: string;
