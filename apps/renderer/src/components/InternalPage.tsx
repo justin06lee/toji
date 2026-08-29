@@ -788,7 +788,8 @@ function AgentSettings() {
           value={agent}
           options={AGENT_OPTIONS}
           onChange={(v) => {
-            if (v === 'alpaca' || v === 'cerebras') return;
+            // 'alpaca' is a placeholder with no backend behind it; every real choice applies.
+            if (v === 'alpaca') return;
             void apply({ agent: v });
           }}
         />
