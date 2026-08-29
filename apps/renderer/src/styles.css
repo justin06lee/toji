@@ -32,9 +32,9 @@ body {
 .drag { -webkit-app-region: drag; }
 .no-drag { -webkit-app-region: no-drag; }
 
-/* A native draggable notch rendered only after React detects the pointer near the
-   top. Native drag regions do not reliably emit :hover on macOS, so visibility must
-   not depend on CSS hover state. */
+/* A native draggable notch, rendered only while the main process reports the cursor
+   near the top of the window (see revealDragHandle). Reveal can never come from CSS
+   hover or DOM mouse events: native drag regions swallow those on macOS. */
 .drag-strip {
   position: fixed;
   top: 0;
@@ -44,14 +44,18 @@ body {
   justify-content: center;
   align-items: flex-start;
 }
+/* Side-tab mode: the strip only pads the header's top edge, which is a native drag
+   region anyway, so a full-width invisible pad steals no clicks. */
 .drag-strip-side {
   left: 0;
   right: 0;
   height: 10px;
 }
+/* Top-tab mode the strip floats over the tabs themselves, so it stays a narrow pad
+   around the visible notch instead of an invisible click-stealing band. */
 .drag-strip-tabs {
-  left: 32%;
-  right: 32%;
+  left: 44%;
+  right: 44%;
   height: 18px;
 }
 .drag-notch {

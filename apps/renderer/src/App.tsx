@@ -25,6 +25,7 @@ import {
 } from './lib/containers';
 import { hostOf, isOnionUrl, looksLikeUrl, toUrl, webSearchUrl, type SearchEngineId } from './lib/nav';
 import { bridge, type TorStatus, type VaultEntry, type VaultPrompt } from './lib/bridge';
+import { revealDragHandle } from './lib/dragHandle';
 import { replacePristineTabWithWelcome, startBrowsingInTab } from './lib/tabLifecycle';
 import { tabTitle } from './lib/tabPresentation';
 import { GROUP_COLORS, type BrowserTab, type TabGroup } from './types';
@@ -225,6 +226,14 @@ export function App() {
       observer.disconnect();
     };
   }, [layout, tabs.length]);
+  // The window-drag notch reveals from the tracked cursor position streamed by the
+  // main process, never from DOM hover: the top chrome is a native drag region, so
+  // mouse events over it are swallowed by the OS (hover state there never fired, and
+  // flickered once the notch — itself a drag region — appeared under the pointer).
+  useEffect(() => {
+    setDragHandleVisible(false);
+    return bridge().onWindowCursor?.((cursor) => setDragHandleVisible((prev) => revealDragHandle(cursor, prev, layout)));
+  }, [layout]);
   // Vertical wheel scrolls the horizontal tab strip. Registered natively because React
   // attaches onWheel as a PASSIVE listener, where preventDefault() is a no-op.
   useEffect(() => {
@@ -1365,9 +1374,10 @@ export function App() {
   const iconBtn =
     'no-drag inline-flex items-center justify-center rounded-full text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-black/5 dark:hover:bg-white/10 transition-colors disabled:opacity-35 disabled:pointer-events-none';
 
-  // The handle is itself a native drag region. Its reveal boundary is implemented by
-  // capture-phase listeners on the existing tabs, so revealing it never puts an
-  // invisible click-blocking layer over close buttons or other controls.
+  // The visible "grab here" notch, itself a native drag region. It mounts only while
+  // revealDragHandle says the tracked cursor is near the top band (see the
+  // onWindowCursor effect) — it must unmount when hidden, because a merely
+  // transparent drag region would still steal clicks from the tabs beneath it.
   const windowDragHandle = (placement: 'side' | 'tabs') => (
     <div className={`drag-strip drag-strip-${placement}`} data-testid="window-drag-handle" aria-hidden>
       <span className="drag-notch">
@@ -1691,8 +1701,6 @@ export function App() {
           return cur.map((t) => (t.groupId ? t : ordered[k++] ?? t));
         })
       }
-      onPointerActivity={() => setDragHandleVisible(true)}
-      onPointerLeave={() => setDragHandleVisible(false)}
     />
   );
 
@@ -1710,11 +1718,8 @@ export function App() {
 
   if (layout === 'side') {
     return (
-      <div
-        className="flex h-screen flex-col bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100"
-        onMouseLeave={() => setDragHandleVisible(false)}
-      >
-        {(sidebarOpen || sidebarPeek) && dragHandleVisible && windowDragHandle('side')}
+      <div className="flex h-screen flex-col bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
+        {dragHandleVisible && windowDragHandle('side')}
         <header className="drag relative shrink-0 border-b border-black/[0.07] px-3 pt-2.5 pb-2.5 dark:border-white/10">
           {addressRow}
           {vaultBar && <div className="mt-2">{vaultBar}</div>}
@@ -1752,23 +1757,13 @@ export function App() {
   }
 
   return (
-    <div
-      className="flex h-screen flex-col bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100"
-      onMouseLeave={() => setDragHandleVisible(false)}
-    >
+    <div className="flex h-screen flex-col bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
       {topTabsCrowded && dragHandleVisible && windowDragHandle('tabs')}
       <header className="drag relative shrink-0 border-b border-black/[0.07] px-3 pt-2.5 pb-2.5 dark:border-white/10">
         {/* Tabs sit at the very top (offset past the macOS traffic lights); the omnibox lives
             just beneath them, flush left since nothing overlaps it there. */}
         {/* Tabs are drag-reorderable along the X axis only (they live in a horizontal strip). */}
-        <div
-          className="flex h-9"
-          data-testid="top-tab-hover-boundary"
-          onMouseMoveCapture={() => {
-            if (topTabsCrowded) setDragHandleVisible(true);
-          }}
-          onMouseLeave={() => setDragHandleVisible(false)}
-        >
+        <div className="flex h-9">
           {isMac && <div aria-hidden className="w-[82px] shrink-0" />}
           <Reorder.Group
             ref={topTabStripRef}

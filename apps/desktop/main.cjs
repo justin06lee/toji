@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, shell, nativeImage, webContents, dialog, session } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, shell, nativeImage, webContents, dialog, session, screen } = require('electron');
 const { spawn } = require('node:child_process');
 const { applySessionPolicy, applyWebRtcPolicy, parsePartition } = require('./policy.cjs');
 const { TorController } = require('./tor.cjs');
@@ -521,6 +521,46 @@ function openInToji(url, targetWindow = focusedWindow()) {
   if (win && !win.isDestroyed()) win.webContents.send('toji:open-url', url);
 }
 
+// The renderer reveals its window-drag notch when the pointer nears the top of the
+// window. It cannot learn that from DOM events: the top chrome is largely a native
+// drag region (-webkit-app-region: drag), and macOS delivers no mouse events over
+// those. So while a window is focused, its cursor position is polled here and
+// streamed to the renderer as window-relative coordinates.
+const CURSOR_POLL_MS = 80;
+
+function attachCursorTracker(win) {
+  let timer = null;
+  let last = null;
+  const send = (cursor) => {
+    if (win.isDestroyed()) return;
+    if (last && last.x === cursor.x && last.y === cursor.y && last.inside === cursor.inside) return;
+    last = cursor;
+    win.webContents.send('toji:window-cursor', cursor);
+  };
+  const stop = () => {
+    if (timer !== null) clearInterval(timer);
+    timer = null;
+  };
+  const tick = () => {
+    if (win.isDestroyed()) return stop();
+    const point = screen.getCursorScreenPoint();
+    const bounds = win.getContentBounds();
+    const x = point.x - bounds.x;
+    const y = point.y - bounds.y;
+    send({ x, y, width: bounds.width, height: bounds.height, inside: x >= 0 && y >= 0 && x <= bounds.width && y <= bounds.height });
+  };
+  const start = () => {
+    if (timer === null) timer = setInterval(tick, CURSOR_POLL_MS);
+  };
+  win.on('focus', start);
+  win.on('blur', () => {
+    stop();
+    send({ x: -1, y: -1, width: 0, height: 0, inside: false });
+  });
+  win.on('closed', stop);
+  if (win.isFocused()) start();
+}
+
 function createWindow(containerId = null) {
   const win = new BrowserWindow({
     width: 1480,
@@ -544,6 +584,7 @@ function createWindow(containerId = null) {
   });
   appWindows.add(win);
   win.on('closed', () => appWindows.delete(win));
+  attachCursorTracker(win);
   attachContainerPolicy(win.webContents);
 
   // In production the bundled agent server serves the renderer over http:// so it

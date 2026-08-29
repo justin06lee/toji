@@ -16,6 +16,17 @@ export interface TorStatus {
   isolated?: boolean;
 }
 
+/** Pointer position relative to the window's content area, streamed while focused. */
+export interface WindowCursor {
+  x: number;
+  y: number;
+  /** Content-area size at the moment of sampling, for edge/zone math. */
+  width: number;
+  height: number;
+  /** False once the pointer leaves the window (or the window loses focus). */
+  inside: boolean;
+}
+
 /** Vault calls return either a value or a message; they never throw across IPC. */
 export type VaultResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -92,6 +103,10 @@ export interface TojiBridge {
   /** Request fresh circuits (Tor NEWNYM). */
   torNewCircuit?: () => Promise<boolean>;
   onTorStatus?: (callback: (status: TorStatus) => void) => () => void;
+
+  // --- window chrome ---
+  /** Cursor tracking for the window-drag notch; see WindowCursor. */
+  onWindowCursor?: (callback: (cursor: WindowCursor) => void) => () => void;
 }
 
 export const bridge = (): TojiBridge => (window as unknown as { toji?: TojiBridge }).toji ?? {};

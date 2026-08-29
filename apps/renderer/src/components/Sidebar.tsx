@@ -26,9 +26,6 @@ interface SidebarProps {
   onTabContextMenu: (tabId: string, x: number, y: number) => void;
   /** Reorder the ungrouped tabs (drag along the Y axis). */
   onReorderUngrouped?: (ordered: BrowserTab[]) => void;
-  /** Reveal the native window handle while the pointer is anywhere over the sidebar. */
-  onPointerActivity?: () => void;
-  onPointerLeave?: () => void;
 }
 
 function TabRow({
@@ -169,7 +166,7 @@ function SidebarNewButton({ onNewTab, onNewGroup, onNewAgentTab }: { onNewTab: (
   );
 }
 
-export function Sidebar({ tabs, groups, activeId, onSelect, onClose, onNewTab, onNewGroup, onNewAgentTab, peek, onToggleCollapse, onToggleGroup, onRenameGroup, onRemoveGroup, onTabContextMenu, onReorderUngrouped, onPointerActivity, onPointerLeave }: SidebarProps) {
+export function Sidebar({ tabs, groups, activeId, onSelect, onClose, onNewTab, onNewGroup, onNewAgentTab, peek, onToggleCollapse, onToggleGroup, onRenameGroup, onRemoveGroup, onTabContextMenu, onReorderUngrouped }: SidebarProps) {
   const contextHandler = (tabId: string) => (e: ReactMouseEvent) => {
     e.preventDefault();
     onTabContextMenu(tabId, e.clientX, e.clientY);
@@ -184,11 +181,11 @@ export function Sidebar({ tabs, groups, activeId, onSelect, onClose, onNewTab, o
     <aside
       className={`${peek ? '' : 'drag '}relative flex w-60 shrink-0 select-none flex-col border-r border-black/[0.07] bg-black/[0.015] dark:border-white/10 dark:bg-white/[0.02]`}
       data-testid="sidebar"
-      onMouseMoveCapture={onPointerActivity}
-      onMouseLeave={onPointerLeave}
     >
-      {!peek && <div className="drag absolute inset-y-0 left-0 z-20 w-3" data-testid="sidebar-drag-edge" aria-hidden />}
-      <div className="no-drag ml-3 flex items-center justify-end py-2 pr-2">
+      {/* The whole left rail moves the window — kept clear of tab rows (they start at
+          ml-5) so a wide grab area never steals their clicks. */}
+      {!peek && <div className="drag absolute inset-y-0 left-0 z-20 w-5" data-testid="sidebar-drag-edge" aria-hidden />}
+      <div className="no-drag ml-5 flex items-center justify-end py-2 pr-2">
         <button
           type="button"
           aria-label={peek ? 'Show sidebar' : 'Hide sidebar'}
@@ -200,7 +197,7 @@ export function Sidebar({ tabs, groups, activeId, onSelect, onClose, onNewTab, o
         </button>
       </div>
 
-      <div className="no-drag ml-3 flex-1 space-y-0.5 overflow-y-auto pr-2 pb-2">
+      <div className="no-drag ml-5 flex-1 space-y-0.5 overflow-y-auto pr-2 pb-2">
         {groups.map((group, index) => {
           const color = GROUP_COLORS[index % GROUP_COLORS.length];
           const groupTabs = tabs.filter((t) => t.groupId === group.id);
