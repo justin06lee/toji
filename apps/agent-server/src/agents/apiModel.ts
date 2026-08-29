@@ -1,9 +1,9 @@
 import type { ApiBackend } from './agentRuntime.js';
+import { CEREBRAS_BASE_URL, cerebrasErrorMessage } from './cerebras.js';
 
-// The custom-endpoint backend: any OpenAI-compatible /chat/completions server
-// (Ollama, LM Studio, vLLM, a home server) reached with a user-entered URL and an
-// optional bearer key. Everything hosted-API-shaped that Toji used to speak
-// directly now routes through the embedded yagami engine instead.
+// The OpenAI-compatible backend: Cerebras, or any /chat/completions server the user
+// points at (Ollama, LM Studio, vLLM, a home server). Everything else hosted-API-shaped
+// that Toji used to speak directly now routes through the embedded yagami engine.
 
 export interface ApiCallOptions {
   system: string;
@@ -53,6 +53,9 @@ async function openaiFetch(backend: ApiBackend, options: ApiCallOptions, stream:
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
+    // Cerebras has failure modes worth naming precisely — a 402 is an empty balance,
+    // not a bad key, and telling them apart saves a pointless key-rotation hunt.
+    if (backend.baseUrl === CEREBRAS_BASE_URL) throw new Error(cerebrasErrorMessage(response.status, detail));
     throw new Error(`${backend.label} error ${response.status}: ${detail.slice(0, 300)}`);
   }
   return response;

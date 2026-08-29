@@ -17,7 +17,8 @@ import { gatherPageSources } from './agents/search.js';
 import { getCachedPage, putCachedPage } from './lib/pageCache.js';
 import { nextAgentAction, researchHelp } from './agents/webAgent.js';
 import { agentAvailable, liveModelName } from './agents/model.js';
-import { agentStatus, refreshDetection, setAgentChoice, setApiConfig } from './agents/agentRuntime.js';
+import { agentStatus, cerebrasCredentials, refreshDetection, setAgentChoice, setApiConfig } from './agents/agentRuntime.js';
+import { listCerebrasModels } from './agents/cerebras.js';
 import { modelCatalog, warmCatalog } from './agents/yagamiCatalog.js';
 import { addFact, listFacts, removeFact, readPinned, writePinned, PINNED_CAPS } from './lib/memory.js';
 import { detectBrowsers, importBookmarks } from './lib/browserImport.js';
@@ -96,9 +97,11 @@ const settingsPatchSchema = z
     defaultFreshness: z.enum(['auto', 'latest', 'timeless']).optional(),
     visualAnalysis: z.boolean().optional(),
     theme: z.enum(['dark', 'system']).optional(),
-    agent: z.enum(['yagami', 'local', 'off']).optional(),
+    agent: z.enum(['yagami', 'cerebras', 'local', 'off']).optional(),
     agentModel: z.string().max(160).optional(),
     agentThinking: z.enum(['default', 'low', 'medium', 'high']).optional(),
+    cerebrasModel: z.string().max(160).optional(),
+    cerebrasApiKey: z.string().max(400).optional(),
     localUrl: z
       .string()
       .max(400)
@@ -112,7 +115,7 @@ const settingsPatchSchema = z
 // API keys are stored in the local settings.json but never echoed back over HTTP:
 // responses carry a mask (so the UI can show "saved"), and a PATCH whose key value is
 // still the mask leaves the stored key untouched.
-const KEY_FIELDS = ['localApiKey'] as const;
+const KEY_FIELDS = ['localApiKey', 'cerebrasApiKey'] as const;
 const MASK_PREFIX = '••••';
 const maskKey = (value: string) => (value ? `${MASK_PREFIX}${value.slice(-4)}` : '');
 function maskSettings(settings: UserSettings): UserSettings {
@@ -217,6 +220,20 @@ app.get('/api/agents/models', async (req, res, next) => {
     res.json(await modelCatalog(req.query.refresh === '1'));
   } catch (error) {
     next(error);
+  }
+});
+
+// Models the configured Cerebras key can use, for the settings model picker. The key
+// stays server-side; only ids come back.
+app.get('/api/agents/cerebras-models', async (req, res) => {
+  const { key, source } = cerebrasCredentials();
+  if (!key) return res.json({ models: [], keySource: source, error: 'No Cerebras API key. Set CEREBRAS_API_KEY or paste one in Settings.' });
+  try {
+    return res.json({ models: await listCerebrasModels(key, req.query.refresh === '1'), keySource: source });
+  } catch (error) {
+    // A bad key or an empty balance is the user's to fix, so it is reported as data
+    // rather than thrown — the picker stays usable and shows why it is empty.
+    return res.json({ models: [], keySource: source, error: error instanceof Error ? error.message : String(error) });
   }
 });
 

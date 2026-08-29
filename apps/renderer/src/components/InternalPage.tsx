@@ -9,6 +9,7 @@ import {
   getAgentModels,
   getAgents,
   getBookmarks,
+  getCerebrasModels,
   getImportBrowsers,
   getMemoryFacts,
   getPinnedMemory,
@@ -23,7 +24,7 @@ import {
   type PinnedMemory,
   type ReferenceDoc
 } from '../lib/api';
-import type { AgentChoice, AgentsStatus, InternalPage as InternalPageKind, ModelCatalog, ThinkingLevel, UserSettings } from '../types';
+import type { AgentChoice, AgentsStatus, CerebrasModels, InternalPage as InternalPageKind, ModelCatalog, ThinkingLevel, UserSettings } from '../types';
 import { bridge, type TorStatus, type VaultEntry, type VaultStatus } from '../lib/bridge';
 import { CONTAINER_COLORS, PROFILE_AVATARS, containerId as makeContainerId, type Container, type Egress } from '../lib/containers';
 import { VaultUnavailable } from './VaultBar';
@@ -625,12 +626,12 @@ function ProviderField({ label, value, onChange, placeholder, secret }: { label:
   );
 }
 
-type AgentPick = AgentChoice | 'alpaca' | 'cerebras';
+type AgentPick = AgentChoice | 'alpaca';
 
 const AGENT_OPTIONS: DropdownOption<AgentPick>[] = [
   { value: 'yagami', label: 'Yagami', hint: 'automatic' },
   { value: 'alpaca', label: 'Alpaca', hint: 'under construction', disabled: true },
-  { value: 'cerebras', label: 'Cerebras', hint: 'under construction', disabled: true },
+  { value: 'cerebras', label: 'Cerebras', hint: 'hosted API' },
   { value: 'local', label: 'Custom endpoint', hint: 'URL + key' },
   { value: 'off', label: 'Off' }
 ];
@@ -671,6 +672,12 @@ function AgentSettings() {
   const [agent, setAgent] = useState<AgentChoice>('yagami');
   const [agentModel, setAgentModel] = useState('');
   const [agentThinking, setAgentThinking] = useState<ThinkingLevel>('default');
+  // Cerebras — the model list comes from the account behind the key; the key itself is
+  // held server-side (usually from CEREBRAS_API_KEY) and only ever arrives masked.
+  const [cerebras, setCerebras] = useState<CerebrasModels | null>(null);
+  const [cerebrasLoading, setCerebrasLoading] = useState(false);
+  const [cerebrasModel, setCerebrasModel] = useState('');
+  const [cerebrasKey, setCerebrasKey] = useState('');
   // Custom endpoint — the key arrives masked; typing a new value replaces it on save.
   const [localUrl, setLocalUrl] = useState('');
   const [localModel, setLocalModel] = useState('');
@@ -684,6 +691,8 @@ function AgentSettings() {
     setAgent(settings.agent);
     setAgentModel(settings.agentModel ?? '');
     setAgentThinking(settings.agentThinking ?? 'default');
+    setCerebrasModel(settings.cerebrasModel ?? '');
+    setCerebrasKey(settings.cerebrasApiKey ?? '');
     setLocalUrl(settings.localUrl ?? '');
     setLocalModel(settings.localModel ?? '');
     setLocalKey(settings.localApiKey ?? '');
@@ -709,11 +718,29 @@ function AgentSettings() {
     void loadModels();
   }, [loadModels]);
 
+  const loadCerebras = useCallback(async (refresh = false) => {
+    setCerebrasLoading(true);
+    try {
+      setCerebras(await getCerebrasModels(refresh));
+    } catch {
+      setCerebras(null);
+    } finally {
+      setCerebrasLoading(false);
+    }
+  }, []);
+  // Only fetched once Cerebras is the selected backend — no reaching out to a hosted
+  // API just because the settings page was opened.
+  useEffect(() => {
+    if (agent === 'cerebras') void loadCerebras();
+  }, [agent, loadCerebras]);
+
   const apply = async (patch: Partial<UserSettings>) => {
     const next: Partial<UserSettings> = {
       agent,
       agentModel: agentModel.trim(),
       agentThinking,
+      cerebrasModel: cerebrasModel.trim(),
+      cerebrasApiKey: cerebrasKey,
       localUrl: localUrl.trim(),
       localModel: localModel.trim(),
       localApiKey: localKey,
@@ -722,14 +749,18 @@ function AgentSettings() {
     if (next.agent !== undefined) setAgent(next.agent);
     if (next.agentModel !== undefined) setAgentModel(next.agentModel);
     if (next.agentThinking !== undefined) setAgentThinking(next.agentThinking);
+    if (next.cerebrasModel !== undefined) setCerebrasModel(next.cerebrasModel);
     setSaving(true);
     setSaved(false);
     setApplyErr('');
     try {
       const settings = await saveSettings(next);
-      // Reflect the server's masked key so we never hold a plaintext key in state longer than needed.
+      // Reflect the server's masked keys so we never hold a plaintext key in state longer than needed.
       setLocalKey(settings.localApiKey ?? '');
+      setCerebrasKey(settings.cerebrasApiKey ?? '');
       setStatus(await getAgents());
+      // A new key means a different account, so its model list must be re-fetched.
+      if (next.cerebrasApiKey !== undefined && next.agent === 'cerebras') await loadCerebras(true);
       setSaved(true);
     } catch (e) {
       setApplyErr(e instanceof Error ? e.message : 'Could not save agent settings.');
@@ -804,6 +835,54 @@ function AgentSettings() {
             )}
           </div>
         )}
+        {agent === 'cerebras' && (
+          <div className="space-y-2.5">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-0.5 text-[12px] text-neutral-500">
+              <span className="inline-flex items-center gap-1.5">
+                <StatusDot state={cerebras?.keySource === 'none' ? 'off' : 'on'} />
+                {cerebras?.keySource === 'env' ? 'API key from .env.local' : cerebras?.keySource === 'settings' ? 'API key saved in settings' : 'No API key'}
+              </span>
+              <button
+                type="button"
+                onClick={() => void loadCerebras(true)}
+                disabled={cerebrasLoading}
+                className="inline-flex items-center gap-1 text-[11.5px] text-neutral-400 transition hover:text-neutral-600 disabled:opacity-50 dark:hover:text-neutral-200"
+              >
+                <RefreshCw size={11} className={cerebrasLoading ? 'animate-spin' : ''} /> Refresh models
+              </button>
+            </div>
+            <div className="flex gap-2">
+              <label className="block min-w-0 flex-1">
+                <span className="mb-1 block text-[11px] text-neutral-400">Model</span>
+                <Dropdown<string>
+                  value={cerebrasModel}
+                  options={
+                    cerebras?.models.length
+                      ? cerebras.models.map((m) => ({ value: m.id, label: m.label }))
+                      : cerebrasModel
+                        ? [{ value: cerebrasModel, label: cerebrasModel, hint: 'saved' }]
+                        : []
+                  }
+                  placeholder={cerebrasLoading ? 'Loading models…' : cerebras?.error ? 'Unavailable' : 'Select a model'}
+                  onChange={(v) => void apply({ cerebrasModel: v })}
+                />
+              </label>
+              <ProviderField
+                label={cerebras?.keySource === 'env' ? 'API key (overrides .env.local)' : 'API key'}
+                value={cerebrasKey}
+                onChange={setCerebrasKey}
+                placeholder={cerebras?.keySource === 'env' ? 'using CEREBRAS_API_KEY' : 'csk-…'}
+                secret
+              />
+              {saveButton}
+            </div>
+            {cerebras?.error && <p className="text-[11.5px] text-amber-600 dark:text-amber-400">{cerebras.error}</p>}
+            <p className="text-[11.5px] text-neutral-400">
+              Cerebras runs open models on their own inference hardware. Toji reads the key from CEREBRAS_API_KEY in your
+              .env.local; a key entered here overrides it and is stored in Toji&rsquo;s local settings instead.
+            </p>
+          </div>
+        )}
         {agent === 'local' && (
           <div className="space-y-2">
             <ProviderField label="Endpoint URL (OpenAI-compatible)" value={localUrl} onChange={setLocalUrl} placeholder="http://127.0.0.1:11434/v1" />
@@ -835,6 +914,11 @@ function AgentSettings() {
             </span>
           ) : agent === 'local' ? (
             <span className="inline-flex items-center gap-1.5"><StatusDot state="off" /> Enter your endpoint URL and model, then Save</span>
+          ) : agent === 'cerebras' ? (
+            <span className="inline-flex items-center gap-1.5">
+              <StatusDot state="off" />
+              {status?.cerebras.keySource === 'none' ? 'Add a Cerebras API key to continue' : 'Pick a Cerebras model to continue'}
+            </span>
           ) : (
             <span className="inline-flex items-center gap-1.5"><StatusDot state="off" /> No coding CLI found — install and sign into one (e.g. Claude Code)</span>
           )}

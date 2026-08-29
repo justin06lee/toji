@@ -125,9 +125,12 @@ which drives whichever coding-agent CLIs you are already signed into (Claude Cod
 opencode, Gemini CLI, any ACP agent) — no API keys, nothing to paste. Settings lists every
 model each signed-in CLI reports, grouped by harness, and each one runs on the harness that
 owns it — not just the Claude ones. Controls a harness doesn't have (reasoning effort on
-ACP agents, for instance) are shown as unavailable rather than silently ignored. If you'd
-rather use your own hardware, point it at any OpenAI-compatible endpoint — Ollama, LM
-Studio, vLLM, or a home server.
+ACP agents, for instance) are shown as unavailable rather than silently ignored.
+
+Two hosted alternatives sit beside it in the same picker: **Cerebras**, which reads its key
+from `CEREBRAS_API_KEY` in your `.env.local` (or one you paste into Settings) and lists the
+models that key can reach; and any **OpenAI-compatible endpoint** you point it at, if you'd
+rather use your own hardware — Ollama, LM Studio, vLLM, or a home server.
 
 The credential vault is deliberately opaque to the agent: it can use a saved login by name
 without ever seeing it.

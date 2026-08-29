@@ -169,6 +169,10 @@ export function defaultSettings(): UserSettings {
     agent: agentChoice.agent,
     agentModel: agentChoice.agentModel,
     agentThinking: agentChoice.agentThinking,
+    // Cerebras — the key normally comes from CEREBRAS_API_KEY in the environment and is
+    // deliberately NOT copied here; a key typed into Settings overrides it.
+    cerebrasModel: '',
+    cerebrasApiKey: '',
     // Custom OpenAI-compatible endpoint — unconfigured by default; the user enters a
     // URL (and optionally a key) in Settings and it lives only in this file.
     localUrl: '',

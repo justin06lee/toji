@@ -281,11 +281,16 @@ export interface UserSettings {
    *  coding-agent CLIs on this machine — no keys); 'local' is any OpenAI-compatible
    *  endpoint (Ollama, LM Studio, vLLM, a home server); 'off' forces the
    *  deterministic demo/heuristic fallbacks. URL/key live only in settings.json. */
-  agent: 'yagami' | 'local' | 'off';
+  agent: 'yagami' | 'cerebras' | 'local' | 'off';
   /** Yagami model id ('' = the engine's default; supports "provider:model"). */
   agentModel: string;
   /** Reasoning/thinking effort. 'default' = omit. */
   agentThinking: 'default' | 'low' | 'medium' | 'high';
+  /** Cerebras model id (e.g. gpt-oss-120b). */
+  cerebrasModel: string;
+  /** Optional Cerebras key. Empty means fall back to CEREBRAS_API_KEY from the
+   *  environment, which is never copied in here. */
+  cerebrasApiKey: string;
   /** Custom endpoint: OpenAI-compatible base URL (e.g. http://127.0.0.1:11434/v1 for Ollama). */
   localUrl: string;
   /** Custom endpoint model name (e.g. llama3.2). */
