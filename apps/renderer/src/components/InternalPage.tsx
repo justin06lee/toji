@@ -6,6 +6,7 @@ import {
   deleteBookmark,
   deleteMemoryFact,
   deleteReference,
+  getAgentModels,
   getAgents,
   getBookmarks,
   getImportBrowsers,
@@ -22,7 +23,7 @@ import {
   type PinnedMemory,
   type ReferenceDoc
 } from '../lib/api';
-import type { AgentChoice, AgentsStatus, InternalPage as InternalPageKind, ThinkingLevel, UserSettings } from '../types';
+import type { AgentChoice, AgentsStatus, InternalPage as InternalPageKind, ModelCatalog, ThinkingLevel, UserSettings } from '../types';
 import { bridge, type TorStatus, type VaultEntry, type VaultStatus } from '../lib/bridge';
 import { CONTAINER_COLORS, PROFILE_AVATARS, containerId as makeContainerId, type Container, type Egress } from '../lib/containers';
 import { VaultUnavailable } from './VaultBar';
@@ -634,8 +635,39 @@ const AGENT_OPTIONS: DropdownOption<AgentPick>[] = [
   { value: 'off', label: 'Off' }
 ];
 
+/**
+ * The model picker: every model every installed coding CLI reports, grouped by
+ * harness. Options carry the QUALIFIED `provider:model` id — a bare model name is
+ * routed to the default provider (Claude Code), so picking a Codex or Gemini model
+ * by its plain name used to fail on every call.
+ */
+function ModelPicker({ value, catalog, loading, onChange }: { value: string; catalog: ModelCatalog | null; loading: boolean; onChange: (id: string) => void }) {
+  const options: DropdownOption<string>[] = [{ value: '', label: 'Auto', hint: 'the default harness', group: 'Automatic' }];
+  for (const model of catalog?.models ?? []) {
+    options.push({
+      value: model.id,
+      label: model.label,
+      ...(model.resolvedModel && model.resolvedModel !== model.model ? { hint: model.resolvedModel } : { hint: model.model }),
+      group: model.providerLabel
+    });
+  }
+  // A saved model whose harness is gone (or is still being probed) stays selectable,
+  // so opening settings never silently rewrites the user's choice.
+  if (value && !options.some((o) => o.value === value)) {
+    options.push({ value, label: value, hint: loading ? 'checking…' : 'not available', group: 'Saved' });
+  }
+  return (
+    <label className="block min-w-0 flex-1">
+      <span className="mb-1 block text-[11px] text-neutral-400">Model</span>
+      <Dropdown<string> value={value} options={options} onChange={onChange} placeholder={loading ? 'Loading models…' : 'Auto'} />
+    </label>
+  );
+}
+
 function AgentSettings() {
   const [status, setStatus] = useState<AgentsStatus | null>(null);
+  const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
+  const [modelsLoading, setModelsLoading] = useState(true);
   const [agent, setAgent] = useState<AgentChoice>('yagami');
   const [agentModel, setAgentModel] = useState('');
   const [agentThinking, setAgentThinking] = useState<ThinkingLevel>('default');
@@ -660,6 +692,22 @@ function AgentSettings() {
   useEffect(() => {
     void refresh().catch(() => {});
   }, [refresh]);
+
+  // Probing the harnesses spawns a process each, so it runs once on open (the server
+  // caches the result) and again only when the user asks for a rescan.
+  const loadModels = useCallback(async (rescan = false) => {
+    setModelsLoading(true);
+    try {
+      setCatalog(await getAgentModels(rescan));
+    } catch {
+      setCatalog(null);
+    } finally {
+      setModelsLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    void loadModels();
+  }, [loadModels]);
 
   const apply = async (patch: Partial<UserSettings>) => {
     const next: Partial<UserSettings> = {
@@ -716,24 +764,44 @@ function AgentSettings() {
         {agent === 'yagami' && (
           <div className="space-y-2.5">
             {status && (
-              <div className="flex flex-wrap gap-x-4 gap-y-1.5 px-0.5 text-[12px] text-neutral-500">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-0.5 text-[12px] text-neutral-500">
                 {installed.map((p) => (
-                  <span key={p.id} className="inline-flex items-center gap-1.5">
-                    <StatusDot state="on" />
+                  // Installed but unusable (not signed in, ACP handshake failed) reads as
+                  // hollow, not on — it can't actually serve a model.
+                  <span key={p.id} className="inline-flex items-center gap-1.5" title={p.error ?? undefined}>
+                    <StatusDot state={p.usable ? 'on' : 'off'} />
                     {p.label}
+                    {!p.usable && <span className="text-neutral-400">· unavailable</span>}
                   </span>
                 ))}
                 {installed.length === 0 && <span className="inline-flex items-center gap-1.5"><StatusDot state="off" /> No coding CLIs detected</span>}
+                <button
+                  type="button"
+                  onClick={() => void loadModels(true)}
+                  disabled={modelsLoading}
+                  className="inline-flex items-center gap-1 text-[11.5px] text-neutral-400 transition hover:text-neutral-600 disabled:opacity-50 dark:hover:text-neutral-200"
+                >
+                  <RefreshCw size={11} className={modelsLoading ? 'animate-spin' : ''} /> Rescan
+                </button>
               </div>
             )}
             <div className="flex gap-2">
-              <ProviderField label="Model (optional)" value={agentModel} onChange={setAgentModel} placeholder="auto — or e.g. sonnet, codex:gpt-5.6-sol" />
+              <ModelPicker value={agentModel} catalog={catalog} loading={modelsLoading} onChange={(v) => void apply({ agentModel: v })} />
               <label className="w-[140px] shrink-0">
                 <span className="mb-1 block text-[11px] text-neutral-400">Thinking</span>
-                <Dropdown<ThinkingLevel> value={agentThinking} options={THINKING} onChange={(v) => void apply({ agentThinking: v })} />
+                <Dropdown<ThinkingLevel>
+                  value={agentThinking}
+                  options={THINKING}
+                  disabled={status ? !status.yagami.supportsEffort : false}
+                  onChange={(v) => void apply({ agentThinking: v })}
+                />
               </label>
-              {saveButton}
             </div>
+            {status && !status.yagami.supportsEffort && (
+              <p className="px-0.5 text-[11.5px] text-neutral-400">
+                {status.yagami.modelProvider ?? 'This harness'} has no reasoning-effort control, so Thinking does not apply to this model.
+              </p>
+            )}
           </div>
         )}
         {agent === 'local' && (
@@ -754,6 +822,12 @@ function AgentSettings() {
             <span className="inline-flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Saving…</span>
           ) : agent === 'off' ? (
             <span className="inline-flex items-center gap-1.5"><StatusDot state="off" /> Demo mode — no model</span>
+          ) : agent === 'yagami' && status?.yagami.unknownModel ? (
+            // The saved model belongs to no installed harness — every call would fail,
+            // so this must not read as "Ready".
+            <span className="inline-flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+              <StatusDot state="off" /> “{status.yagami.model}” is not offered by any installed CLI — pick another model
+            </span>
           ) : status?.available ? (
             <span className="inline-flex items-center gap-1.5 text-neutral-600 dark:text-neutral-300">
               <StatusDot state="on" />

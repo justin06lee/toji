@@ -18,6 +18,7 @@ import { getCachedPage, putCachedPage } from './lib/pageCache.js';
 import { nextAgentAction, researchHelp } from './agents/webAgent.js';
 import { agentAvailable, liveModelName } from './agents/model.js';
 import { agentStatus, refreshDetection, setAgentChoice, setApiConfig } from './agents/agentRuntime.js';
+import { modelCatalog, warmCatalog } from './agents/yagamiCatalog.js';
 import { addFact, listFacts, removeFact, readPinned, writePinned, PINNED_CAPS } from './lib/memory.js';
 import { detectBrowsers, importBookmarks } from './lib/browserImport.js';
 import { listBookmarks, addBookmarks, removeBookmark } from './lib/bookmarks.js';
@@ -207,6 +208,16 @@ app.get('/api/agents', (_req, res) => {
     model: liveModelName(),
     ...agentStatus()
   });
+});
+
+// Every model every installed harness reports — the settings model picker. Probing
+// spawns a short-lived process per harness, so results are cached; ?refresh=1 re-probes.
+app.get('/api/agents/models', async (req, res, next) => {
+  try {
+    res.json(await modelCatalog(req.query.refresh === '1'));
+  } catch (error) {
+    next(error);
+  }
 });
 
 // Store a file the user dropped onto the agent (e.g. a resume). Written to the data
@@ -612,6 +623,9 @@ try {
   // Defaults (env-seeded) apply if settings can't be read.
   console.warn('[toji] Failed to load settings at boot, using env defaults:', error instanceof Error ? error.message : error);
 }
+// Probe the harnesses for their models in the background: a saved bare model id can
+// only be routed to its owning provider once the catalog knows who owns it.
+warmCatalog();
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });

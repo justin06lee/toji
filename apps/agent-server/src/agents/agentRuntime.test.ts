@@ -38,8 +38,15 @@ describe('backend resolution', () => {
     setAgentChoice({ agent: 'yagami', agentModel: 'codex:gpt-5.6-sol', agentThinking: 'high' });
     const backend = getActiveBackend();
     // On a machine with no harness installed the backend is null; with one, it's yagami.
+    // The catalog is unprobed here, so an already-qualified id passes through untouched.
     if (backend) {
-      expect(backend).toEqual({ kind: 'yagami', model: 'codex:gpt-5.6-sol', label: 'Yagami · codex:gpt-5.6-sol', thinking: 'high' });
+      expect(backend).toEqual({
+        kind: 'yagami',
+        model: 'codex:gpt-5.6-sol',
+        label: 'Yagami · codex:gpt-5.6-sol',
+        thinking: 'high',
+        supportsEffort: true
+      });
     } else {
       expect(backend).toBeNull();
     }

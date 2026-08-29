@@ -1,5 +1,6 @@
 import { detectProviders, type DetectedProvider } from '@justin06lee/yagami';
 import { config } from '../config.js';
+import { cachedCatalog, capabilitiesFor, findModel, qualifyModel } from './yagamiCatalog.js';
 
 // Toji's inference runs through yagami: an embedded, zero-config engine that drives
 // the coding-agent CLIs already installed and signed in on this machine (Claude Code,
@@ -107,10 +108,12 @@ export function setApiConfig(cfg: Partial<ApiConfig>) {
 
 export interface YagamiBackend {
   kind: 'yagami';
-  /** '' routes to yagami's default provider/model. */
+  /** Qualified `provider:model` ('' routes to yagami's default provider/model). */
   model: string;
   label: string;
   thinking: ThinkingLevel;
+  /** False when the model's provider ignores reasoning effort (most ACP harnesses). */
+  supportsEffort: boolean;
 }
 
 export interface ApiBackend {
@@ -126,8 +129,18 @@ export type Backend = YagamiBackend | ApiBackend;
 
 function yagamiBackend(tuning: AgentTuning): YagamiBackend | null {
   if (!yagamiUsable()) return null;
-  const model = tuning.agentModel;
-  return { kind: 'yagami', model, label: `Yagami · ${model || 'auto'}`, thinking: tuning.agentThinking };
+  // Qualify before use: a bare id like "gpt-5.6-luna" would otherwise be routed to
+  // the default provider (Claude Code) and rejected on every single call.
+  const model = qualifyModel(tuning.agentModel);
+  const entry = findModel(model);
+  const label = entry ? `${entry.providerLabel} · ${entry.label}` : model || 'auto';
+  return {
+    kind: 'yagami',
+    model,
+    label: `Yagami · ${label}`,
+    thinking: tuning.agentThinking,
+    supportsEffort: capabilitiesFor(model)?.effort ?? true
+  };
 }
 
 function localBackend(tuning: AgentTuning): ApiBackend | null {
@@ -162,12 +175,32 @@ export function agentAvailable(): boolean {
 /** Backend status for the settings UI (never exposes key values). */
 export function agentStatus() {
   const choice = userChoice ?? envChoice();
+  const catalog = cachedCatalog();
+  const model = qualifyModel(choice.agentModel, catalog);
+  const entry = findModel(model, catalog);
+  const capabilities = capabilitiesFor(model, catalog);
+  // A model the catalog has probed and does not have is one no harness can run —
+  // report it so the UI doesn't say "Ready" while every call fails.
+  const unknownModel = Boolean(model) && catalog.models.length > 0 && !entry && !catalog.providers.some((p) => p.id === model);
   return {
     choice: choice.agent,
     yagami: {
-      providers: detectHarnesses().map(({ id, label, installed }) => ({ id, label, installed })),
+      providers: detectHarnesses().map(({ id, label, installed }) => {
+        const probed = catalog.providers.find((p) => p.id === id);
+        return {
+          id,
+          label,
+          installed,
+          usable: probed?.usable ?? installed,
+          ...(probed?.error ? { error: probed.error } : {})
+        };
+      }),
       anyInstalled: yagamiUsable(),
-      model: choice.agentModel
+      model,
+      ...(entry ? { modelLabel: entry.label, modelProvider: entry.providerLabel } : {}),
+      unknownModel,
+      supportsEffort: capabilities?.effort ?? true,
+      supportsVision: capabilities?.images ?? false
     },
     local: { configured: Boolean(apiConfig.localUrl && apiConfig.localModel), url: apiConfig.localUrl, model: apiConfig.localModel }
   };

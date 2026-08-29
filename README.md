@@ -122,9 +122,12 @@ against fresh geometry before dispatching it.
 
 Inference is zero-config: Toji embeds [yagami](https://github.com/justin06lee/yagami),
 which drives whichever coding-agent CLIs you are already signed into (Claude Code, Codex,
-opencode, Gemini CLI, any ACP agent) — no API keys, nothing to paste. If you'd rather use
-your own hardware, point it at any OpenAI-compatible endpoint — Ollama, LM Studio, vLLM,
-or a home server.
+opencode, Gemini CLI, any ACP agent) — no API keys, nothing to paste. Settings lists every
+model each signed-in CLI reports, grouped by harness, and each one runs on the harness that
+owns it — not just the Claude ones. Controls a harness doesn't have (reasoning effort on
+ACP agents, for instance) are shown as unavailable rather than silently ignored. If you'd
+rather use your own hardware, point it at any OpenAI-compatible endpoint — Ollama, LM
+Studio, vLLM, or a home server.
 
 The credential vault is deliberately opaque to the agent: it can use a saved login by name
 without ever seeing it.
