@@ -81,7 +81,7 @@ export function AgentSpotlight({ target, insetLeft = 0, running, pendingAsk, log
         transition={{ duration: 0.12, ease: 'easeOut' }}
       >
         {log.length > 0 && (
-          <div ref={logRef} className="max-h-[42vh] space-y-2 overflow-y-auto border-b border-black/[0.06] px-4 py-4 dark:border-white/[0.08]">
+          <div ref={logRef} className="select-text max-h-[42vh] space-y-2 overflow-y-auto border-b border-black/[0.06] px-4 py-4 dark:border-white/[0.08]">
             {log.map((l, i) => (
               <div key={i} className={`flex gap-2 ${l.role === 'you' ? 'justify-end' : ''}`}>
                 {l.role !== 'you' && <MousePointer2 size={14} className="mt-1 shrink-0 text-neutral-400" />}

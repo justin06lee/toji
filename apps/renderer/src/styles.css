@@ -40,6 +40,33 @@ body {
   color: #fafafa; /* neutral-50 */
 }
 
+/* The app shell is chrome, not a document: it should behave like native UI, so its
+   labels, placeholders, icons and logos are not selectable and its images cannot be
+   dragged out. Real page content is untouched — web pages live in a <webview> and AI
+   answer pages in an <iframe>, and CSS does not cross into either document. Scoped to
+   body rather than #root so the portal'd menus and dropdowns are covered too.
+   Selection is handed back wherever the text is genuinely the user's to take. */
+body {
+  user-select: none;
+  -webkit-user-select: none;
+}
+input,
+textarea,
+[contenteditable='true'],
+.select-text,
+.select-text * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+/* Chrome imagery (the logo, favicons, avatars) is furniture — dragging one should not
+   start an HTML5 image/link drag, which also stole tab-reorder drags that began on a
+   favicon. This is separate from -webkit-app-region and from pointer-driven reordering. */
+img,
+a,
+svg {
+  -webkit-user-drag: none;
+}
+
 /* Hidden-but-functional scrollbars */
 * { scrollbar-width: none; }
 *::-webkit-scrollbar { display: none; }
