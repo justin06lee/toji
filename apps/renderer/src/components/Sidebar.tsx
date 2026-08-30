@@ -274,7 +274,9 @@ function DraggableTabRow({ tab, active, constraintsRef, agentRunning, onSelect, 
       }}
       onDragEnd={() => setDragging(false)}
       whileDrag={{ zIndex: 50 }}
-      className={`relative rounded-lg ${dragging ? 'sidebar-tab-dragging bg-[var(--tab-active)]' : ''}`}
+      /* Only the stacking order changes while dragging — the row inside already paints
+         its own opaque surface, so the tab looks exactly as it does at rest. */
+      className={`relative rounded-lg ${dragging ? 'sidebar-tab-dragging' : ''}`}
     >
       <TabRow tab={tab} active={active} indent={false} dragging={dragging} agentRunning={agentRunning} onSelect={onSelect} onClose={onClose} onContext={onContext} />
     </Reorder.Item>

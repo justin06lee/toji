@@ -126,12 +126,11 @@ body {
   overscroll-behavior-inline: contain;
   scroll-behavior: smooth;
 }
-/* A dragged tab rides OVER its neighbours, so it must be opaque (see the --tab-*
-   surfaces) and read as lifted — otherwise the tab underneath shows straight through it. */
-.top-tab-dragging { z-index: 90 !important; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16); }
-.sidebar-tab-dragging { z-index: 50 !important; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16); }
-.dark .top-tab-dragging,
-.dark .sidebar-tab-dragging { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); }
+/* A dragged tab is the SAME tab, just moving: no shadow, no lift, nothing that says
+   "picked up". It only needs to sit above its neighbours so the opaque --tab-* surface
+   actually covers them instead of showing the tab underneath. */
+.top-tab-dragging { z-index: 90 !important; }
+.sidebar-tab-dragging { z-index: 50 !important; }
 
 /* The agent's cursor mark on a tab: a slow breath, so a driven tab is noticeable in
    peripheral vision without the twitch of a blinking dot. */
