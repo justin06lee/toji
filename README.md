@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/toji.svg" alt="toji" width="420" />
+<img src="assets/toji.png" alt="toji" width="420" />
 
 # toji
 
