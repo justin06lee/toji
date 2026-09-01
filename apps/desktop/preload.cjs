@@ -40,6 +40,14 @@ contextBridge.exposeInMainWorld('toji', {
     ipcRenderer.on('toji:window-cursor', handler);
     return () => ipcRenderer.removeListener('toji:window-cursor', handler);
   },
+  // Dragging the notch is driven from the main process rather than by a native drag
+  // region, so the notch keeps its grab cursor and its double-click. The renderer only
+  // says when the grab starts and ends; the main process follows the cursor.
+  startWindowDrag: () => ipcRenderer.send('toji:window-drag-start'),
+  endWindowDrag: () => ipcRenderer.send('toji:window-drag-end'),
+  // Double-clicking the notch does whatever double-clicking a title bar does here
+  // (zoom on macOS unless the user chose otherwise, maximize/restore elsewhere).
+  windowTitleAction: () => ipcRenderer.send('toji:window-title-action'),
   // Set a dropped file onto a <input type=file> inside a guest <webview> (the agent
   // attaching e.g. a resume). Done in the main process via the Chrome DevTools
   // Protocol because the renderer can't set a file input programmatically.

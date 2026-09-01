@@ -180,16 +180,16 @@ export function Sidebar({ tabs, groups, activeId, onSelect, onClose, onNewTab, o
       className={`${peek ? '' : 'drag '}relative flex w-60 shrink-0 select-none flex-col border-r border-black/[0.07] bg-black/[0.015] dark:border-white/10 dark:bg-white/[0.02]`}
       data-testid="sidebar"
     >
-      {/* The left rail moves the window. It keeps its full width, but every row is
-          stacked ABOVE it (z-30) and marked no-drag, so wherever a tab or button
-          actually sits the click belongs to that control and only the space AROUND
-          them drags the window. That is what lets the tabs sit this close to the edge. */}
-      {!peek && <div className="drag absolute inset-y-0 left-0 z-20 w-5" data-testid="sidebar-drag-edge" aria-hidden />}
-      <div className="no-drag relative z-30 ml-2 flex items-center gap-1 py-2 pr-2">
+      {/* The whole sidebar moves the window; only the controls themselves are carved
+          out of it (no-drag, below). Nothing here is a blanket no-drag container, so
+          the grabbable region is everything the tabs don't literally cover — both
+          margins, the gaps between rows, and all the empty space under the last tab —
+          without any of it pushing the tabs away from the edge. */}
+      <div className="relative z-30 ml-2 flex items-center gap-1 py-2 pr-2">
         <button
           type="button"
           onClick={() => onNewTab(null)}
-          className="flex flex-1 items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13px] text-neutral-500 transition-colors hover:bg-black/5 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-neutral-100"
+          className="no-drag flex flex-1 items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13px] text-neutral-500 transition-colors hover:bg-black/5 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-neutral-100"
         >
           <Plus size={15} /> New tab
         </button>
@@ -198,19 +198,19 @@ export function Sidebar({ tabs, groups, activeId, onSelect, onClose, onNewTab, o
           aria-label={peek ? 'Show sidebar' : 'Hide sidebar'}
           title={peek ? 'Show sidebar (keep it open)' : 'Hide sidebar'}
           onClick={onToggleCollapse}
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-black/5 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-neutral-100"
+          className="no-drag inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-black/5 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-neutral-100"
         >
           {peek ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
         </button>
       </div>
 
-      <div className="no-drag ml-2 flex-1 space-y-0.5 overflow-y-auto pr-2 pb-2">
+      <div className="ml-2 flex-1 space-y-0.5 overflow-y-auto pr-2 pb-2">
         {groups.map((group, index) => {
           const color = GROUP_COLORS[index % GROUP_COLORS.length];
           const groupTabs = tabs.filter((t) => t.groupId === group.id);
           return (
             <div key={group.id} className="group/grp">
-              <div className="relative z-30 flex h-8 items-center gap-1.5 rounded-lg px-1.5 hover:bg-black/[0.03] dark:hover:bg-white/[0.04]">
+              <div className="no-drag relative z-30 flex h-8 items-center gap-1.5 rounded-lg px-1.5 hover:bg-black/[0.03] dark:hover:bg-white/[0.04]">
                 <button type="button" aria-label={group.collapsed ? 'Expand group' : 'Collapse group'} onClick={() => onToggleGroup(group.id)} className="inline-flex h-5 w-5 items-center justify-center text-neutral-400">
                   {group.collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
                 </button>

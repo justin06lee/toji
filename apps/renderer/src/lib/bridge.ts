@@ -107,6 +107,11 @@ export interface TojiBridge {
   // --- window chrome ---
   /** Cursor tracking for the window-drag notch; see WindowCursor. */
   onWindowCursor?: (callback: (cursor: WindowCursor) => void) => () => void;
+  /** Grab the window: the main process follows the cursor until endWindowDrag. */
+  startWindowDrag?: () => void;
+  endWindowDrag?: () => void;
+  /** The platform's title-bar double-click action (zoom / maximize / minimize). */
+  windowTitleAction?: () => void;
 }
 
 export const bridge = (): TojiBridge => (window as unknown as { toji?: TojiBridge }).toji ?? {};

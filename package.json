@@ -54,6 +54,26 @@
         "dmg"
       ]
     },
+    "linux": {
+      "icon": "apps/desktop/build/icon.png",
+      "category": "Network;WebBrowser",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
     "dmg": {
       "title": "Toji",
       "window": {

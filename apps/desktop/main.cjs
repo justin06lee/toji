@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, shell, nativeImage, webContents, dialog, session, screen } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, shell, nativeImage, webContents, dialog, session, screen, systemPreferences } = require('electron');
 const { spawn } = require('node:child_process');
 const { applySessionPolicy, applyWebRtcPolicy, parsePartition } = require('./policy.cjs');
 const { TorController } = require('./tor.cjs');
@@ -527,10 +527,16 @@ function openInToji(url, targetWindow = focusedWindow()) {
 // those. So while a window is focused, its cursor position is polled here and
 // streamed to the renderer as window-relative coordinates.
 const CURSOR_POLL_MS = 80;
+// While the window is being moved or resized, the cursor and the window's bounds are
+// changing together but are sampled independently, so the window-relative position
+// this computes swings wildly for a frame or two and the notch flickers in and out.
+// Reports are frozen for the move and resume once the window has been still this long.
+const CHROME_SETTLE_MS = 220;
 
 function attachCursorTracker(win) {
   let timer = null;
   let last = null;
+  let settling = null;
   const send = (cursor) => {
     if (win.isDestroyed()) return;
     if (last && last.x === cursor.x && last.y === cursor.y && last.inside === cursor.inside) return;
@@ -543,6 +549,7 @@ function attachCursorTracker(win) {
   };
   const tick = () => {
     if (win.isDestroyed()) return stop();
+    if (settling !== null) return; // mid-move: whatever the renderer last heard is still the truth
     const point = screen.getCursorScreenPoint();
     const bounds = win.getContentBounds();
     const x = point.x - bounds.x;
@@ -552,14 +559,102 @@ function attachCursorTracker(win) {
   const start = () => {
     if (timer === null) timer = setInterval(tick, CURSOR_POLL_MS);
   };
+  const settle = () => {
+    if (settling !== null) clearTimeout(settling);
+    settling = setTimeout(() => {
+      settling = null;
+      tick();
+    }, CHROME_SETTLE_MS);
+  };
   win.on('focus', start);
   win.on('blur', () => {
     stop();
     send({ x: -1, y: -1, width: 0, height: 0, inside: false });
   });
-  win.on('closed', stop);
+  win.on('move', settle);
+  win.on('resize', settle);
+  win.on('closed', () => {
+    stop();
+    if (settling !== null) clearTimeout(settling);
+  });
   if (win.isFocused()) start();
 }
+
+// The drag notch moves the window from here instead of through a native
+// -webkit-app-region: drag rect. Native regions swallow every mouse event over them,
+// which cost the notch its grab cursor and its double-click, and left its reveal to
+// race the window's own movement; following the cursor from the main process keeps
+// all three, and works the same on Linux (where drag regions only apply to frameless
+// windows) as on macOS.
+const DRAG_FOLLOW_MS = 8;
+// A drag ends on mouse-up in the renderer. If that message never arrives — a crashed
+// or reloaded renderer — the window would follow the cursor forever, so every drag
+// also expires on its own.
+const DRAG_MAX_MS = 30_000;
+const windowDrags = new WeakMap();
+
+function stopWindowDrag(win) {
+  const drag = windowDrags.get(win);
+  if (!drag) return;
+  clearInterval(drag.timer);
+  clearTimeout(drag.expiry);
+  windowDrags.delete(win);
+}
+
+function startWindowDrag(win) {
+  stopWindowDrag(win);
+  if (win.isFullScreen()) return; // a full-screen window has nowhere to go
+  if (win.isMaximized()) win.unmaximize();
+  const origin = screen.getCursorScreenPoint();
+  const start = win.getBounds();
+  const timer = setInterval(() => {
+    if (win.isDestroyed()) return stopWindowDrag(win);
+    const point = screen.getCursorScreenPoint();
+    const x = start.x + point.x - origin.x;
+    const y = start.y + point.y - origin.y;
+    const now = win.getBounds();
+    if (now.x === x && now.y === y) return;
+    win.setBounds({ x, y, width: start.width, height: start.height });
+  }, DRAG_FOLLOW_MS);
+  windowDrags.set(win, { timer, expiry: setTimeout(() => stopWindowDrag(win), DRAG_MAX_MS) });
+}
+
+/**
+ * What double-clicking the window's title area does. On macOS that is whatever the
+ * user set under Appearance ("Zoom", "Minimize", "Do Nothing"); everywhere else it
+ * is the usual maximize/restore toggle.
+ */
+function titleBarDoubleClick(win) {
+  if (process.platform === 'darwin') {
+    let action = 'Maximize';
+    try {
+      action = systemPreferences.getUserDefault('AppleActionOnDoubleClick', 'string') || 'Maximize';
+    } catch {
+      // No preference set (or unreadable): fall through to the system default, zoom.
+    }
+    if (action === 'Minimize') return win.minimize();
+    if (action === 'None') return;
+  }
+  if (win.isFullScreen()) return;
+  if (win.isMaximized()) win.unmaximize();
+  else win.maximize();
+}
+
+ipcMain.on('toji:window-drag-start', (event) => {
+  const win = windowForContents(event.sender);
+  if (win) startWindowDrag(win);
+});
+ipcMain.on('toji:window-drag-end', (event) => {
+  const win = windowForContents(event.sender);
+  if (win) stopWindowDrag(win);
+});
+ipcMain.on('toji:window-title-action', (event) => {
+  const win = windowForContents(event.sender);
+  if (win) {
+    stopWindowDrag(win);
+    titleBarDoubleClick(win);
+  }
+});
 
 function createWindow(containerId = null) {
   const win = new BrowserWindow({
@@ -583,8 +678,13 @@ function createWindow(containerId = null) {
     }
   });
   appWindows.add(win);
-  win.on('closed', () => appWindows.delete(win));
-  attachCursorTracker(win);
+  win.on('closed', () => {
+    appWindows.delete(win);
+    stopWindowDrag(win);
+  });
+  // Only macOS hides the title bar, so only macOS renders the drag notch the cursor
+  // stream exists to reveal. Elsewhere the poll would run for nobody.
+  if (process.platform === 'darwin') attachCursorTracker(win);
   attachContainerPolicy(win.webContents);
 
   // In production the bundled agent server serves the renderer over http:// so it

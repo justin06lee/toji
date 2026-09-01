@@ -75,14 +75,16 @@ svg {
 .drag { -webkit-app-region: drag; }
 .no-drag { -webkit-app-region: no-drag; }
 
-/* A native draggable notch, rendered only while the main process reports the cursor
-   near the top of the window (see revealDragHandle). Reveal can never come from CSS
-   hover or DOM mouse events: native drag regions swallow those on macOS. */
+/* The notch is revealed by the main process's cursor stream (see revealDragHandle),
+   because the chrome AROUND it is a native drag region and macOS delivers no mouse
+   events over those. The strip is only the positioning frame: it is transparent to
+   both the pointer and the OS, so the chrome beneath keeps whatever behaviour it had
+   and the notch never steals a click from the tabs it floats over. */
 .drag-strip {
   position: fixed;
   top: 0;
   z-index: 80;
-  -webkit-app-region: drag;
+  pointer-events: none;
   display: flex;
   justify-content: center;
   align-items: flex-start;
@@ -102,9 +104,13 @@ svg {
   height: 18px;
 }
 .drag-notch {
-  /* Grabbable: dragging the visible notch itself moves the window (it stays visible
-     while hovered because it's a descendant of the strip). */
-  -webkit-app-region: drag;
+  /* Explicitly NOT a native drag region: the window follows the cursor from the main
+     process instead (see startWindowDrag). That is what lets the notch show a grab
+     cursor, answer a double-click, and behave identically on Linux, where app-region
+     only applies to frameless windows. */
+  -webkit-app-region: no-drag;
+  pointer-events: auto;
+  cursor: grab;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -115,6 +121,10 @@ svg {
   border-radius: 0 0 13px 13px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
   animation: toji-drag-notch-in 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.drag-notch:active,
+.drag-notch-holding {
+  cursor: grabbing;
 }
 .dark .drag-notch {
   background: #171717;

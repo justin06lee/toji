@@ -1,6 +1,6 @@
 import { ArrowLeft, ArrowRight, Copy, FolderPlus, Moon, MousePointer2, PanelLeft, PanelTop, Plus, RefreshCcw, RotateCw, Search, Settings, Sun, WandSparkles, X } from 'lucide-react';
 import { AnimatePresence, motion, Reorder } from 'motion/react';
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { AgentSpotlight, type AgentLogEntry } from './components/AgentSpotlight';
 import { WindowProfilePicker } from './components/WindowProfilePicker';
@@ -26,7 +26,7 @@ import {
 } from './lib/containers';
 import { hostOf, isOnionUrl, looksLikeUrl, toUrl, webSearchUrl, type SearchEngineId } from './lib/nav';
 import { bridge, type TorStatus, type VaultEntry, type VaultPrompt } from './lib/bridge';
-import { revealDragHandle } from './lib/dragHandle';
+import { DRAG_HANDLE_DWELL_MS, revealDragHandle } from './lib/dragHandle';
 import { replacePristineTabWithWelcome, startBrowsingInTab } from './lib/tabLifecycle';
 import { tabTitle } from './lib/tabPresentation';
 import { GROUP_COLORS, type BrowserTab, type TabGroup } from './types';
@@ -48,6 +48,11 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const DEFAULT_AGENT_MAX_STEPS = 40;
 
 const isMac = (window as unknown as { toji?: { platform?: string } }).toji?.platform === 'darwin';
+// Only macOS hides the native title bar (titleBarStyle: 'hiddenInset'), so only macOS
+// needs a stand-in for it. On Linux and Windows the window is framed and the real title
+// bar already drags, zooms on double-click, and shows the right cursor — putting our own
+// notch there would duplicate it, and under Wayland it could not move the window anyway.
+const hasCustomTitleBar = isMac;
 // In Electron, Cmd+W / Cmd+T are owned by the app menu; the keydown fallback below is
 // only for running the renderer in a plain browser during development.
 const isElectron = Boolean((window as unknown as { toji?: unknown }).toji);
@@ -120,6 +125,11 @@ export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem('toji-sidebar') !== 'closed');
   const [sidebarPeek, setSidebarPeek] = useState(false);
   const [dragHandleVisible, setDragHandleVisible] = useState(false);
+  // Mirrors dragHandleVisible for the cursor stream (which reads it far more often
+  // than React re-renders), and pins it while the pointer is on the notch or holding it.
+  const dragHandleVisibleRef = useRef(false);
+  const dragHandleHeldRef = useRef(false);
+  const [dragHandleHolding, setDragHandleHolding] = useState(false);
   const [topTabsCrowded, setTopTabsCrowded] = useState(false);
   const [draggingTopTabId, setDraggingTopTabId] = useState<string | null>(null);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tabId: string } | null>(null);
@@ -220,13 +230,72 @@ export function App() {
     };
   }, [layout, tabs.length]);
   // The window-drag notch reveals from the tracked cursor position streamed by the
-  // main process, never from DOM hover: the top chrome is a native drag region, so
-  // mouse events over it are swallowed by the OS (hover state there never fired, and
-  // flickered once the notch — itself a drag region — appeared under the pointer).
+  // main process, never from DOM hover: the chrome around it is a native drag region,
+  // so mouse events over that are swallowed by the OS and hover there never fires.
+  // Two things keep it steady rather than strobing: it never hides while the pointer
+  // is actually on it (the notch itself is not a drag region, so it does get hover),
+  // and hiding waits out a brief dwell so one stray sample can't blink it away.
+  const setDragHandle = useCallback((visible: boolean) => {
+    if (dragHandleVisibleRef.current === visible) return;
+    dragHandleVisibleRef.current = visible;
+    setDragHandleVisible(visible);
+  }, []);
   useEffect(() => {
-    setDragHandleVisible(false);
-    return bridge().onWindowCursor?.((cursor) => setDragHandleVisible((prev) => revealDragHandle(cursor, prev, layout)));
-  }, [layout]);
+    setDragHandle(false);
+    let hideTimer: ReturnType<typeof setTimeout> | null = null;
+    const cancelHide = () => {
+      if (hideTimer === null) return;
+      clearTimeout(hideTimer);
+      hideTimer = null;
+    };
+    const off = bridge().onWindowCursor?.((cursor) => {
+      const shown = dragHandleVisibleRef.current;
+      if (dragHandleHeldRef.current || revealDragHandle(cursor, shown, layout)) {
+        cancelHide();
+        setDragHandle(true);
+        return;
+      }
+      if (!shown || hideTimer !== null) return;
+      hideTimer = setTimeout(() => {
+        hideTimer = null;
+        if (!dragHandleHeldRef.current) setDragHandle(false);
+      }, DRAG_HANDLE_DWELL_MS);
+    });
+    return () => {
+      cancelHide();
+      off?.();
+    };
+  }, [layout, setDragHandle]);
+  // Grabbing the notch hands the window to the main process, which follows the cursor
+  // until we let go. Letting go is watched on the whole window, not just the notch: the
+  // pointer can outrun a window that has hit a screen edge, and a drag that never ends
+  // would leave the window stuck to the cursor.
+  const releaseWindowDrag = useCallback(() => {
+    if (!dragHandleHeldRef.current) return;
+    dragHandleHeldRef.current = false;
+    setDragHandleHolding(false);
+    bridge().endWindowDrag?.();
+  }, []);
+  const holdWindowDrag = useCallback(
+    (event: ReactMouseEvent) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      dragHandleHeldRef.current = true;
+      setDragHandleHolding(true);
+      setDragHandle(true);
+      bridge().startWindowDrag?.();
+    },
+    [setDragHandle]
+  );
+  useEffect(() => {
+    if (!dragHandleHolding) return;
+    window.addEventListener('mouseup', releaseWindowDrag);
+    window.addEventListener('blur', releaseWindowDrag);
+    return () => {
+      window.removeEventListener('mouseup', releaseWindowDrag);
+      window.removeEventListener('blur', releaseWindowDrag);
+    };
+  }, [dragHandleHolding, releaseWindowDrag]);
   // Vertical wheel scrolls the horizontal tab strip. Registered natively because React
   // attaches onWheel as a PASSIVE listener, where preventDefault() is a no-op.
   useEffect(() => {
@@ -1306,13 +1375,31 @@ export function App() {
   const iconBtn =
     'no-drag inline-flex items-center justify-center rounded-full text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-black/5 dark:hover:bg-white/10 transition-colors disabled:opacity-35 disabled:pointer-events-none';
 
-  // The visible "grab here" notch, itself a native drag region. It mounts only while
-  // revealDragHandle says the tracked cursor is near the top band (see the
-  // onWindowCursor effect) — it must unmount when hidden, because a merely
-  // transparent drag region would still steal clicks from the tabs beneath it.
+  // The visible "grab here" notch. It mounts only while revealDragHandle says the
+  // tracked cursor is near the top band (see the onWindowCursor effect) — it must
+  // unmount when hidden, because even a transparent handle would steal clicks from
+  // the tabs beneath it.
+  //
+  // It is deliberately NOT a native -webkit-app-region: drag rect. Those swallow every
+  // mouse event, which is why the notch had no grab cursor and no double-click, and why
+  // it flickered. Instead the main process follows the cursor between drag-start and
+  // drag-end, which behaves the same on macOS and on Linux (where drag regions only
+  // work on frameless windows at all).
   const windowDragHandle = (placement: 'side' | 'tabs') => (
     <div className={`drag-strip drag-strip-${placement}`} data-testid="window-drag-handle" aria-hidden>
-      <span className="drag-notch">
+      <span
+        className={`drag-notch${dragHandleHolding ? ' drag-notch-holding' : ''}`}
+        data-testid="window-drag-notch"
+        role="presentation"
+        title="Drag to move the window — double-click to zoom"
+        onMouseDown={holdWindowDrag}
+        onMouseUp={releaseWindowDrag}
+        onMouseEnter={() => setDragHandle(true)}
+        onDoubleClick={() => {
+          releaseWindowDrag();
+          bridge().windowTitleAction?.();
+        }}
+      >
         <span className="drag-grip">
           {Array.from({ length: 12 }, (_, i) => (
             <i key={i} />
@@ -1655,7 +1742,7 @@ export function App() {
   if (layout === 'side') {
     return (
       <div className="flex h-screen flex-col bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
-        {dragHandleVisible && windowDragHandle('side')}
+        {hasCustomTitleBar && dragHandleVisible && windowDragHandle('side')}
         <header className="drag relative shrink-0 border-b border-black/[0.07] px-3 pt-2.5 pb-2.5 dark:border-white/10">
           {addressRow}
           {vaultBar && <div className="mt-2">{vaultBar}</div>}
@@ -1694,7 +1781,7 @@ export function App() {
 
   return (
     <div className="flex h-screen flex-col bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
-      {topTabsCrowded && dragHandleVisible && windowDragHandle('tabs')}
+      {hasCustomTitleBar && topTabsCrowded && dragHandleVisible && windowDragHandle('tabs')}
       <header className="drag relative shrink-0 border-b border-black/[0.07] px-3 pt-2.5 pb-2.5 dark:border-white/10">
         {/* Tabs sit at the very top (offset past the macOS traffic lights); the omnibox lives
             just beneath them, flush left since nothing overlaps it there. */}
