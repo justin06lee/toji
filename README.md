@@ -102,7 +102,14 @@ make dev        # run from source with hot reload
 make update     # stop, rebuild, reinstall, relaunch
 make check      # typecheck + smoke + build + e2e
 make tor-check  # start a real Tor and verify circuits, .onion and NEWNYM
+make linux      # build the Linux packages (AppImage + deb, x64 and arm64)
 ```
+
+`make` and `make update` install to `/Applications`, so they are macOS-only; `make linux`
+builds the Linux artifacts instead. Only macOS is built and tested regularly — the Linux
+targets exist and the app avoids macOS-only chrome there (the window keeps its native title
+bar rather than Toji's drag notch, which needs APIs Wayland doesn't offer), but arm64 Linux
+has not been run end to end.
 
 `make tor-check` is the one that proves the isolation claim rather than asserting it: it
 boots an actual Tor, sends traffic for two containers through their assigned SocksPorts, and

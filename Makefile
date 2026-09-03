@@ -7,7 +7,7 @@ DEST    := /Applications/$(APP).app
 UNPACKED = release/mac-arm64/$(APP).app
 
 .DEFAULT_GOAL := all
-.PHONY: all deps app dev build stop install uninstall update check tor-check typecheck test dmg clean
+.PHONY: all deps app dev build stop install uninstall update check tor-check typecheck test dmg linux clean
 
 all: install ## Install deps, build, install to /Applications, and launch
 
@@ -57,6 +57,9 @@ check: ## Full gate: typecheck + smoke + build + e2e
 dmg: build ## Build a distributable .dmg and open it
 	@bunx electron-builder --mac dmg
 	@open release/*.dmg 2>/dev/null || true
+
+linux: build ## Build the Linux packages (AppImage + deb, x64 and arm64)
+	@bunx electron-builder --linux --x64 --arm64
 
 clean: ## Remove build output
 	@rm -rf dist release
