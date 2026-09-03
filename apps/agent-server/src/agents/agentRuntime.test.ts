@@ -8,7 +8,12 @@ describe('normalizeAgentChoice', () => {
     expect(normalizeAgentChoice('off')).toBe('off');
   });
 
-  it('routes every legacy backend name through yagami', () => {
+  it('keeps the Toji plan', () => {
+    expect(normalizeAgentChoice('toji')).toBe('toji');
+  });
+
+  it('routes every legacy backend name through yagami, never onto the paid plan', () => {
+    // A settings file from an older build must not be reinterpreted as "they subscribed".
     for (const legacy of ['claude', 'codex', 'opencode', 'auto', 'anthropic', 'openai', '', undefined]) {
       expect(normalizeAgentChoice(legacy)).toBe('yagami');
     }
@@ -49,6 +54,15 @@ describe('backend resolution', () => {
     setApiConfig({ cerebrasApiKey: 'csk-from-settings', cerebrasModel: 'gpt-oss-120b' });
     setAgentChoice({ agent: 'cerebras', agentModel: '', agentThinking: 'default' });
     expect((getActiveBackend() as { apiKey: string }).apiKey).toBe('csk-from-settings');
+  });
+
+  it('an unsubscribed Toji plan falls back rather than going dead', () => {
+    // Nothing is subscribed yet, so this must behave exactly like plain yagami; the
+    // plans page is what tells the user, not a backend that refuses to run.
+    setAgentChoice({ agent: 'toji', agentModel: 'codex:gpt-5.6-sol', agentThinking: 'default' });
+    const viaPlan = getActiveBackend();
+    setAgentChoice({ agent: 'yagami', agentModel: 'codex:gpt-5.6-sol', agentThinking: 'default' });
+    expect(viaPlan).toEqual(getActiveBackend());
   });
 
   it('off means no backend (demo mode)', () => {

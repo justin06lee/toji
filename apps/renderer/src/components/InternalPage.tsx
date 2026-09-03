@@ -1,5 +1,5 @@
-import { BookMarked, Boxes, Brain, Check, Compass, Copy, Cpu, Download, EyeOff, FileText, KeyRound, Loader2, Paperclip, Plus, Puzzle, RefreshCw, Route, Search, Star, Trash2, X } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { ArrowRight, BookMarked, Boxes, Brain, Check, Compass, Copy, Cpu, Download, EyeOff, FileText, KeyRound, Loader2, Paperclip, Plus, Puzzle, RefreshCw, Route, Search, Sparkles, Star, Trash2, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   addMemory,
   addReference,
@@ -8,6 +8,7 @@ import {
   deleteReference,
   getAgentModels,
   getAgents,
+  getBilling,
   getBookmarks,
   getCerebrasModels,
   getImportBrowsers,
@@ -24,7 +25,7 @@ import {
   type PinnedMemory,
   type ReferenceDoc
 } from '../lib/api';
-import type { AgentChoice, AgentsStatus, CerebrasModels, InternalPage as InternalPageKind, ModelCatalog, ThinkingLevel, UserSettings } from '../types';
+import type { AgentChoice, AgentsStatus, Billing, CerebrasModels, InternalPage as InternalPageKind, ModelCatalog, Plan, ThinkingLevel, UserSettings } from '../types';
 import { bridge, type TorStatus, type VaultEntry, type VaultStatus } from '../lib/bridge';
 import { CONTAINER_COLORS, PROFILE_AVATARS, containerId as makeContainerId, type Container, type Egress } from '../lib/containers';
 import { VaultUnavailable } from './VaultBar';
@@ -41,16 +42,26 @@ interface InternalPageProps {
   containers: Container[];
   onContainersChange: (containers: Container[]) => void;
   onClearContainer: (containerId: string) => void;
+  /** The question that sent the user to the plans page, so it survives the detour. */
+  pendingQuery?: string;
+  /** Run that question now, on whatever backend is configured by the time they leave. */
+  onContinue?: () => void;
+  /** Open the plans page (from Settings, where there is no room for it inline). */
+  onShowPlans?: () => void;
 }
 
-export function InternalPage({ page, onOpenUrl, onGetStarted, containers, onContainersChange, onClearContainer }: InternalPageProps) {
+export function InternalPage({ page, onOpenUrl, onGetStarted, containers, onContainersChange, onClearContainer, pendingQuery, onContinue, onShowPlans }: InternalPageProps) {
+  // The plans page is wider than the others: three tiers side by side don't fit 760px.
+  const width = page === 'plans' ? 'w-[min(1000px,94vw)]' : 'w-[min(760px,92vw)]';
   return (
     <div className="h-full w-full overflow-y-auto bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
-      <div className="mx-auto w-[min(760px,92vw)] px-6 py-12">
+      <div className={`mx-auto ${width} px-6 py-12`}>
         {page === 'welcome' ? (
           <WelcomeView onOpenUrl={onOpenUrl} onGetStarted={onGetStarted} />
+        ) : page === 'plans' ? (
+          <PlansView onOpenUrl={onOpenUrl} pendingQuery={pendingQuery} onContinue={onContinue} />
         ) : (
-          <SettingsView containers={containers} onContainersChange={onContainersChange} onClearContainer={onClearContainer} />
+          <SettingsView containers={containers} onContainersChange={onContainersChange} onClearContainer={onClearContainer} onShowPlans={onShowPlans} />
         )}
       </div>
     </div>
@@ -209,6 +220,207 @@ function WelcomeView({ onOpenUrl, onGetStarted }: { onOpenUrl: (url: string) => 
   );
 }
 
+/**
+ * The subscription page. It opens when someone on the Toji plan asks for something the
+ * plan would answer — so it is the first thing a new user sees, and it has to do two
+ * jobs at once: sell the plan, and make sure a person who does not want to pay is not
+ * stuck. Hence BringYourOwn directly below the tiers: it explains what yagami is,
+ * switches the backend in place, and hands the original question back.
+ */
+function PlansView({ onOpenUrl, pendingQuery, onContinue }: { onOpenUrl: (url: string) => void; pendingQuery?: string; onContinue?: () => void }) {
+  const [billing, setBilling] = useState<Billing | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    void getBilling()
+      .then(setBilling)
+      .catch(() => setFailed(true));
+  }, []);
+
+  const byoRef = useRef<HTMLDivElement>(null);
+  const scrollToByo = () => byoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  return (
+    <div>
+      <div className="mb-9 flex flex-col items-center text-center">
+        <img src={ICON} alt="Toji" className="mb-4 h-14 w-14 rounded-[16px] shadow-sm" />
+        <h1 className="text-3xl font-semibold tracking-tight">Toji</h1>
+        <p className="mt-2 max-w-lg text-[14px] text-neutral-500">
+          Toji does not ship a model of its own. Pick who runs one for you — us, or a coding agent you already pay for.
+        </p>
+      </div>
+
+      {failed && <p className="mb-6 rounded-xl border border-black/10 p-3 text-[13px] text-neutral-500 dark:border-white/10">Couldn&apos;t reach the local Toji server, so plans are unavailable. Everything below still works.</p>}
+
+      <div className="grid gap-4 md:grid-cols-3">
+        {(billing?.plans ?? []).map((plan) => (
+          <PlanCard key={plan.id} plan={plan} current={billing?.subscription.plan === plan.id && billing.subscription.active} onOpenUrl={onOpenUrl} onPickFree={scrollToByo} />
+        ))}
+      </div>
+
+      {billing && !billing.subscription.active && billing.plans.some((p) => p.priceUsd > 0 && !p.checkoutUrl) && (
+        <p className="mt-3 text-center text-[12px] text-neutral-400">Paid plans aren&apos;t open for sign-up yet. Toji is free and fully usable in the meantime.</p>
+      )}
+
+      <div ref={byoRef} data-testid="plans-byo" className="mt-12">
+        <BringYourOwn pendingQuery={pendingQuery} onContinue={onContinue} />
+      </div>
+    </div>
+  );
+}
+
+function PlanCard({ plan, current, onOpenUrl, onPickFree }: { plan: Plan; current: boolean; onOpenUrl: (url: string) => void; onPickFree: () => void }) {
+  const paid = plan.priceUsd > 0;
+  const purchasable = paid && Boolean(plan.checkoutUrl);
+  return (
+    <div
+      className={`flex flex-col rounded-2xl border p-5 ${
+        plan.highlight ? 'border-black/25 dark:border-white/30' : 'border-black/10 dark:border-white/10'
+      }`}
+    >
+      <div className="mb-1 flex items-center gap-2">
+        <h2 className="text-[15px] font-semibold">{plan.name}</h2>
+        {plan.highlight && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-black/[0.06] px-2 py-0.5 text-[10.5px] uppercase tracking-wide text-neutral-500 dark:bg-white/10">
+            <Sparkles size={10} /> Popular
+          </span>
+        )}
+        {current && <span className="rounded-full bg-black/[0.06] px-2 py-0.5 text-[10.5px] uppercase tracking-wide text-neutral-500 dark:bg-white/10">Current</span>}
+      </div>
+      <p className="mb-4 flex items-baseline gap-1">
+        <span className="text-[30px] font-semibold tracking-tight">{paid ? `$${plan.priceUsd}` : 'Free'}</span>
+        {paid && <span className="text-[13px] text-neutral-400">/month</span>}
+      </p>
+      <p className="mb-4 text-[13px] leading-relaxed text-neutral-500">{plan.tagline}</p>
+      <ul className="mb-5 flex-1 space-y-2">
+        {plan.features.map((feature) => (
+          <li key={feature} className="flex gap-2 text-[13px] leading-relaxed">
+            <Check size={14} className="mt-[3px] shrink-0 text-neutral-400" />
+            <span>{feature}</span>
+          </li>
+        ))}
+      </ul>
+      {paid ? (
+        <button
+          type="button"
+          disabled={!purchasable}
+          title={purchasable ? undefined : 'Sign-up opens once Toji billing is live'}
+          onClick={() => onOpenUrl(plan.checkoutUrl)}
+          className={`${purchasable ? FIELD_BUTTON : FIELD_BUTTON_QUIET} w-full`}
+        >
+          {purchasable ? (
+            <>
+              Subscribe <ArrowRight size={14} />
+            </>
+          ) : (
+            'Not open yet'
+          )}
+        </button>
+      ) : (
+        <button type="button" onClick={onPickFree} className={`${FIELD_BUTTON_QUIET} w-full`}>
+          Use your own agent
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The escape hatch, and the explanation that has to come with it: someone who lands
+ * here mid-question needs to know what "yagami" even means before being asked to pick
+ * one. Switching backend happens here rather than in Settings so the question they
+ * asked is still on screen when they continue.
+ */
+function BringYourOwn({ pendingQuery, onContinue }: { pendingQuery?: string; onContinue?: () => void }) {
+  const [status, setStatus] = useState<AgentsStatus | null>(null);
+  const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
+  const [model, setModel] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const load = useCallback(async () => {
+    const [settings, agents] = await Promise.all([getSettings(), getAgents()]);
+    setModel(settings.agentModel ?? '');
+    setStatus(agents);
+    setCatalog(await getAgentModels().catch(() => null));
+  }, []);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const use = async (nextModel: string) => {
+    setSaving(true);
+    try {
+      await saveSettings({ agent: 'yagami', agentModel: nextModel });
+      setModel(nextModel);
+      setStatus(await getAgents());
+      setSaved(true);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const installed = (status?.yagami.providers ?? []).filter((p) => p.installed);
+  const usable = installed.filter((p) => p.usable);
+  const onYagami = status?.choice === 'yagami';
+
+  return (
+    <div className="rounded-2xl border border-black/10 p-6 dark:border-white/10">
+      <h2 className="text-[15px] font-semibold">Already pay for a coding agent? Use that instead.</h2>
+      <p className="mt-2 text-[13.5px] leading-relaxed text-neutral-500">
+        Toji drives the coding-agent CLIs already installed on this machine through <strong className="font-medium text-neutral-700 dark:text-neutral-300">yagami</strong> — an
+        engine that speaks Claude Code, Codex, opencode, Gemini CLI and any ACP agent. It signs in as you already are, so there is no API key to paste and no extra bill: your
+        Claude or ChatGPT subscription answers Toji&apos;s calls. This is the Free plan, and it is the whole browser, not a trial.
+      </p>
+
+      <div className="mt-5">
+        <p className="mb-2 text-[11px] uppercase tracking-wide text-neutral-400">Found on this machine</p>
+        {installed.length === 0 ? (
+          <p className="text-[13px] text-neutral-500">
+            No coding CLIs found. Install one (Claude Code, Codex, opencode…) and it appears here, or point Toji at Cerebras or your own endpoint in Settings.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {installed.map((provider) => (
+              <span key={provider.id} className="inline-flex items-center gap-1.5 rounded-lg bg-black/[0.05] px-2.5 py-1 text-[12.5px] dark:bg-white/10">
+                <StatusDot state={provider.usable ? 'on' : 'off'} />
+                {provider.label}
+                {!provider.usable && <span className="text-neutral-400">signed out</span>}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {usable.length > 0 && (
+        <div className="mt-5 flex flex-wrap items-end gap-2">
+          <ModelPicker value={model} catalog={catalog} loading={!catalog} onChange={(v) => void use(v)} />
+          <button type="button" disabled={saving || (onYagami && saved)} onClick={() => void use(model)} className={FIELD_BUTTON}>
+            {saving ? <Loader2 size={14} className="animate-spin" /> : onYagami && saved ? <Check size={14} /> : null}
+            {onYagami && saved ? 'Using this' : 'Use this'}
+          </button>
+        </div>
+      )}
+
+      {status && (
+        <p className="mt-4 text-[12.5px] text-neutral-500">
+          Right now Toji runs <strong className="font-medium text-neutral-700 dark:text-neutral-300">{status.model}</strong>.
+        </p>
+      )}
+
+      {pendingQuery && onContinue && (
+        <div className="mt-6 border-t border-black/[0.07] pt-5 dark:border-white/10">
+          <p className="mb-2 text-[11px] uppercase tracking-wide text-neutral-400">Your question is still here</p>
+          <p className="mb-3 text-[14px]">“{pendingQuery}”</p>
+          <button type="button" onClick={onContinue} className={FIELD_BUTTON}>
+            Continue <ArrowRight size={14} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BookmarksList({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const refresh = useCallback(() => void getBookmarks().then((r) => setBookmarks(r.bookmarks)).catch(() => {}), []);
@@ -267,11 +479,13 @@ function StatusDot({ state }: { state: 'on' | 'busy' | 'off' }) {
 function SettingsView({
   containers,
   onContainersChange,
-  onClearContainer
+  onClearContainer,
+  onShowPlans
 }: {
   containers: Container[];
   onContainersChange: (containers: Container[]) => void;
   onClearContainer: (containerId: string) => void;
+  onShowPlans?: () => void;
 }) {
   return (
     <div>
@@ -279,7 +493,7 @@ function SettingsView({
       <ContainersSettings containers={containers} onChange={onContainersChange} onClear={onClearContainer} />
       <TorSettings />
       <VaultSettings containers={containers} />
-      <AgentSettings />
+      <AgentSettings onShowPlans={onShowPlans} />
       <SearchSettings />
       <MemorySettings />
     </div>
@@ -632,9 +846,10 @@ function ProviderField({ label, value, onChange, placeholder, secret }: { label:
 type AgentPick = AgentChoice | 'alpaca';
 
 const AGENT_OPTIONS: DropdownOption<AgentPick>[] = [
-  { value: 'yagami', label: 'Yagami', hint: 'automatic' },
+  { value: 'toji', label: 'Toji', hint: 'subscription' },
+  { value: 'yagami', label: 'Yagami', hint: 'your signed-in CLIs' },
   { value: 'alpaca', label: 'Alpaca', hint: 'under construction', disabled: true },
-  { value: 'cerebras', label: 'Cerebras', hint: 'hosted API' },
+  { value: 'cerebras', label: 'Cerebras', hint: 'your own key' },
   { value: 'local', label: 'Custom endpoint', hint: 'URL + key' },
   { value: 'off', label: 'Off' }
 ];
@@ -668,7 +883,7 @@ function ModelPicker({ value, catalog, loading, onChange }: { value: string; cat
   );
 }
 
-function AgentSettings() {
+function AgentSettings({ onShowPlans }: { onShowPlans?: () => void }) {
   const [status, setStatus] = useState<AgentsStatus | null>(null);
   const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
   const [modelsLoading, setModelsLoading] = useState(true);
@@ -794,8 +1009,27 @@ function AgentSettings() {
             // 'alpaca' is a placeholder with no backend behind it; every real choice applies.
             if (v === 'alpaca') return;
             void apply({ agent: v });
+            // Picking the subscription is the moment to show what it costs and what it
+            // includes, rather than leaving a chosen plan that quietly does nothing.
+            if (v === 'toji') onShowPlans?.();
           }}
         />
+        {agent === 'toji' && status && (
+          <div className="space-y-2 rounded-lg border border-black/10 p-3 text-[12.5px] dark:border-white/12">
+            <p className="flex items-center gap-2 text-neutral-500">
+              <StatusDot state={status.toji.active ? 'on' : 'off'} />
+              {status.toji.active ? `Subscribed — ${status.toji.plan}` : (status.toji.reason ?? 'No subscription')}
+            </p>
+            <p className="text-neutral-500">
+              {status.toji.fallback
+                ? `Until then Toji runs ${status.toji.fallback}, so nothing stops working.`
+                : 'No signed-in coding CLI to fall back on — pick another backend below, or install one.'}
+            </p>
+            <button type="button" onClick={() => onShowPlans?.()} className={FIELD_BUTTON_QUIET}>
+              See plans
+            </button>
+          </div>
+        )}
         {agent === 'yagami' && (
           <div className="space-y-2.5">
             {status && (

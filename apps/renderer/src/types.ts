@@ -268,7 +268,7 @@ export interface TabGroup {
 export type TabMode = 'page' | 'web';
 
 /** Built-in browser pages (chrome://-style), rendered as React, not a web page. */
-export type InternalPage = 'settings' | 'welcome';
+export type InternalPage = 'settings' | 'welcome' | 'plans';
 
 export interface BrowserTab {
   id: string;
@@ -310,7 +310,7 @@ export type ServerEvent = (
 /** 'yagami' embeds the yagami engine (signed-in coding CLIs, no keys); 'cerebras' is
  *  the hosted Cerebras API; 'local' is a custom OpenAI-compatible endpoint; 'off'
  *  forces the deterministic fallbacks. */
-export type AgentChoice = 'yagami' | 'cerebras' | 'local' | 'off';
+export type AgentChoice = 'toji' | 'yagami' | 'cerebras' | 'local' | 'off';
 export type ThinkingLevel = 'default' | 'low' | 'medium' | 'high';
 
 export interface UserSettings {
@@ -360,9 +360,28 @@ export interface AgentsStatus {
     model: string;
   };
   local: { configured: boolean; url: string; model: string };
+  /** The Toji plan: whether it is active, and what is answering calls while it isn't. */
+  toji: { plan: 'free' | 'pro' | 'max'; active: boolean; reason?: string; fallback: string };
 }
 
 /** Cerebras models the configured key can reach; `error` explains an empty list. */
+/** A Toji subscription tier, as the server describes it. */
+export interface Plan {
+  id: 'free' | 'pro' | 'max';
+  name: string;
+  priceUsd: number;
+  tagline: string;
+  features: string[];
+  highlight?: boolean;
+  /** Empty until Toji's Stripe account exists; the tier then shows as not yet on sale. */
+  checkoutUrl: string;
+}
+
+export interface Billing {
+  plans: Plan[];
+  subscription: { plan: 'free' | 'pro' | 'max'; active: boolean; reason?: string };
+}
+
 export interface CerebrasModels {
   models: Array<{ id: string; label: string }>;
   keySource: 'settings' | 'env' | 'none';

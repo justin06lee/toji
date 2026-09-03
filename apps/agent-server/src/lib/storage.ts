@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { config } from '../config.js';
 import { defaultAgentChoice, normalizeAgentChoice } from '../agents/agentRuntime.js';
+import { MANAGED_MODEL_DEFAULT } from './billing.js';
 import type { ResearchSessionState, UserSettings } from '../types.js';
 
 const sessionsDir = path.join(config.dataDir, 'sessions');
@@ -170,8 +171,10 @@ export function defaultSettings(): UserSettings {
     agentModel: agentChoice.agentModel,
     agentThinking: agentChoice.agentThinking,
     // Cerebras — the key normally comes from CEREBRAS_API_KEY in the environment and is
-    // deliberately NOT copied here; a key typed into Settings overrides it.
-    cerebrasModel: '',
+    // deliberately NOT copied here; a key typed into Settings overrides it. The model is
+    // seeded so picking Cerebras is one click rather than two; any model the account
+    // actually has can be chosen in Settings.
+    cerebrasModel: MANAGED_MODEL_DEFAULT,
     cerebrasApiKey: '',
     // Custom OpenAI-compatible endpoint — unconfigured by default; the user enters a
     // URL (and optionally a key) in Settings and it lives only in this file.

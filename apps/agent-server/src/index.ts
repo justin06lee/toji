@@ -19,6 +19,7 @@ import { nextAgentAction, researchHelp } from './agents/webAgent.js';
 import { agentAvailable, liveModelName } from './agents/model.js';
 import { agentStatus, cerebrasCredentials, refreshDetection, setAgentChoice, setApiConfig } from './agents/agentRuntime.js';
 import { listCerebrasModels } from './agents/cerebras.js';
+import { plans, subscriptionStatus } from './lib/billing.js';
 import { modelCatalog, warmCatalog } from './agents/yagamiCatalog.js';
 import { addFact, listFacts, removeFact, readPinned, writePinned, PINNED_CAPS } from './lib/memory.js';
 import { detectBrowsers, importBookmarks } from './lib/browserImport.js';
@@ -97,7 +98,7 @@ const settingsPatchSchema = z
     defaultFreshness: z.enum(['auto', 'latest', 'timeless']).optional(),
     visualAnalysis: z.boolean().optional(),
     theme: z.enum(['dark', 'system']).optional(),
-    agent: z.enum(['yagami', 'cerebras', 'local', 'off']).optional(),
+    agent: z.enum(['toji', 'yagami', 'cerebras', 'local', 'off']).optional(),
     agentModel: z.string().max(160).optional(),
     agentThinking: z.enum(['default', 'low', 'medium', 'high']).optional(),
     cerebrasModel: z.string().max(160).optional(),
@@ -200,6 +201,13 @@ app.patch('/api/settings', async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+// The Toji plans, and whether this install has a subscription. Served rather than
+// hard-coded in the UI so the price a user is shown and the price the server believes
+// in can never drift apart.
+app.get('/api/billing/plans', (_req, res) => {
+  res.json({ plans: plans(), subscription: subscriptionStatus() });
 });
 
 // Which yagami harnesses are installed, whether the custom endpoint is configured,

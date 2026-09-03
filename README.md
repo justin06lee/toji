@@ -136,20 +136,48 @@ popups are drawn by the OS outside the page so it picks from those with the keyb
 This needs a model that accepts images. Claude Code and Codex through Yagami both do;
 a text-only backend will say so rather than click blind.
 
-Inference is zero-config: Toji embeds [yagami](https://github.com/justin06lee/yagami),
-which drives whichever coding-agent CLIs you are already signed into (Claude Code, Codex,
-opencode, Gemini CLI, any ACP agent) — no API keys, nothing to paste. Settings lists every
-model each signed-in CLI reports, grouped by harness, and each one runs on the harness that
-owns it — not just the Claude ones. Controls a harness doesn't have (reasoning effort on
-ACP agents, for instance) are shown as unavailable rather than silently ignored.
+Toji does not ship a model. Who runs one for you is a setting, and there are four answers.
 
-Two hosted alternatives sit beside it in the same picker: **Cerebras**, which reads its key
-from `CEREBRAS_API_KEY` in your `.env.local` (or one you paste into Settings) and lists the
-models that key can reach; and any **OpenAI-compatible endpoint** you point it at, if you'd
-rather use your own hardware — Ollama, LM Studio, vLLM, or a home server.
+**Yagami** is the zero-config one: Toji embeds
+[yagami](https://github.com/justin06lee/yagami), which drives whichever coding-agent CLIs
+you are already signed into (Claude Code, Codex, opencode, Gemini CLI, any ACP agent) — no
+API keys, nothing to paste, and no second bill, since your existing subscription answers
+the calls. Settings lists every model each signed-in CLI reports, grouped by harness, and
+each one runs on the harness that owns it — not just the Claude ones. Controls a harness
+doesn't have (reasoning effort on ACP agents, for instance) are shown as unavailable rather
+than silently ignored.
+
+**Cerebras** reads its key from `CEREBRAS_API_KEY` in your `.env.local` (or one you paste
+into Settings) and lists the models that key can reach. Any **OpenAI-compatible endpoint**
+works too, if you'd rather use your own hardware — Ollama, LM Studio, vLLM, or a home
+server.
+
+The fourth is **Toji** itself — see Plans below.
 
 The credential vault is deliberately opaque to the agent: it can use a saved login by name
 without ever seeing it.
+
+## Plans
+
+A new install starts on the **Toji** plan, and the first thing it asks for opens the plans
+page rather than an answer. That page exists to be honest about a trade: Toji can run
+inference for you (managed Cerebras access, nothing to install or paste) for $20/month on
+Pro or $60/month on Max — or you can pay nothing and point Toji at a coding agent you
+already have.
+
+So the free route is not buried. Directly under the tiers, the same page explains what
+yagami is, shows which CLIs it found on your machine, and switches the backend in place —
+and the question that sent you there is still on screen, with a button to carry on. Nobody
+has to guess what "yagami" means or retype what they were asking.
+
+Only the choice of plan is a default; nothing is a trial. On Free, every part of the
+browser works — profiles, Tor, the vault, the agent — for as long as you like.
+
+> **Billing is not connected yet.** The paid tiers show as unavailable, no payment
+> processor is wired up, and `subscriptionStatus()` in `apps/agent-server/src/lib/billing.ts`
+> reports the free tier unconditionally. Because there is no Toji service to check against,
+> an unsubscribed Toji plan simply runs whatever CLI you are signed into, so choosing it
+> never takes away a setup that already worked.
 
 ## What this does not do
 

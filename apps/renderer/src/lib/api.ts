@@ -1,4 +1,4 @@
-import type { AgentsStatus, AppConfig, CerebrasModels, ModelCatalog, PageSource, PredictionResult, ResearchMode, ResearchOptions, ResearchSessionState, ServerEvent, UserSettings } from '../types';
+import type { AgentsStatus, AppConfig, Billing, CerebrasModels, ModelCatalog, PageSource, PredictionResult, ResearchMode, ResearchOptions, ResearchSessionState, ServerEvent, UserSettings } from '../types';
 import type { AgentStepResult } from './agentDom';
 
 const DEFAULT_BASE = 'http://127.0.0.1:8788';
@@ -44,6 +44,11 @@ export function getAgentModels(refresh = false) {
 }
 
 /** Cerebras models the server's key can reach (the key stays server-side). */
+/** The subscription tiers and whether this install has one. */
+export function getBilling() {
+  return jsonFetch<Billing>('/api/billing/plans');
+}
+
 export function getCerebrasModels(refresh = false) {
   return jsonFetch<CerebrasModels>(`/api/agents/cerebras-models${refresh ? '?refresh=1' : ''}`);
 }

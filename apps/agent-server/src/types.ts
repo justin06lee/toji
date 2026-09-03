@@ -281,7 +281,7 @@ export interface UserSettings {
    *  coding-agent CLIs on this machine — no keys); 'local' is any OpenAI-compatible
    *  endpoint (Ollama, LM Studio, vLLM, a home server); 'off' forces the
    *  deterministic demo/heuristic fallbacks. URL/key live only in settings.json. */
-  agent: 'yagami' | 'cerebras' | 'local' | 'off';
+  agent: 'toji' | 'yagami' | 'cerebras' | 'local' | 'off';
   /** Yagami model id ('' = the engine's default; supports "provider:model"). */
   agentModel: string;
   /** Reasoning/thinking effort. 'default' = omit. */

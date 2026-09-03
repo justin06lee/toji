@@ -24,12 +24,15 @@ const projectRoot = process.cwd();
 // in the UI. TOJI_AGENT=off forces the deterministic demo/heuristic fallbacks; any
 // legacy value (claude/codex/opencode/…) means yagami now, which drives those same CLIs.
 const rawAgent = (process.env.TOJI_AGENT ?? 'yagami').trim().toLowerCase();
-const AGENT_CHOICES = new Set(['off', 'local', 'cerebras', 'yagami']);
+const AGENT_CHOICES = new Set(['off', 'local', 'cerebras', 'yagami', 'toji']);
 
 export const config = {
   appName: 'Toji',
   port: numEnv('PORT', 8788),
-  agent: (AGENT_CHOICES.has(rawAgent) ? rawAgent : 'yagami') as 'yagami' | 'cerebras' | 'local' | 'off',
+  // A fresh install lands on the Toji plan: the point of it is that a new user gets
+  // working inference without installing a CLI or pasting a key. Existing settings
+  // files keep whatever they already say (see loadSettings).
+  agent: (AGENT_CHOICES.has(rawAgent) ? rawAgent : 'toji') as 'toji' | 'yagami' | 'cerebras' | 'local' | 'off',
   // Cerebras key from the environment (.env.local). Used as a fallback when Settings
   // holds no key, and deliberately never copied into settings.json — one secret, one home.
   cerebrasApiKey: (process.env.CEREBRAS_API_KEY ?? '').trim(),

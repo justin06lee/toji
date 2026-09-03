@@ -2,6 +2,7 @@ import { detectProviders, type DetectedProvider } from '@justin06lee/yagami';
 import { config } from '../config.js';
 import { cachedCatalog, capabilitiesFor, findModel, qualifyModel } from './yagamiCatalog.js';
 import { CEREBRAS_BASE_URL, cerebrasKeyFor, clearCerebrasModels, type KeySource } from './cerebras.js';
+import { subscriptionStatus } from '../lib/billing.js';
 
 // Toji's inference runs through yagami: an embedded, zero-config engine that drives
 // the coding-agent CLIs already installed and signed in on this machine (Claude Code,
@@ -10,7 +11,7 @@ import { CEREBRAS_BASE_URL, cerebrasKeyFor, clearCerebrasModels, type KeySource 
 // The one alternative backend is a custom OpenAI-compatible endpoint (URL + key) for
 // self-hosted models; everything else was folded into yagami.
 
-export type AgentChoice = 'yagami' | 'cerebras' | 'local' | 'off';
+export type AgentChoice = 'toji' | 'yagami' | 'cerebras' | 'local' | 'off';
 export type ThinkingLevel = 'default' | 'low' | 'medium' | 'high';
 
 /**
@@ -23,6 +24,10 @@ export function normalizeAgentChoice(value: unknown): AgentChoice {
   if (v === 'off') return 'off';
   if (v === 'local') return 'local';
   if (v === 'cerebras') return 'cerebras';
+  if (v === 'toji') return 'toji';
+  // Unrecognized names come from older builds that had more separate backends. They
+  // land on yagami, NOT on the Toji plan: silently moving someone's working setup onto
+  // a tier they never bought would be worse than ignoring a stale value.
   return 'yagami';
 }
 
@@ -158,6 +163,21 @@ function yagamiBackend(tuning: AgentTuning): YagamiBackend | null {
   };
 }
 
+/**
+ * The Toji plan: inference Toji runs for the user, so there is no key to paste and no
+ * CLI to install. It resolves to a backend only while a subscription is actually
+ * active — see subscriptionStatus, which is honest about there being nothing to check
+ * against yet — and getActiveBackend falls back to a signed-in CLI meanwhile, so
+ * choosing this plan never takes away a setup that already worked.
+ */
+function tojiBackend(): ApiBackend | null {
+  if (!subscriptionStatus().active) return null;
+  // Deliberately unreachable until Toji's hosted endpoint exists. Leaving it as a
+  // throw rather than a half-built URL means a wrong subscription check fails loudly
+  // instead of quietly sending prompts somewhere unintended.
+  throw new Error('Toji-managed inference is not available yet.');
+}
+
 /** Cerebras speaks OpenAI's wire format, so it rides the same ApiBackend path. */
 function cerebrasBackend(tuning: AgentTuning): ApiBackend | null {
   const { key } = cerebrasCredentials();
@@ -195,6 +215,9 @@ export function getActiveBackend(): Backend | null {
   if (choice.agent === 'off') return null;
   if (choice.agent === 'local') return localBackend(tuning);
   if (choice.agent === 'cerebras') return cerebrasBackend(tuning);
+  // An unsubscribed Toji plan keeps working through whatever CLI is signed in; the
+  // plans page is what tells the user, not a dead backend.
+  if (choice.agent === 'toji') return tojiBackend() ?? yagamiBackend(tuning);
   return yagamiBackend(tuning);
 }
 
@@ -239,6 +262,9 @@ export function agentStatus() {
       configured: Boolean(cerebrasCredentials().key && apiConfig.cerebrasModel),
       model: apiConfig.cerebrasModel
     },
-    local: { configured: Boolean(apiConfig.localUrl && apiConfig.localModel), url: apiConfig.localUrl, model: apiConfig.localModel }
+    local: { configured: Boolean(apiConfig.localUrl && apiConfig.localModel), url: apiConfig.localUrl, model: apiConfig.localModel },
+    // What the Toji plan is doing right now, so the UI can say "falling back to Claude
+    // Code" instead of implying the plan is running the model.
+    toji: { ...subscriptionStatus(), fallback: choice.agent === 'toji' ? (yagamiBackend({ agentModel: choice.agentModel, agentThinking: choice.agentThinking })?.label ?? '') : '' }
   };
 }
