@@ -174,6 +174,8 @@ apps/desktop/       Electron main process
   tor.cjs           Tor lifecycle, SocksPort pool, control port
   vault.cjs         OS-keychain-backed encrypted credential storage
   page-redaction.cjs strips form values from agent observations
+  context-menu.cjs  the page right-click menu (View Page Source gets its own
+                    window — a <webview> refuses to navigate to view-source:)
   guest-preload.cjs runs in every page: login detection and fill
 apps/renderer/      React UI (tabs, containers, settings)
 apps/agent-server/  local HTTP server: inference, page generation, memory

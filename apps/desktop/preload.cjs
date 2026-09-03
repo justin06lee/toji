@@ -13,6 +13,13 @@ contextBridge.exposeInMainWorld('toji', {
     ipcRenderer.on('toji:open-url', handler);
     return () => ipcRenderer.removeListener('toji:open-url', handler);
   },
+  // "Search <engine> for …" from the page context menu. The main process sends the
+  // selected phrase rather than a URL, because the engine choice lives here.
+  onSearch: (callback) => {
+    const handler = (_event, text) => callback(text);
+    ipcRenderer.on('toji:search', handler);
+    return () => ipcRenderer.removeListener('toji:search', handler);
+  },
   // Menu accelerators (Cmd+W / Cmd+T) routed from the main process.
   onCloseTab: (callback) => {
     const handler = () => callback();

@@ -542,6 +542,16 @@ export function App() {
     return toji?.onOpenUrl?.(openWebTab);
   }, [openWebTab]);
 
+  // "Search <engine> for …" in the page context menu. The main process sends the phrase;
+  // the engine it should go to is a setting only the renderer knows.
+  useEffect(() => {
+    const toji = (window as unknown as { toji?: { onSearch?: (cb: (text: string) => void) => () => void } }).toji;
+    return toji?.onSearch?.((text) => {
+      const query = text.trim();
+      if (query) openWebTab(webSearchUrl(query, (localStorage.getItem('toji-search-engine') as SearchEngineId | null) ?? 'duckduckgo'));
+    });
+  }, [openWebTab]);
+
   const closeTab = useCallback(
     (id: string) => {
       const current = tabsRef.current;

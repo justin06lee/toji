@@ -1,9 +1,10 @@
-const { app, BrowserWindow, Menu, ipcMain, shell, nativeImage, webContents, dialog, session, screen, systemPreferences } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, shell, nativeImage, webContents, dialog, session, screen, systemPreferences, clipboard } = require('electron');
 const { spawn } = require('node:child_process');
 const { applySessionPolicy, applyWebRtcPolicy, parsePartition } = require('./policy.cjs');
 const { TorController } = require('./tor.cjs');
 const { Vault, generatePassword } = require('./vault.cjs');
 const { redactManifestValues } = require('./page-redaction.cjs');
+const { contextMenuTemplate } = require('./context-menu.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -733,10 +734,167 @@ function watchOptionTap(contents) {
   });
 }
 
+// --- Right-click menu --------------------------------------------------------
+// Electron draws no context menu of its own, which is why right-clicking a page did
+// nothing at all. contextMenuTemplate decides what the menu holds; this half performs
+// whatever was chosen, always against the web-contents that was actually clicked (the
+// <webview> guest, not the window hosting it).
+
+/** The renderer owns the search-engine choice, so ask it rather than keeping a copy. */
+async function readSearchEngine(win) {
+  try {
+    return await win.webContents.executeJavaScript("localStorage.getItem('toji-search-engine')", true);
+  } catch {
+    return null; // template falls back to the same default the renderer does
+  }
+}
+
+/** Tab commands need a profile window; the view-source window below has no tabs. */
+function tabHostWindow(win) {
+  if (win && !win.isDestroyed() && appWindows.has(win)) return win;
+  return [...appWindows].find((other) => !other.isDestroyed()) || null;
+}
+
+/**
+ * Chromium's own source view, in a plain window.
+ *
+ * A <webview> silently refuses to navigate to view-source: — the tab just loads the
+ * page again — so this cannot be a tab. The window carries the clicked tab's session,
+ * so reading the source of a Tor page still goes over Tor and a container's cookies
+ * stay where they are; the bytes come from the cache the tab already filled, not from
+ * a second request.
+ */
+function openViewSource(contents, params) {
+  const url = params.pageURL || contents.getURL();
+  if (!/^https?:\/\//i.test(url)) return;
+  const source = new BrowserWindow({
+    width: 940,
+    height: 780,
+    title: `view-source:${url}`,
+    backgroundColor: '#ffffff',
+    webPreferences: {
+      partition: sessionPartitions.get(contents.session),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true
+    }
+  });
+  source.loadURL(`view-source:${url}`).catch((error) => appendServerLog(`view-source failed: ${error && error.message}`));
+}
+
+async function showContextMenu(contents, params) {
+  const win = windowForContents(contents);
+  if (!win || win.isDestroyed()) return;
+  // 'window' is Toji's own UI. Its tab and group menus are drawn by the renderer (which
+  // calls preventDefault, so this event never fires for them); what reaches here is a
+  // right-click on the omnibox or the agent transcript, where only editing applies.
+  const chrome = contents.getType() === 'window';
+  const history = contents.navigationHistory;
+  // Only the "Search … for" label needs the engine, so only that right-click pays for
+  // the round trip to the renderer.
+  const needsEngine = !chrome && !params.isEditable && Boolean((params.selectionText || '').trim());
+  const template = contextMenuTemplate(params, {
+    chrome,
+    canGoBack: !chrome && history.canGoBack(),
+    canGoForward: !chrome && history.canGoForward(),
+    searchEngine: needsEngine ? await readSearchEngine(win) : null
+  });
+  if (!template.length || contents.isDestroyed() || win.isDestroyed()) return;
+  const menu = Menu.buildFromTemplate(
+    template.map((item) =>
+      item.type === 'separator' ? item : { label: item.label, enabled: item.enabled !== false, click: () => runContextMenuItem(item, contents, params, win) }
+    )
+  );
+  menu.popup({ window: win });
+}
+
+function runContextMenuItem(item, contents, params, win) {
+  if (contents.isDestroyed()) return;
+  switch (item.id) {
+    case 'spelling:replace':
+      return contents.replaceMisspelling(item.word);
+    case 'spelling:add':
+      return contents.session.addWordToSpellCheckerDictionary(params.misspelledWord);
+
+    case 'link:open':
+      return openInToji(params.linkURL, tabHostWindow(win));
+    case 'link:save':
+      return contents.downloadURL(params.linkURL);
+    case 'link:copy':
+      return clipboard.writeText(params.linkURL);
+
+    case 'image:open':
+      return openInToji(params.srcURL, tabHostWindow(win));
+    case 'image:save':
+    case 'media:save':
+      return contents.downloadURL(params.srcURL);
+    case 'image:copy':
+      return contents.copyImageAt(params.x, params.y);
+    case 'image:copyLink':
+    case 'media:copyLink':
+      return clipboard.writeText(params.srcURL);
+
+    case 'edit:undo':
+      return contents.undo();
+    case 'edit:redo':
+      return contents.redo();
+    case 'edit:cut':
+      return contents.cut();
+    case 'edit:copy':
+      return contents.copy();
+    case 'edit:paste':
+      return contents.paste();
+    case 'edit:pastePlain':
+      return contents.pasteAndMatchStyle();
+    case 'edit:selectAll':
+      return contents.selectAll();
+
+    // The renderer turns the phrase into a URL, so the engine choice lives in one place.
+    case 'selection:search':
+      return tabHostWindow(win)?.webContents.send('toji:search', params.selectionText);
+
+    case 'page:back':
+      return contents.navigationHistory.goBack();
+    case 'page:forward':
+      return contents.navigationHistory.goForward();
+    case 'page:reload':
+      return contents.reload();
+    case 'page:save':
+      return saveContentsAs(contents, win);
+    case 'page:print':
+      return contents.print();
+    case 'page:viewSource':
+      return openViewSource(contents, params);
+    case 'page:inspect':
+      return contents.inspectElement(params.x, params.y);
+    default:
+      return undefined;
+  }
+}
+
+async function saveContentsAs(contents, win) {
+  let name = 'page';
+  try {
+    name = new URL(contents.getURL()).hostname || name;
+  } catch {
+    /* about:blank and friends keep the default name */
+  }
+  const { canceled, filePath } = await dialog.showSaveDialog(win, { defaultPath: `${name}.html` });
+  if (canceled || !filePath || contents.isDestroyed()) return;
+  try {
+    await contents.savePage(filePath, 'HTMLComplete');
+  } catch (error) {
+    appendServerLog(`save page failed: ${error && error.message}`);
+  }
+}
+
 // Any popup / target=_blank from the app shell, the AI page iframe, or a <webview>
 // opens inside Toji as a new web tab (http/https); other schemes go to the OS.
 app.on('web-contents-created', (_event, contents) => {
   watchOptionTap(contents);
+  contents.on('context-menu', (_e, params) => {
+    void showContextMenu(contents, params);
+  });
   // Container tabs intentionally share a session partition. Drop it only after the last
   // webContents using that exact session is gone; deleting it when any one tab closed made
   // surviving tabs miss later Tor proxy/circuit updates.
