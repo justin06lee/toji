@@ -22,7 +22,7 @@
     "dev:server": "tsx watch apps/agent-server/src/index.ts",
     "dev:electron": "wait-on tcp:5173 tcp:8788 && cross-env ELECTRON_START_URL=http://127.0.0.1:5173 electron apps/desktop/main.cjs",
     "build": "bun run typecheck && bun run build:server && bun run build:web",
-    "build:server": "tsc -p tsconfig.server.json",
+    "build:server": "bun scripts/build-server.ts",
     "build:web": "vite build",
     "preview:web": "vite preview --host 127.0.0.1 --port 5173",
     "start": "bun run start:server",
@@ -96,30 +96,25 @@
     },
     "files": [
       "package.json",
-      "apps/desktop/**/*",
+      "apps/desktop/*.cjs",
+      "apps/desktop/build/icon.png",
       "dist/renderer/**/*",
-      "dist/server/**/*"
+      "dist/server/**/*",
+      "!node_modules/@anthropic-ai/claude-agent-sdk-*/**",
+      "!node_modules/@types/**",
+      "!node_modules/**/*.{d.ts,d.mts,d.cts,map,md,markdown}"
     ],
     "asar": false
   },
   "dependencies": {
-    "@fontsource/poppins": "^5.2.7",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.243",
     "@justin06lee/byakugan": "^0.2.1",
-    "@justin06lee/yagami": "0.5.0",
-    "@vitejs/plugin-react": "6.0.3",
-    "cors": "2.8.6",
-    "dotenv": "17.4.2",
     "electron-chrome-web-store": "0.13.0",
-    "express": "5.2.1",
-    "lucide-react": "1.21.0",
-    "motion": "^12.42.0",
-    "playwright": "1.61.1",
-    "react": "19.2.7",
-    "react-dom": "19.2.7",
-    "ws": "8.21.0",
-    "zod": "4.4.3"
+    "playwright": "1.61.1"
   },
   "devDependencies": {
+    "@fontsource/poppins": "^5.2.7",
+    "@justin06lee/yagami": "0.5.0",
     "@tailwindcss/vite": "^4.3.1",
     "@types/cors": "2.8.19",
     "@types/express": "5.0.6",
@@ -127,15 +122,26 @@
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@types/ws": "8.18.1",
+    "@vitejs/plugin-react": "6.0.3",
     "concurrently": "10.0.5",
+    "cors": "2.8.6",
     "cross-env": "10.1.0",
+    "dotenv": "17.4.2",
     "electron": "42.5.1",
     "electron-builder": "^26.0.0",
+    "esbuild": "^0.28.1",
+    "express": "5.2.1",
+    "lucide-react": "1.21.0",
+    "motion": "^12.42.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
     "tailwindcss": "^4.3.1",
     "tsx": "4.22.4",
     "typescript": "6.0.3",
     "vite": "8.1.0",
     "vitest": "^4.1.9",
-    "wait-on": "9.0.10"
+    "wait-on": "9.0.10",
+    "ws": "8.21.0",
+    "zod": "4.4.3"
   }
 }

@@ -13,6 +13,9 @@ export default defineConfig({
   },
   build: {
     outDir: '../../dist/renderer',
-    emptyOutDir: true
+    emptyOutDir: true,
+    // The renderer only ever runs inside this app's Electron (42 → Chromium 140+), so
+    // nothing needs transpiling down for older browsers.
+    target: 'chrome140'
   }
 });
