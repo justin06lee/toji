@@ -33,6 +33,8 @@ import { SEARCH_ENGINES, type SearchEngineId } from '../lib/nav';
 import { FIELD, FIELD_BUTTON, FIELD_BUTTON_QUIET, FIELD_MONO, FIELD_TEXTAREA } from '../lib/fieldStyles';
 import { Dropdown, type DropdownOption } from './Dropdown';
 import { ColorPicker } from './ColorPicker';
+import { Switch } from './Switch';
+import { autosaveEnabled, setAutosaveEnabled } from '../lib/vaultAutosave';
 import { providerNote } from '../lib/providerState';
 
 
@@ -880,6 +882,7 @@ function VaultSettings({ containers }: { containers: Container[] }) {
   const [entries, setEntries] = useState<VaultEntry[]>([]);
   const [generated, setGenerated] = useState('');
   const [copied, setCopied] = useState(false);
+  const [autosave, setAutosave] = useState(() => autosaveEnabled());
 
   const refresh = useCallback(async () => {
     const s = await bridge().vaultStatus?.();
@@ -925,6 +928,22 @@ function VaultSettings({ containers }: { containers: Container[] }) {
         <VaultUnavailable message={status.error ?? 'The vault is unavailable on this system.'} />
       ) : (
         <>
+          <div className="mb-4 flex items-center justify-between gap-4 rounded-xl border border-black/10 p-3 dark:border-white/12">
+            <span className="min-w-0">
+              <span className="block text-[13px]">Save passwords automatically</span>
+              <span className="mt-0.5 block text-[12px] leading-relaxed text-neutral-400">
+                A login you submit goes into the vault once the sign-in goes through. Turn this off and Toji asks first, every time.
+              </span>
+            </span>
+            <Switch
+              checked={autosave}
+              label="Save passwords automatically"
+              onChange={(next) => {
+                setAutosaveEnabled(next);
+                setAutosave(next);
+              }}
+            />
+          </div>
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <button type="button" onClick={generate} className={FIELD_BUTTON_QUIET}>
               <RefreshCw size={12} />
@@ -940,7 +959,7 @@ function VaultSettings({ containers }: { containers: Container[] }) {
 
           {entries.length === 0 ? (
             <p className="rounded-xl border border-dashed border-black/10 p-4 text-center text-[13px] text-neutral-400 dark:border-white/12">
-              No saved logins yet. Sign in to a site and Toji will offer to save it.
+              {autosave ? 'No saved logins yet. Sign in to a site and Toji keeps the login for you.' : 'No saved logins yet. Sign in to a site and Toji will offer to save it.'}
             </p>
           ) : (
             <div className="divide-y divide-black/[0.07] rounded-xl border border-black/10 dark:divide-white/10 dark:border-white/12">

@@ -30,6 +30,7 @@ import { DRAG_HANDLE_DWELL_MS, revealDragHandle } from './lib/dragHandle';
 import { replacePristineTabWithWelcome, startBrowsingInTab } from './lib/tabLifecycle';
 import { tabTitle } from './lib/tabPresentation';
 import { GROUP_COLORS, type BrowserTab, type TabGroup } from './types';
+import { AUTOSAVE_TIMEOUT_MS, autosaveEnabled, autosaveVerdict } from './lib/vaultAutosave';
 
 interface AgentState {
   running: boolean;
@@ -208,7 +209,49 @@ export function App() {
     return bridge().onTorStatus?.(setTorStatus);
   }, []);
   // A login the user submitted; the password stays in the main process until they say so.
-  useEffect(() => bridge().onVaultPrompt?.(setVaultPrompt), []);
+  const [vaultPromptError, setVaultPromptError] = useState<string | undefined>(undefined);
+  // A submitted login being judged for automatic saving (see lib/vaultAutosave.ts).
+  const autosaveWatch = useRef<{ prompt: VaultPrompt; tabId: string | null; submittedUrl: string | null; startedAt: number; timer: number } | null>(null);
+  const settleAutosave = useCallback(async (verdict: 'save' | 'ask') => {
+    const watch = autosaveWatch.current;
+    if (!watch) return;
+    window.clearTimeout(watch.timer);
+    autosaveWatch.current = null;
+    if (verdict === 'ask') {
+      setVaultPromptError(undefined);
+      setVaultPrompt(watch.prompt);
+      return;
+    }
+    const result = await bridge().vaultCommit?.(watch.prompt.webContentsId);
+    if (result && !result.ok) {
+      // Saving failed (the vault refused, the page went away): say so rather than lose it quietly.
+      setVaultPromptError(result.error);
+      setVaultPrompt(watch.prompt);
+    }
+  }, []);
+  useEffect(
+    () =>
+      bridge().onVaultPrompt?.((prompt) => {
+        if (!autosaveEnabled()) {
+          setVaultPromptError(undefined);
+          setVaultPrompt(prompt);
+          return;
+        }
+        // Already stored (a password Toji generated) — with autosave on, nothing to show.
+        if (prompt.status === 'saved') return;
+        const tabId = Object.keys(webviewRefs.current).find((id) => webviewRefs.current[id]?.getWebContentsId?.() === prompt.webContentsId) ?? null;
+        const tab = tabsRef.current.find((t) => t.id === tabId);
+        if (autosaveWatch.current) window.clearTimeout(autosaveWatch.current.timer);
+        autosaveWatch.current = {
+          prompt,
+          tabId,
+          submittedUrl: tab?.url ?? null,
+          startedAt: Date.now(),
+          timer: window.setTimeout(() => void settleAutosave('save'), AUTOSAVE_TIMEOUT_MS)
+        };
+      }),
+    [settleAutosave]
+  );
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
   const baseContainer = findContainer(containers, windowContainerId ?? activeTab?.containerId);
@@ -855,7 +898,12 @@ export function App() {
   /** Messages from a tab's guest preload (see apps/desktop/guest-preload.cjs). */
   const onGuestMessage = useCallback((tabId: string, channel: string, payload: unknown) => {
     if (channel !== 'toji-vault:form') return;
-    const { hasLogin } = (payload ?? {}) as { hasLogin?: boolean };
+    const { hasLogin, url: reportedUrl } = (payload ?? {}) as { hasLogin?: boolean; url?: string };
+    const watch = autosaveWatch.current;
+    if (watch && watch.tabId === tabId) {
+      const verdict = autosaveVerdict({ hasLogin: Boolean(hasLogin), url: reportedUrl }, { submittedUrl: watch.submittedUrl, elapsedMs: Date.now() - watch.startedAt });
+      if (verdict !== 'wait') void settleAutosave(verdict);
+    }
     if (!hasLogin) {
       setVaultMatches((m) => (m[tabId]?.length ? { ...m, [tabId]: [] } : m));
       return;
@@ -1529,7 +1577,7 @@ export function App() {
   );
   const torBar = activeContainer.egress === 'tor' ? <TorStatusBar container={activeContainer} status={torStatus} /> : null;
   const vaultBar = vaultPrompt ? (
-    <VaultPromptBar prompt={vaultPrompt} container={findContainer(containers, vaultPrompt.containerId ?? undefined)} onDone={() => setVaultPrompt(null)} />
+    <VaultPromptBar prompt={vaultPrompt} container={findContainer(containers, vaultPrompt.containerId ?? undefined)} error={vaultPromptError} onDone={() => setVaultPrompt(null)} />
   ) : null;
   const profilePicker = profilePickerOpen ? (
     <WindowProfilePicker

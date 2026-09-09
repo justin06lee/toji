@@ -5,24 +5,29 @@ import { bridge, type VaultEntry, type VaultPrompt } from '../lib/bridge';
 import type { Container } from '../lib/containers';
 
 /**
- * Offer to save a login the user just submitted.
+ * Ask whether to keep a login the user just submitted.
  *
- * A card hanging off the omnibox — the way every browser asks — rather than a bar that
- * shoves the page down. The password is held in the main process and never reaches
- * this component: the prompt only knows which site and account it is for, which is
- * all it needs to show.
+ * Shown only when automatic saving is off (see lib/vaultAutosave.ts) or when Toji could
+ * not tell whether the sign-in worked. A small bubble hanging off the omnibox — the key,
+ * who and where, a tick and a cross — rather than a bar that pushed the page down.
+ *
+ * The password is held in the main process and never reaches this component: the prompt
+ * only knows which site and account it is for, which is all it needs to show.
  */
 export function VaultPromptBar({
   prompt,
   container,
-  onDone
+  onDone,
+  error: initialError
 }: {
   prompt: VaultPrompt;
   container: Container;
   onDone: () => void;
+  /** A failure from an automatic save, so the bubble opens already explaining it. */
+  error?: string;
 }) {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError ?? null);
 
   const save = async () => {
     setBusy(true);
@@ -36,84 +41,54 @@ export function VaultPromptBar({
   };
 
   const dismiss = async () => {
-    if (prompt.status !== 'saved') await bridge().vaultDismiss?.(prompt.webContentsId);
+    if (prompt.status !== 'saved' && !error) await bridge().vaultDismiss?.(prompt.webContentsId);
     onDone();
   };
 
   const site = prompt.origin.replace(/^https?:\/\//, '');
-  const title = error
-    ? 'Could not save'
-    : prompt.status === 'saved'
-      ? 'Password saved'
-      : prompt.status === 'update'
-        ? 'Update password?'
-        : 'Save password?';
+  const who = prompt.username || site;
+  const verb = prompt.status === 'update' ? 'Update the password' : 'Save the password';
+  const question = `${verb} for ${who}${prompt.username ? ` on ${site}` : ''} in ${container.name}?`;
   // A password Toji generated was used on this site — it is already in the vault, so
   // there is nothing to decide, only to notice.
   const decided = Boolean(error) || prompt.status === 'saved';
+  const ghost =
+    'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-neutral-500 transition enabled:hover:bg-black/[0.06] enabled:hover:text-neutral-900 disabled:opacity-40 dark:text-neutral-400 dark:enabled:hover:bg-white/10 dark:enabled:hover:text-white';
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: -6, scale: 0.98 }}
+      initial={{ opacity: 0, y: -4, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ duration: 0.16, ease: 'easeOut' }}
+      transition={{ duration: 0.14, ease: 'easeOut' }}
       role="dialog"
-      aria-label={title}
+      aria-label={error ? `Could not save: ${error}` : prompt.status === 'saved' ? `Saved the password for ${who}` : question}
       data-testid="vault-prompt"
-      className="no-drag absolute right-0 top-[calc(100%+8px)] z-50 w-[340px] rounded-2xl border border-black/10 bg-white p-4 text-neutral-900 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.35)] dark:border-white/12 dark:bg-neutral-900 dark:text-neutral-100"
+      className="no-drag absolute right-0 top-[calc(100%+9px)] z-50 flex h-9 max-w-[min(440px,80vw)] items-center rounded-xl border border-black/10 bg-white pl-3 pr-1 text-[12.5px] shadow-[0_10px_30px_-10px_rgba(0,0,0,0.35)] dark:border-white/12 dark:bg-neutral-900"
     >
-      <div className="flex items-start gap-3">
-        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-neutral-700 dark:bg-white/10 dark:text-neutral-200">
-          <KeyRound size={16} />
-        </span>
-        <div className="min-w-0 flex-1 pt-0.5">
-          <p className="text-[13.5px] font-semibold leading-tight">{title}</p>
-          <p className="mt-1 truncate text-[12.5px] text-neutral-500" title={error ?? `${prompt.username || site} on ${site}`}>
-            {error ? (
-              <span className="text-rose-600 dark:text-rose-400">{error}</span>
-            ) : (
-              <>
-                <span className="font-medium text-neutral-700 dark:text-neutral-300">{prompt.username || site}</span>
-                {prompt.username && <> · {site}</>}
-              </>
-            )}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={dismiss}
-          aria-label={decided ? 'Close' : 'Not now'}
-          className="-mr-1 -mt-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:bg-black/[0.06] hover:text-neutral-900 dark:hover:bg-white/10 dark:hover:text-white"
-        >
-          <X size={13} />
-        </button>
-      </div>
-      <div className="mt-3.5 flex items-center justify-between gap-3">
-        <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-black/[0.05] px-2.5 py-1 text-[11.5px] text-neutral-600 dark:bg-white/10 dark:text-neutral-300" title={`Saved in the ${container.name} container`}>
-          <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: container.color }} />
-          <span className="truncate">{container.name}</span>
-        </span>
-        {!decided && (
-          <span className="flex shrink-0 items-center gap-1.5">
-            <button
-              type="button"
-              onClick={dismiss}
-              className="inline-flex h-8 items-center rounded-lg px-3 text-[12.5px] text-neutral-500 transition hover:bg-black/[0.05] hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-white"
-            >
-              Not now
-            </button>
-            <button
-              type="button"
-              onClick={save}
-              disabled={busy}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-neutral-900 px-3.5 text-[12.5px] font-medium text-white transition enabled:hover:opacity-85 disabled:opacity-40 dark:bg-white dark:text-neutral-900"
-            >
-              <Check size={12} />
-              {prompt.status === 'update' ? 'Update' : 'Save'}
-            </button>
-          </span>
+      {/* The tail, pointing up at the omnibox this belongs to. */}
+      <span aria-hidden className="absolute -top-[6px] right-[15px] h-[11px] w-[11px] rotate-45 rounded-[2px] border-l border-t border-black/10 bg-white dark:border-white/12 dark:bg-neutral-900" />
+      <KeyRound size={13} className="shrink-0 text-neutral-500 dark:text-neutral-400" />
+      <span className="mx-2 min-w-0 truncate text-neutral-600 dark:text-neutral-300" title={question}>
+        {error ? (
+          <span className="text-rose-600 dark:text-rose-400">{error}</span>
+        ) : (
+          <>
+            <span className="font-medium text-neutral-900 dark:text-neutral-100">{who}</span>
+            {prompt.username && <span className="text-neutral-400"> · {site}</span>}
+            {prompt.status === 'saved' && <span className="text-neutral-400"> · saved</span>}
+            {prompt.status === 'update' && <span className="text-neutral-400"> · new password</span>}
+          </>
         )}
-      </div>
+      </span>
+      <span className="mr-1 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: container.color }} title={`${container.name} container`} />
+      {!decided && (
+        <button type="button" onClick={save} disabled={busy} aria-label={prompt.status === 'update' ? 'Update password' : 'Save password'} title={prompt.status === 'update' ? 'Update' : 'Save'} className={ghost}>
+          <Check size={14} />
+        </button>
+      )}
+      <button type="button" onClick={dismiss} aria-label={decided ? 'Close' : 'Not now'} title={decided ? 'Close' : 'Not now'} className={ghost}>
+        <X size={14} />
+      </button>
     </motion.div>
   );
 }
