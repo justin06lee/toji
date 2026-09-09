@@ -189,6 +189,22 @@ async function enableWebStore(sess) {
   }
 }
 
+/**
+ * Page-side fixups for every guest frame of a container session, alongside the password
+ * manager's half in guest-preload.cjs. A <webview> takes a single webPreferences.preload
+ * and a sandboxed preload cannot require() a sibling, so each further fixup is its own
+ * file registered on the session. Today that is web-store-prompt.cjs, which dismisses the
+ * Chrome Web Store's "Switch to Chrome?" card as soon as it appears.
+ */
+function installGuestFixups(sess) {
+  if (!sess || typeof sess.registerPreloadScript !== 'function') return;
+  try {
+    sess.registerPreloadScript({ type: 'frame', filePath: path.join(__dirname, 'web-store-prompt.cjs') });
+  } catch (error) {
+    appendServerLog(`guest fixups unavailable: ${error && error.message}`);
+  }
+}
+
 function setupExtensions() {
   // Default session powers the app shell (and any Web Store page opened without a partition).
   if (webStore) void enableWebStore(session.defaultSession);
@@ -198,6 +214,7 @@ function setupExtensions() {
     // Re-apply if we already know this session's partition (see attachContainerPolicy,
     // which is where a container session's policy is normally installed).
     applyContainerPolicy(sess);
+    installGuestFixups(sess);
     if (webStore) void enableWebStore(sess);
   });
 }

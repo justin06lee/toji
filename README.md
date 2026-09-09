@@ -205,6 +205,7 @@ apps/desktop/       Electron main process
   context-menu.cjs  the page right-click menu (View Page Source gets its own
                     window — a <webview> refuses to navigate to view-source:)
   guest-preload.cjs runs in every page: login detection and fill
+  web-store-prompt.cjs dismisses the Web Store's "Switch to Chrome?" card
 apps/renderer/      React UI (tabs, containers, settings)
 apps/agent-server/  local HTTP server: inference, page generation, memory
 ```
