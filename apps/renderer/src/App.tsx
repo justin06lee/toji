@@ -1674,6 +1674,7 @@ export function App() {
                 onFavicon={(favicon) => patchTab(tab.id, { favicon })}
                 onGuestMessage={(channel, payload) => onGuestMessage(tab.id, channel, payload)}
                 onRegister={(el) => registerWebview(tab.id, el)}
+                tor={torMode}
               />
             </div>
           );

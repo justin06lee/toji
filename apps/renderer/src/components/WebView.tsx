@@ -1,6 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { bridge } from '../lib/bridge';
+import type { LoadFailure } from '../lib/loadError';
 import { SWIPE_NAV_JS } from '../lib/swipeNav';
+import { LoadErrorPage } from './LoadErrorPage';
 
 interface WebViewProps {
   url: string;
@@ -13,6 +15,8 @@ interface WebViewProps {
   onFavicon?: (url: string | undefined) => void;
   /** Messages from the guest preload (login-form detection, submitted credentials). */
   onGuestMessage?: (channel: string, payload: unknown) => void;
+  /** The tab browses through Tor, so a failed load may simply be Tor being down. */
+  tor?: boolean;
   // Register the underlying <webview> element so the web agent can drive it
   // (executeJavaScript / capturePage) even while this tab is inactive.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -26,9 +30,13 @@ interface WebViewProps {
  * the address bar and tab stay in sync; popups are routed into Toji by the main
  * process (web-contents-created → setWindowOpenHandler).
  */
-export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadingChange, onHistory, onFavicon, onGuestMessage, onRegister }: WebViewProps) {
+export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadingChange, onHistory, onFavicon, onGuestMessage, onRegister, tor }: WebViewProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ref = useRef<any>(null);
+  // A main-frame load that failed. Chromium leaves the view blank; Toji draws its own
+  // page over it (see LoadErrorPage) until the next navigation starts.
+  const [failure, setFailure] = useState<LoadFailure | null>(null);
+  const [canBack, setCanBack] = useState(false);
   const registerRef = useRef(onRegister);
   registerRef.current = onRegister;
 
@@ -43,12 +51,17 @@ export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadin
     el.setAttribute('allowpopups', 'true');
     const reportHistory = () => {
       try {
-        onHistory?.(el.canGoBack(), el.canGoForward());
+        const back = el.canGoBack();
+        setCanBack(back);
+        onHistory?.(back, el.canGoForward());
       } catch {
         // webview not ready yet
       }
     };
-    const onStart = () => onLoadingChange(true);
+    const onStart = () => {
+      setFailure(null);
+      onLoadingChange(true);
+    };
     const onStop = () => {
       onLoadingChange(false);
       reportHistory();
@@ -77,7 +90,9 @@ export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadin
     const onFailLoad = (e: any) => {
       // -3 = ERR_ABORTED (a navigation was superseded) — harmless, ignore.
       if (e?.errorCode === -3 || e?.isMainFrame === false) return;
+      setFailure({ code: Number(e?.errorCode) || 0, description: String(e?.errorDescription ?? ''), url: String(e?.validatedURL || url) });
       onLoadingChange(false);
+      reportHistory();
     };
     el.addEventListener('did-start-loading', onStart);
     el.addEventListener('did-stop-loading', onStop);
@@ -99,10 +114,28 @@ export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadin
       el.removeEventListener('did-fail-load', onFailLoad);
       el.removeEventListener('ipc-message', onIpc);
     };
-  }, [onHistory, onLoadingChange, onNavigate, onTitle, onFavicon, onGuestMessage]);
+  }, [onHistory, onLoadingChange, onNavigate, onTitle, onFavicon, onGuestMessage, url]);
+
+  const retry = () => {
+    const el = ref.current;
+    if (!el || !failure) return;
+    try {
+      el.loadURL(failure.url);
+    } catch {
+      el.reload?.();
+    }
+  };
+  const back = () => {
+    try {
+      ref.current?.goBack();
+    } catch {
+      // nothing to go back to
+    }
+  };
 
   return (
     <div className="relative flex min-h-0 flex-1">
+      {failure && <LoadErrorPage failure={failure} tor={tor} canBack={canBack} onRetry={retry} onBack={back} />}
       {loading && (
         <div className="absolute inset-x-0 top-0 z-10 h-0.5 overflow-hidden">
           <div className="h-full w-1/3 animate-[toji-load_1.1s_ease-in-out_infinite] bg-neutral-900/70 dark:bg-white/70" />
