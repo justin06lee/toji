@@ -395,7 +395,6 @@ app.post('/api/predict', async (req, res, next) => {
 // generated page can use inline styles + images but never run scripts.
 app.get('/api/page/stream', expensiveRateLimit, async (req, res) => {
   const query = String(req.query.q ?? '').slice(0, 1200).trim();
-  const theme = req.query.theme === 'dark' ? 'dark' : 'light';
   const fresh = req.query.fresh === '1';
   if (!query) {
     res.status(400).type('text/html').end('<!doctype html><title>Toji</title><body></body>');
@@ -411,7 +410,7 @@ app.get('/api/page/stream', expensiveRateLimit, async (req, res) => {
 
   // Serve an identical previously-generated page instantly (unless a reload forces fresh).
   if (!fresh) {
-    const cached = await getCachedPage(theme, query);
+    const cached = await getCachedPage(query);
     if (cached) {
       res.end(cached);
       return;
@@ -427,7 +426,7 @@ app.get('/api/page/stream', expensiveRateLimit, async (req, res) => {
   });
   let full = '';
   try {
-    for await (const chunk of streamAnswerPage(query, theme, controller.signal, sources)) {
+    for await (const chunk of streamAnswerPage(query, controller.signal, sources)) {
       if (controller.signal.aborted) break;
       full += chunk;
       res.write(chunk);
@@ -438,7 +437,7 @@ app.get('/api/page/stream', expensiveRateLimit, async (req, res) => {
   res.end();
   // Cache only complete generations (not aborted / not the offline fallback page).
   if (!controller.signal.aborted && full.length > 0 && !full.includes('Toji · demo render')) {
-    void putCachedPage(theme, query, full);
+    void putCachedPage(query, full);
   }
 });
 

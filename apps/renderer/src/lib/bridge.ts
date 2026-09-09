@@ -29,6 +29,32 @@ export interface WindowCursor {
   inside: boolean;
 }
 
+/** How a link handed over by the main process should open. */
+export interface OpenUrlOptions {
+  /** Keep the current tab in front (⌘-click, "Open Link in New Tab"). */
+  background?: boolean;
+  /** A page opened it, so the new tab belongs beside that page's tab. */
+  fromPage?: boolean;
+}
+
+/** Whether a guest page is making sound, by its webContents id. */
+export interface TabAudioState {
+  webContentsId: number;
+  audible: boolean;
+}
+
+export interface AdblockStatus {
+  enabled: boolean;
+  /** The filter engine is loaded and deciding requests. */
+  ready: boolean;
+  /** Requests refused since launch. */
+  blocked: number;
+  /** Pages that asked for element-hiding rules since launch. */
+  cosmetics: number;
+  /** When the filter lists were last fetched, in ms since the epoch. */
+  updatedAt: number | null;
+}
+
 /** Vault calls return either a value or a message; they never throw across IPC. */
 export type VaultResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -120,6 +146,20 @@ export interface TojiBridge {
   guestPreload?: string;
   /** Links from other apps held since before this window existed; also marks it able to take more. */
   takeExternalUrls?: () => Promise<string[]>;
+  /**
+   * A link the main process wants opened as a tab: from a page (a popup, a ⌘-click, the
+   * context menu — `fromPage`, and `background` when the current tab should stay in
+   * front) or from another app (no options).
+   */
+  onOpenUrl?: (callback: (url: string, options: OpenUrlOptions) => void) => () => void;
+  /** A tab's page started or stopped making sound. */
+  onTabAudio?: (callback: (state: TabAudioState) => void) => () => void;
+  /** Toji's theme, applied to every page's prefers-color-scheme. */
+  setTheme?: (theme: 'light' | 'dark') => void;
+
+  // --- ad blocking ---
+  adblockStatus?: () => Promise<AdblockStatus>;
+  setAdblock?: (enabled: boolean) => Promise<AdblockStatus>;
 
   // --- tor ---
   torStatus?: () => Promise<TorStatus>;

@@ -289,6 +289,12 @@ export interface BrowserTab {
   containerId: string;
   /** When set, this tab shows a built-in Toji page instead of a web/AI page. */
   internal?: InternalPage;
+  /** The page is making sound right now (reported by Chromium; false once it stops). */
+  audible?: boolean;
+  /** Sound from this tab is silenced (the speaker on the tab toggles it). */
+  muted?: boolean;
+  /** The tab this one was opened from (a link, a popup), which decides where it sits. */
+  openerId?: string;
 }
 
 /** Colors used to visually distinguish tab groups (work in light + dark). */

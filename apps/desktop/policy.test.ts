@@ -56,9 +56,11 @@ describe('kill switch', () => {
   const runFilter = (torReady: boolean, url: string) => {
     const sess = fakeSession();
     policy.applySessionPolicy(sess, 'toji-c-onion-tor', { isReady: () => torReady, socksPortFor: () => 9063 });
-    const filter = sess.webRequest.onBeforeRequest.mock.calls[0][0];
+    // The switch sits in the shared request gate (request-gate.cjs); the session's one
+    // Electron listener is the gate's, and the switch is its first check.
+    const listener = sess.webRequest.onBeforeRequest.mock.calls[0][1];
     const callback = vi.fn();
-    filter({ url }, callback);
+    listener({ url }, callback);
     return callback.mock.calls[0][0];
   };
 
@@ -69,7 +71,15 @@ describe('kill switch', () => {
   });
 
   it('allows web traffic once Tor is ready', () => {
-    expect(runFilter(true, 'https://example.com/')).toEqual({ cancel: false });
+    expect(runFilter(true, 'https://example.com/')).toEqual({});
+  });
+
+  it('is asked before any other check on the session', () => {
+    const sess = fakeSession();
+    const { addRequestCheck, requestGate } = require('./request-gate.cjs') as typeof import('./request-gate.cjs');
+    addRequestCheck(sess, 'adblock', (_details, cb) => cb({}), 10);
+    policy.applySessionPolicy(sess, 'toji-c-onion-tor', { isReady: () => false, socksPortFor: () => 9063 });
+    expect(requestGate(sess).checks.map((c) => c.name)).toEqual(['kill-switch', 'adblock']);
   });
 
   it('never blocks non-network schemes, so the shell keeps working', () => {

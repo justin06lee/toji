@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Copy, FolderPlus, Moon, MousePointer2, PanelLeft, PanelTop, Plus, RefreshCcw, RotateCw, Search, Settings, Star, Sun, WandSparkles, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Copy, FolderPlus, Moon, MousePointer2, PanelLeft, PanelTop, RefreshCcw, RotateCw, Search, Settings, Star, Sun, Volume2, VolumeX, WandSparkles, X } from 'lucide-react';
 import { AnimatePresence, motion, Reorder } from 'motion/react';
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
@@ -10,7 +10,9 @@ import { VaultFillButton, VaultPromptBar } from './components/VaultBar';
 import { InternalPage } from './components/InternalPage';
 import { PageView } from './components/PageView';
 import { Sidebar } from './components/Sidebar';
-import { TabAgentCursor, TabStatus } from './components/TabStatus';
+import { NewTabButton } from './components/NewTabButton';
+import { BOOKMARKS_BAR_EVENT, BookmarksBar, bookmarksBarPinned, setBookmarksBarPinned } from './components/BookmarksBar';
+import { TabMarks, TabStatus } from './components/TabStatus';
 import { WebView } from './components/WebView';
 import { addBookmarks, addMemory, agentResearch, agentStep, deleteBookmark, fetchPageSources, getAgents, getBookmarks, getReferences, librarian, pageStreamUrl, uploadFile, type Bookmark } from './lib/api';
 import { eyesAct, eyesAvailable, pageScreenshot, toPagePoint, PAGE_SIGNATURE_JS } from './lib/agentDom';
@@ -25,9 +27,9 @@ import {
   type Container
 } from './lib/containers';
 import { hostOf, isOnionUrl, looksLikeUrl, toUrl, webSearchUrl, type SearchEngineId } from './lib/nav';
-import { bridge, type TorStatus, type VaultEntry, type VaultPrompt } from './lib/bridge';
+import { bridge, type OpenUrlOptions, type TorStatus, type VaultEntry, type VaultPrompt } from './lib/bridge';
 import { DRAG_HANDLE_DWELL_MS, revealDragHandle } from './lib/dragHandle';
-import { replacePristineTabWithWelcome, startBrowsingInTab } from './lib/tabLifecycle';
+import { insertTabAfter, replacePristineTabWithWelcome, startBrowsingInTab } from './lib/tabLifecycle';
 import { tabTitle } from './lib/tabPresentation';
 import { GROUP_COLORS, type BrowserTab, type TabGroup } from './types';
 import { AUTOSAVE_TIMEOUT_MS, autosaveEnabled, autosaveVerdict } from './lib/vaultAutosave';
@@ -65,7 +67,7 @@ const STARTUP_CONTAINER_ID = new URLSearchParams(window.location.search).get('co
  * mirrored into the toolbar omnibox (typing in one showing up in the other read as a
  * glitch, not a feature).
  */
-function LandingSearch({ onGo, onAi, torActive, onTorToggle, bookmarks }: { onGo: (value: string) => void; onAi: (value: string) => void; torActive: boolean; onTorToggle?: () => void; bookmarks: Bookmark[] }) {
+function LandingSearch({ onGo, onAi, torActive, onTorToggle }: { onGo: (value: string) => void; onAi: (value: string) => void; torActive: boolean; onTorToggle?: () => void }) {
   const [value, setValue] = useState('');
   const submit = () => {
     if (value.trim()) onGo(value);
@@ -103,24 +105,6 @@ function LandingSearch({ onGo, onAi, torActive, onTorToggle, bookmarks }: { onGo
         </button>
         <span className="mr-1"><TorHoldButton active={torActive} onGo={submit} onToggle={onTorToggle} /></span>
       </form>
-      {/* Where bookmarks live: a quiet row under the box, so the star in the omnibox has
-          somewhere to lead. Titles only — Toji stores no favicons for them. */}
-      {bookmarks.length > 0 && (
-        <div className="mt-7 flex w-[min(600px,92vw)] flex-wrap justify-center gap-1.5" data-testid="landing-bookmarks">
-          {bookmarks.slice(0, 12).map((b) => (
-            <button
-              key={b.id}
-              type="button"
-              onClick={() => onGo(b.url)}
-              title={b.url}
-              className="inline-flex max-w-[200px] items-center gap-1.5 rounded-full border border-black/[0.08] px-3 py-1.5 text-[12.5px] text-neutral-600 transition hover:bg-black/[0.04] hover:text-neutral-900 dark:border-white/10 dark:text-neutral-300 dark:hover:bg-white/[0.07] dark:hover:text-white"
-            >
-              <Star size={11} className="shrink-0 text-neutral-400" />
-              <span className="truncate">{b.title || hostOf(b.url) || b.url}</span>
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -144,6 +128,13 @@ export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem('toji-sidebar') !== 'closed');
   const [sidebarPeek, setSidebarPeek] = useState(false);
   const [dragHandleVisible, setDragHandleVisible] = useState(false);
+  // The notch stays in the tree while it fades out; it leaves once that animation ends.
+  const [dragHandleMounted, setDragHandleMounted] = useState(false);
+  // The bookmarks bar: part of the chrome when pinned, a hover reveal under the address
+  // bar when not. The pin state is shared with Settings through localStorage.
+  const [bookmarksPinned, setBookmarksPinned] = useState(bookmarksBarPinned);
+  const [bookmarksPeek, setBookmarksPeek] = useState(false);
+  const bookmarksPeekTimer = useRef<number | null>(null);
   // Mirrors dragHandleVisible for the cursor stream (which reads it far more often
   // than React re-renders), and pins it while the pointer is on the notch or holding it.
   const dragHandleVisibleRef = useRef(false);
@@ -272,7 +263,46 @@ export function App() {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
     localStorage.setItem('toji-theme', theme);
+    // Every page follows: sites with a dark mode switch to it, and the AI answer pages
+    // restyle in place (they carry both palettes) rather than being generated again.
+    bridge().setTheme?.(theme);
   }, [theme]);
+  useEffect(() => {
+    const sync = () => setBookmarksPinned(bookmarksBarPinned());
+    window.addEventListener(BOOKMARKS_BAR_EVENT, sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener(BOOKMARKS_BAR_EVENT, sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
+  const showBookmarksPeek = useCallback(() => {
+    if (bookmarksPeekTimer.current !== null) window.clearTimeout(bookmarksPeekTimer.current);
+    bookmarksPeekTimer.current = null;
+    setBookmarksPeek(true);
+  }, []);
+  const hideBookmarksPeek = useCallback(() => {
+    if (bookmarksPeekTimer.current !== null) window.clearTimeout(bookmarksPeekTimer.current);
+    bookmarksPeekTimer.current = window.setTimeout(() => {
+      bookmarksPeekTimer.current = null;
+      setBookmarksPeek(false);
+    }, 160);
+  }, []);
+  useEffect(() => {
+    if (bookmarksPinned) setBookmarksPeek(false);
+  }, [bookmarksPinned]);
+  // Keep the active tab in view in the top strip: after a switch, a resize, or a layout
+  // change the strip may have scrolled it out of sight.
+  useEffect(() => {
+    if (layout !== 'top') return;
+    const strip = topTabStripRef.current;
+    if (!strip) return;
+    const frame = requestAnimationFrame(() => {
+      const el = strip.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(activeId)}"]`);
+      el?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeId, layout, topTabsCrowded]);
   useEffect(() => localStorage.setItem('toji-layout', layout), [layout]);
   useEffect(() => localStorage.setItem('toji-sidebar', sidebarOpen ? 'open' : 'closed'), [sidebarOpen]);
   useEffect(() => {
@@ -305,6 +335,7 @@ export function App() {
     if (dragHandleVisibleRef.current === visible) return;
     dragHandleVisibleRef.current = visible;
     setDragHandleVisible(visible);
+    if (visible) setDragHandleMounted(true);
   }, []);
   useEffect(() => {
     setDragHandle(false);
@@ -508,12 +539,12 @@ export function App() {
         setActiveId(tabId);
         return;
       }
-      patchTab(tabId, { internal: undefined, mode: 'page', url: null, query, streamUrl: pageStreamUrl(query, theme), status: 'loading', sources: [] });
+      patchTab(tabId, { internal: undefined, mode: 'page', url: null, query, streamUrl: pageStreamUrl(query), status: 'loading', sources: [] });
       void fetchPageSources(query)
         .then((res) => patchTab(tabId, { sources: res.sources }))
         .catch(() => undefined);
     },
-    [patchTab, theme]
+    [patchTab]
   );
 
   // Omnibox submit. URLs always navigate; otherwise either a web search or an AI page.
@@ -620,7 +651,12 @@ export function App() {
     [selectWindowContainer]
   );
 
-  const openWebTab = useCallback((url: string) => {
+  /**
+   * A link opened from the page on screen: a popup, a ⌘-click, "Open Link in New Tab",
+   * a source under an answer. The tab goes right beside the one it came from, and with
+   * `background` it opens without taking the screen — the way a ⌘-click should.
+   */
+  const openWebTab = useCallback((url: string, options: OpenUrlOptions = {}) => {
     const from = tabsRef.current.find((t) => t.id === activeRef.current);
     // A link opened from a page stays in that page's container, so following a link
     // never silently moves you into a different identity.
@@ -629,8 +665,9 @@ export function App() {
     tab.url = url;
     tab.query = url;
     tab.status = 'loading';
-    setTabs((current) => [...current, tab]);
-    setActiveId(tab.id);
+    tab.openerId = from?.id;
+    setTabs((current) => insertTabAfter(current, from?.id, tab));
+    if (!options.background) setActiveId(tab.id);
   }, []);
 
   // Whether the chosen backend is a Toji plan with no subscription behind it. Kept in a
@@ -649,10 +686,13 @@ export function App() {
     void refreshPlanGate();
   }, [refreshPlanGate]);
 
-  // Links opened from the AI page iframe / webviews are routed here by the main process.
+  // Links the main process hands over: from a page (a popup, a ⌘-click, the context
+  // menu — beside the page's tab, in the background when asked) or from another app.
   useEffect(() => {
-    const toji = (window as unknown as { toji?: { onOpenUrl?: (cb: (url: string) => void) => () => void } }).toji;
-    const off = toji?.onOpenUrl?.(openExternalLink);
+    const off = bridge().onOpenUrl?.((url, options) => {
+      if (options?.fromPage) openWebTab(url, options);
+      else openExternalLink(url);
+    });
     // Links that arrived before this window's renderer existed — a click in another app
     // that started Toji cold. Asking for them also tells the main process this window
     // can take the next one directly.
@@ -661,7 +701,7 @@ export function App() {
       .then((urls) => urls.forEach(openExternalLink))
       .catch(() => {});
     return off;
-  }, [openWebTab]);
+  }, [openExternalLink, openWebTab]);
 
   // "Search <engine> for …" in the page context menu. The main process sends the phrase;
   // the engine it should go to is a setting only the renderer knows.
@@ -742,6 +782,18 @@ export function App() {
     void refreshBookmarks();
   }, [refreshBookmarks]);
 
+  const removeBookmark = useCallback(
+    async (id: string) => {
+      try {
+        await deleteBookmark(id);
+      } catch {
+        return;
+      }
+      await refreshBookmarks();
+    },
+    [refreshBookmarks]
+  );
+
   /** Bookmark the page a web tab is showing, or remove it if it already is one. */
   const toggleBookmark = useCallback(
     async (tab: BrowserTab | undefined) => {
@@ -821,7 +873,7 @@ export function App() {
         patchTab(tabId, { reloadKey: nextKey, status: 'loading' });
       } else if (tab.mode === 'page' && tab.query.trim()) {
         // Reload forces a fresh (uncached) regeneration.
-        patchTab(tabId, { reloadKey: nextKey, streamUrl: pageStreamUrl(tab.query, theme, nextKey), status: 'loading' });
+        patchTab(tabId, { reloadKey: nextKey, streamUrl: pageStreamUrl(tab.query, nextKey), status: 'loading' });
         void fetchPageSources(tab.query)
           .then((r) => patchTab(tabId, { sources: r.sources }))
           .catch(() => undefined);
@@ -829,7 +881,7 @@ export function App() {
         go(tabId, tab.query);
       }
     },
-    [go, patchTab, theme]
+    [go, patchTab]
   );
   const reloadActive = () => activeTab && reloadTab(activeTab.id);
 
@@ -923,10 +975,31 @@ export function App() {
   }, []);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const registerWebview = useCallback((tabId: string, el: any | null) => {
-    if (el) webviewRefs.current[tabId] = el;
-    else delete webviewRefs.current[tabId];
-  }, []);
+  const registerWebview = useCallback(
+    (tabId: string, el: any | null) => {
+      if (el) webviewRefs.current[tabId] = el;
+      else {
+        delete webviewRefs.current[tabId];
+        // A page that went away (reload, navigation to a new context) is silent until
+        // Chromium says otherwise about the next one.
+        setTabs((current) => (current.some((t) => t.id === tabId && t.audible) ? current.map((t) => (t.id === tabId ? { ...t, audible: false } : t)) : current));
+      }
+    },
+    []
+  );
+
+  // Sound: Chromium reports per page (by webContents id) when it starts and stops; the
+  // tab shows a speaker meanwhile. The mute is the tab's own state, applied by WebView.
+  useEffect(
+    () =>
+      bridge().onTabAudio?.(({ webContentsId, audible }) => {
+        const tabId = Object.keys(webviewRefs.current).find((id) => webviewRefs.current[id]?.getWebContentsId?.() === webContentsId);
+        if (!tabId) return;
+        setTabs((current) => (current.some((t) => t.id === tabId && Boolean(t.audible) !== audible) ? current.map((t) => (t.id === tabId ? { ...t, audible } : t)) : current));
+      }),
+    []
+  );
+  const toggleMute = useCallback((tabId: string) => patchTab(tabId, (t) => ({ muted: !t.muted })), [patchTab]);
 
   // Back / forward through the active web tab's history (webview history).
   const goBack = useCallback(() => {
@@ -1530,11 +1603,9 @@ export function App() {
     [glideCursor, logAgent, navigateTab, realClickAt, realDrag]
   );
 
-  const toggleTheme = useCallback(() => {
-    const next = theme === 'dark' ? 'light' : 'dark';
-    setTheme(next);
-    setTabs((current) => current.map((tab) => (tab.id === activeRef.current && tab.mode === 'page' && tab.query.trim() ? { ...tab, streamUrl: pageStreamUrl(tab.query, next), status: 'loading' } : tab)));
-  }, [theme]);
+  // Only the theme changes. The AI pages carry both palettes and follow it through
+  // prefers-color-scheme (see the theme effect), so nothing reloads or regenerates.
+  const toggleTheme = useCallback(() => setTheme((current) => (current === 'dark' ? 'light' : 'dark')), []);
 
   const canReload = Boolean(activeTab && (activeTab.url || activeTab.query.trim()));
   const activeBookmarked = Boolean(activeTab?.url && bookmarks.some((b) => b.url === activeTab.url));
@@ -1552,13 +1623,30 @@ export function App() {
   // it flickered. Instead the main process follows the cursor between drag-start and
   // drag-end, which behaves the same on macOS and on Linux (where drag regions only
   // work on frameless windows at all).
+  //
+  // It fades out exactly as it fades in: the same slide and fade, run backwards. While
+  // it is on its way out it takes no pointer events, so a tab underneath is clickable
+  // at once, and it leaves the tree only when the animation has finished.
+  const dragHandleShown = dragHandleVisible && (layout === 'side' || topTabsCrowded);
   const windowDragHandle = (placement: 'side' | 'tabs') => (
-    <div className={`drag-strip drag-strip-${placement}`} data-testid="window-drag-handle" aria-hidden>
+    <motion.div
+      className={`drag-strip drag-strip-${placement}`}
+      data-testid="window-drag-handle"
+      data-state={dragHandleShown ? 'shown' : 'hiding'}
+      aria-hidden
+      initial={{ opacity: 0, y: '-100%' }}
+      animate={dragHandleShown ? { opacity: 1, y: 0 } : { opacity: 0, y: '-100%' }}
+      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+      onAnimationComplete={() => {
+        if (!dragHandleVisibleRef.current) setDragHandleMounted(false);
+      }}
+    >
       <span
         className={`drag-notch${dragHandleHolding ? ' drag-notch-holding' : ''}`}
         data-testid="window-drag-notch"
         role="presentation"
         title="Drag to move the window — double-click to zoom"
+        style={{ pointerEvents: dragHandleShown ? 'auto' : 'none' }}
         onMouseDown={holdWindowDrag}
         onMouseUp={releaseWindowDrag}
         onMouseEnter={() => setDragHandle(true)}
@@ -1573,7 +1661,7 @@ export function App() {
           ))}
         </span>
       </span>
-    </div>
+    </motion.div>
   );
   const torBar = activeContainer.egress === 'tor' ? <TorStatusBar container={activeContainer} status={torStatus} /> : null;
   const vaultBar = vaultPrompt ? (
@@ -1663,7 +1751,6 @@ export function App() {
       onTorToggle={baseContainer.egress === 'tor' ? undefined : toggleWindowTor}
       onGo={(value) => go(activeTab.id, value)}
       onAi={(value) => go(activeTab.id, value, { ai: true })}
-      bookmarks={bookmarks}
     />
   ) : null;
 
@@ -1723,6 +1810,7 @@ export function App() {
                 onGuestMessage={(channel, payload) => onGuestMessage(tab.id, channel, payload)}
                 onRegister={(el) => registerWebview(tab.id, el)}
                 tor={torMode}
+                muted={Boolean(tab.muted)}
               />
             </div>
           );
@@ -1855,6 +1943,11 @@ export function App() {
                 <RefreshCcw size={14} /> Reset context
               </button>
             )}
+            {menuTab.mode === 'web' && menuTab.url && (
+              <button type="button" className={item} onClick={run(() => toggleMute(menuTab.id))}>
+                {menuTab.muted ? <Volume2 size={14} /> : <VolumeX size={14} />} {menuTab.muted ? 'Unmute tab' : 'Mute tab'}
+              </button>
+            )}
             {sep}
             <button type="button" className={item} onClick={run(() => createGroup(menuTab.id))}>
               <FolderPlus size={14} /> New group
@@ -1910,6 +2003,7 @@ export function App() {
         setActiveId(tabId);
         setTabMenu({ x, y, tabId });
       }}
+      onToggleMute={toggleMute}
       onReorderUngrouped={(ordered) =>
         setTabs((cur) => {
           // Drop the reordered ungrouped tabs back into their original slots, leaving grouped tabs put.
@@ -1933,132 +2027,169 @@ export function App() {
     );
   }
 
-  if (layout === 'side') {
+  const bookmarksBar = (
+    <BookmarksBar
+      bookmarks={bookmarks}
+      pinned={bookmarksPinned}
+      onTogglePinned={() => setBookmarksBarPinned(!bookmarksPinned)}
+      onOpen={(url) => activeTab && navigateTab(activeTab.id, url)}
+      onOpenInNewTab={(url) => openWebTab(url, { background: true })}
+      onRemove={(id) => void removeBookmark(id)}
+    />
+  );
+
+  const topTabStrip = (
+    // Tabs sit at the very top (offset past the macOS traffic lights); the omnibox lives
+    // just beneath them, flush left since nothing overlaps it there.
+    // Tabs are drag-reorderable along the X axis only (they live in a horizontal strip).
+    <div className="flex h-9">
+      {isMac && <div aria-hidden className="w-[82px] shrink-0" />}
+      <Reorder.Group
+        ref={topTabStripRef}
+        as="div"
+        axis="x"
+        values={tabs}
+        onReorder={setTabs}
+        layoutScroll
+        data-testid="top-tab-strip"
+        className="tab-strip flex min-w-0 flex-1 select-none items-center gap-1 overflow-x-auto overflow-y-hidden"
+      >
+        {tabs.map((tab) => {
+          const color = groupColor(tab.groupId);
+          return (
+            <Reorder.Item
+              as="div"
+              key={tab.id}
+              value={tab}
+              // Only positions animate. Animating size too squashed the titles while
+              // the row reflowed — on every open, close and window resize.
+              layout="position"
+              dragConstraints={topTabStripRef}
+              dragElastic={0}
+              dragMomentum={false}
+              data-testid="top-tab"
+              data-tab-id={tab.id}
+              onClick={() => setActiveId(tab.id)}
+              onDragStart={() => {
+                setDraggingTopTabId(tab.id);
+                setActiveId(tab.id);
+              }}
+              onDragEnd={() => setDraggingTopTabId(null)}
+              onContextMenu={(e: React.MouseEvent<HTMLDivElement>) => {
+                e.preventDefault();
+                setActiveId(tab.id);
+                setTabMenu({ x: e.clientX, y: e.clientY, tabId: tab.id });
+              }}
+              whileDrag={{ cursor: 'grabbing', zIndex: 90 }}
+              // Tabs share the row evenly and shrink together as it fills, down to a
+              // width that still shows the favicon and a word of the title; past that
+              // the strip scrolls. Nothing depends on the window being any one size.
+              className={`no-drag group relative flex h-8 w-[210px] min-w-[104px] max-w-[210px] flex-[1_1_210px] cursor-grab items-center gap-2 overflow-hidden rounded-xl px-2.5 transition-colors ${
+                draggingTopTabId === tab.id || tab.id === activeId
+                  ? `bg-[var(--tab-active)]${draggingTopTabId === tab.id ? ' top-tab-dragging' : ''}`
+                  : 'bg-[var(--tab)] text-neutral-500 hover:bg-[var(--tab-hover)] dark:text-neutral-400'
+              }`}
+            >
+              <TabStatus tab={tab} color={color} />
+              <span className="min-w-0 flex-1 truncate text-[13px]">{tabTitle(tab)}</span>
+              {/* Sound first, then the agent's mark, then close; the title, not the
+                  favicon, gives up room for them. */}
+              <TabMarks tab={tab} agentRunning={agents[tab.id]?.running} onToggleMute={() => toggleMute(tab.id)} />
+              <button
+                type="button"
+                aria-label="Close tab"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeTab(tab.id);
+                }}
+                className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-md text-neutral-400 opacity-0 transition group-hover:opacity-100 hover:bg-black/10 hover:text-neutral-900 dark:hover:bg-white/15 dark:hover:text-white"
+              >
+                <X size={12} />
+              </button>
+            </Reorder.Item>
+          );
+        })}
+        {/* New-tab sits right beside the last tab; once the row fills up it pins to the corner. */}
+        {!topTabsCrowded && <NewTabButton className="ml-0.5" onNewTab={() => openTab(null)} onNewGroup={openTabInNewGroup} onNewAgentTab={openAgentTab} data-testid="top-new-tab" />}
+      </Reorder.Group>
+      {topTabsCrowded && <NewTabButton className="ml-1.5" onNewTab={() => openTab(null)} onNewGroup={openTabInNewGroup} onNewAgentTab={openAgentTab} data-testid="top-new-tab" />}
+    </div>
+  );
+
+  // The picker only ever shows before this window has an identity (fresh window, or
+  // its profile was deleted underneath it) — a window's profile is fixed once chosen,
+  // so there is no mid-session picker and nothing underneath worth keeping mounted.
+  if (profilePickerOpen) {
     return (
-      <div className="flex h-screen flex-col bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
-        {hasCustomTitleBar && dragHandleVisible && windowDragHandle('side')}
-        <header className="drag relative shrink-0 border-b border-black/[0.07] px-3 pt-2.5 pb-2.5 dark:border-white/10">
-          {addressRow}
-          {torBar}
-        </header>
-        <div className="relative flex min-h-0 flex-1">
-          {sidebarOpen && sidebarEl()}
-          {viewport}
-          {!sidebarOpen && (
-            <>
-              <div className="absolute left-0 top-0 z-[70] h-full w-3" data-testid="sidebar-peek-trigger" onMouseEnter={() => setSidebarPeek(true)} />
-              <AnimatePresence>
-                {sidebarPeek && (
-                  <motion.div
-                    className="absolute left-0 top-0 z-[75] flex h-full bg-white dark:bg-neutral-950"
-                    data-testid="sidebar-peek"
-                    onMouseLeave={() => setSidebarPeek(false)}
-                    initial={{ x: -240 }}
-                    animate={{ x: 0 }}
-                    exit={{ x: -240 }}
-                    transition={{ type: 'spring', stiffness: 420, damping: 38 }}
-                  >
-                    {sidebarEl(true)}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </>
-          )}
-        </div>
-        <AnimatePresence>{agentSpotlight}</AnimatePresence>
-        {agentCursorEl}
-        {tabContextMenu}
+      <div className="relative h-screen bg-white dark:bg-neutral-950">
+        <div className="drag fixed inset-x-0 top-0 z-50 h-16" data-testid="profile-drag-region" aria-hidden />
+        {profilePicker}
       </div>
     );
   }
 
+  // One tree for both layouts. The header changes shape and the sidebar comes and goes,
+  // but the viewport — every mounted page — keeps its place in the tree, so switching
+  // between top and side tabs rearranges the chrome without reloading a single tab.
+  const sideTabs = layout === 'side';
   return (
     <div className="flex h-screen flex-col bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
-      {hasCustomTitleBar && topTabsCrowded && dragHandleVisible && windowDragHandle('tabs')}
+      {hasCustomTitleBar && dragHandleMounted && windowDragHandle(sideTabs ? 'side' : 'tabs')}
       <header className="drag relative shrink-0 border-b border-black/[0.07] px-3 pt-2.5 pb-2.5 dark:border-white/10">
-        {/* Tabs sit at the very top (offset past the macOS traffic lights); the omnibox lives
-            just beneath them, flush left since nothing overlaps it there. */}
-        {/* Tabs are drag-reorderable along the X axis only (they live in a horizontal strip). */}
-        <div className="flex h-9">
-          {isMac && <div aria-hidden className="w-[82px] shrink-0" />}
-          <Reorder.Group
-            ref={topTabStripRef}
-            as="div"
-            axis="x"
-            values={tabs}
-            onReorder={setTabs}
-            layoutScroll
-            data-testid="top-tab-strip"
-            className="tab-strip flex min-w-0 flex-1 select-none items-center gap-1 overflow-x-auto overflow-y-hidden"
-          >
-          {tabs.map((tab) => {
-            const color = groupColor(tab.groupId);
-            return (
-              <Reorder.Item
-                as="div"
-                key={tab.id}
-                value={tab}
-                dragConstraints={topTabStripRef}
-                dragElastic={0}
-                dragMomentum={false}
-                data-testid="top-tab"
-                data-tab-id={tab.id}
-                onClick={() => setActiveId(tab.id)}
-                onDragStart={() => {
-                  setDraggingTopTabId(tab.id);
-                  setActiveId(tab.id);
-                }}
-                onDragEnd={() => setDraggingTopTabId(null)}
-                onContextMenu={(e: React.MouseEvent<HTMLDivElement>) => {
-                  e.preventDefault();
-                  setActiveId(tab.id);
-                  setTabMenu({ x: e.clientX, y: e.clientY, tabId: tab.id });
-                }}
-                whileDrag={{ cursor: 'grabbing', zIndex: 90 }}
-                className={`no-drag group relative flex h-8 w-[210px] min-w-[120px] max-w-[210px] flex-[1_1_210px] cursor-grab items-center gap-2 overflow-hidden rounded-xl px-2.5 transition-colors ${
-                  draggingTopTabId === tab.id || tab.id === activeId
-                    ? `bg-[var(--tab-active)]${draggingTopTabId === tab.id ? ' top-tab-dragging' : ''}`
-                    : 'bg-[var(--tab)] text-neutral-500 hover:bg-[var(--tab-hover)] dark:text-neutral-400'
-                }`}
-              >
-                <TabStatus tab={tab} color={color} />
-                <span className="min-w-0 flex-1 truncate text-[13px]">{tabTitle(tab)}</span>
-                {/* The agent's mark sits just before the close button; the title, not the
-                    favicon, gives up room for it. */}
-                {agents[tab.id]?.running && <TabAgentCursor />}
-                <button
-                  type="button"
-                  aria-label="Close tab"
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    closeTab(tab.id);
-                  }}
-                  className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-md text-neutral-400 opacity-0 transition group-hover:opacity-100 hover:bg-black/10 hover:text-neutral-900 dark:hover:bg-white/15 dark:hover:text-white"
-                >
-                  <X size={12} />
-                </button>
-              </Reorder.Item>
-            );
-          })}
-          {/* New-tab sits right beside the last tab; once the row fills up it pins to the corner. */}
-          {!topTabsCrowded && (
-            <button type="button" aria-label="New tab" onClick={() => openTab(null)} className={`${iconBtn} ml-0.5 h-8 w-8 shrink-0`}>
-              <Plus size={16} />
-            </button>
-          )}
-          </Reorder.Group>
-          {topTabsCrowded && (
-            <button type="button" aria-label="New tab" onClick={() => openTab(null)} className={`${iconBtn} ml-1.5 h-8 w-8 shrink-0`}>
-              <Plus size={16} />
-            </button>
-          )}
-        </div>
+        {!sideTabs && topTabStrip}
         {/* Same 10px rhythm as the header's top/bottom padding, so all three gaps match. */}
-        <div className="mt-2.5">{addressRow}</div>
+        <div className={sideTabs ? '' : 'mt-2.5'}>{addressRow}</div>
+        {bookmarksPinned && <div className="mt-1.5 -mb-1">{bookmarksBar}</div>}
         {torBar}
+        {!bookmarksPinned && (
+          // Unpinned, the bar lives just below the address bar and shows itself when the
+          // pointer rests along the header's bottom edge — over the page, never moving it.
+          // The header is a native drag region, which never sees the pointer, so the
+          // strip that senses it is carved out of that region.
+          <div className="no-drag absolute inset-x-0 bottom-0 z-[60]" onMouseEnter={showBookmarksPeek} onMouseLeave={hideBookmarksPeek} data-testid="bookmarks-bar-trigger">
+            <div className="h-2" />
+            <AnimatePresence>
+              {bookmarksPeek && (
+                <motion.div
+                  className="absolute inset-x-0 top-full border-b border-black/[0.07] bg-white px-3 shadow-[0_6px_16px_rgba(0,0,0,0.08)] dark:border-white/10 dark:bg-neutral-950 dark:shadow-[0_6px_16px_rgba(0,0,0,0.4)]"
+                  data-testid="bookmarks-bar-peek"
+                  initial={{ opacity: 0, y: -6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+                >
+                  {bookmarksBar}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
       </header>
-      {viewport}
+      <div className="relative flex min-h-0 flex-1">
+        {sideTabs && sidebarOpen && sidebarEl()}
+        {viewport}
+        {sideTabs && !sidebarOpen && (
+          <>
+            <div className="absolute left-0 top-0 z-[70] h-full w-3" data-testid="sidebar-peek-trigger" onMouseEnter={() => setSidebarPeek(true)} />
+            <AnimatePresence>
+              {sidebarPeek && (
+                <motion.div
+                  className="absolute left-0 top-0 z-[75] flex h-full bg-white dark:bg-neutral-950"
+                  data-testid="sidebar-peek"
+                  onMouseLeave={() => setSidebarPeek(false)}
+                  initial={{ x: -240 }}
+                  animate={{ x: 0 }}
+                  exit={{ x: -240 }}
+                  transition={{ type: 'spring', stiffness: 420, damping: 38 }}
+                >
+                  {sidebarEl(true)}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </>
+        )}
+      </div>
       <AnimatePresence>{agentSpotlight}</AnimatePresence>
       {agentCursorEl}
       {tabContextMenu}

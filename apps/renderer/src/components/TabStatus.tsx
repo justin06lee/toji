@@ -1,5 +1,5 @@
-import { MousePointer2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { MousePointer2, Volume2, VolumeX } from 'lucide-react';
+import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import type { BrowserTab } from '../types';
 
 const ICON = `${import.meta.env.BASE_URL}toji-round.png`;
@@ -7,7 +7,7 @@ const ICON = `${import.meta.env.BASE_URL}toji-round.png`;
 /**
  * A tab's leading slot: the site's favicon (or its group colour), with a spinner while
  * the page loads. The favicon is how a tab is recognised at a glance, so nothing else
- * ever takes its place — status marks go at the trailing end (see TabAgentCursor).
+ * ever takes its place — status marks go at the trailing end (see TabMarks).
  *
  * Shared by both tab strips so the top and side layouts can never drift apart.
  */
@@ -33,6 +33,43 @@ export function TabAgentCursor() {
     >
       <MousePointer2 size={13} className="agent-tab-cursor" />
     </span>
+  );
+}
+
+/**
+ * The speaker on a tab that is making sound, and the crossed one on a tab that has been
+ * muted. Clicking it mutes or unmutes — the way it works in every other browser.
+ */
+export function TabAudio({ tab, onToggleMute }: { tab: BrowserTab; onToggleMute: () => void }) {
+  const muted = Boolean(tab.muted);
+  return (
+    <button
+      type="button"
+      data-testid={muted ? 'tab-muted' : 'tab-audible'}
+      aria-label={muted ? 'Unmute tab' : 'Mute tab'}
+      title={muted ? 'Unmute tab' : 'Mute tab'}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event: ReactMouseEvent) => {
+        event.stopPropagation();
+        onToggleMute();
+      }}
+      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-neutral-500 transition hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+    >
+      {muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+    </button>
+  );
+}
+
+/**
+ * Everything that sits between a tab's title and its close button, in the one order
+ * both strips use: sound first, then the agent's cursor. See tabMarks for the rule.
+ */
+export function TabMarks({ tab, agentRunning, onToggleMute }: { tab: BrowserTab; agentRunning?: boolean; onToggleMute: () => void }) {
+  return (
+    <>
+      {(tab.muted || tab.audible) && <TabAudio tab={tab} onToggleMute={onToggleMute} />}
+      {agentRunning && <TabAgentCursor />}
+    </>
   );
 }
 

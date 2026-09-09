@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, shell, nativeImage, webContents, dialog, session, screen, systemPreferences, clipboard } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, shell, nativeImage, nativeTheme, webContents, dialog, session, screen, systemPreferences, clipboard } = require('electron');
 const { spawn } = require('node:child_process');
 const { applySessionPolicy, applyWebRtcPolicy, parsePartition } = require('./policy.cjs');
 const { TorController } = require('./tor.cjs');
@@ -6,6 +6,7 @@ const { Vault, generatePassword } = require('./vault.cjs');
 const { ExternalLinkQueue, urlsFromArgv } = require('./external-links.cjs');
 const { redactManifestValues } = require('./page-redaction.cjs');
 const { contextMenuTemplate } = require('./context-menu.cjs');
+const { Adblock } = require('./adblock.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -194,17 +195,32 @@ async function enableWebStore(sess) {
  * Page-side fixups for every guest frame of a container session, alongside the password
  * manager's half in guest-preload.cjs. A <webview> takes a single webPreferences.preload
  * and a sandboxed preload cannot require() a sibling, so each further fixup is its own
- * file registered on the session. Today that is browser-promos.cjs, which removes the
- * "switch to our browser" promos of the Chrome Web Store and the search engines.
+ * file registered on the session: browser-promos.cjs removes the "switch to our browser"
+ * promos of the Chrome Web Store and the search engines; video-controls.cjs adds the
+ * picture-in-picture button and the space bar to every video.
  */
+const GUEST_FIXUPS = ['browser-promos.cjs', 'video-controls.cjs'];
 function installGuestFixups(sess) {
   if (!sess || typeof sess.registerPreloadScript !== 'function') return;
-  try {
-    sess.registerPreloadScript({ type: 'frame', filePath: path.join(__dirname, 'browser-promos.cjs') });
-  } catch (error) {
-    appendServerLog(`guest fixups unavailable: ${error && error.message}`);
+  for (const file of GUEST_FIXUPS) {
+    try {
+      sess.registerPreloadScript({ type: 'frame', filePath: path.join(__dirname, file) });
+    } catch (error) {
+      appendServerLog(`guest fixup ${file} unavailable: ${error && error.message}`);
+    }
   }
 }
+
+// --- Ad blocking -------------------------------------------------------------------
+// One blocker for the whole app, attached to every container session as it is created.
+// See adblock.cjs: its request check sits behind the Tor kill switch in the shared gate.
+let adblock = null;
+function getAdblock() {
+  if (!adblock) adblock = new Adblock({ dataDir: path.join(app.getPath('userData'), 'adblock'), ipcMain, log: appendServerLog });
+  return adblock;
+}
+ipcMain.handle('toji:adblock-status', () => getAdblock().status());
+ipcMain.handle('toji:adblock-set', (_event, enabled) => getAdblock().setEnabled(Boolean(enabled)));
 
 function setupExtensions() {
   // Default session powers the app shell (and any Web Store page opened without a partition).
@@ -216,6 +232,7 @@ function setupExtensions() {
     // which is where a container session's policy is normally installed).
     applyContainerPolicy(sess);
     installGuestFixups(sess);
+    getAdblock().attach(sess);
     if (webStore) void enableWebStore(sess);
   });
 }
@@ -266,6 +283,10 @@ function attachContainerPolicy(hostContents) {
     webPreferences.webSecurity = true;
     webPreferences.allowRunningInsecureContent = false;
     webPreferences.preload = path.join(__dirname, 'guest-preload.cjs');
+    // Pages may open windows: target=_blank links and window.open() reach the window-open
+    // handler below, which turns each into a Toji tab. Chromium's default for a guest is
+    // to refuse them outright, in which case such a link does nothing at all.
+    webPreferences.disablePopups = false;
     applyContainerPolicy(session.fromPartition(params.partition), params.partition);
   });
   hostContents.on('did-attach-webview', (_event, guest) => {
@@ -535,9 +556,11 @@ function senderOwnsTarget(event, webContentsId) {
 }
 
 // Open an http(s) link inside Toji (as a new web tab) instead of an external browser.
-function openInToji(url, targetWindow = focusedWindow()) {
+// `options.background` keeps the current tab in front (a ⌘-click, "Open Link in New
+// Tab"); `options.fromPage` says the link came from a page, so the tab goes next to it.
+function openInToji(url, targetWindow = focusedWindow(), options = {}) {
   const win = targetWindow;
-  if (win && !win.isDestroyed()) win.webContents.send('toji:open-url', url);
+  if (win && !win.isDestroyed()) win.webContents.send('toji:open-url', url, options);
 }
 
 // --- Links from outside ----------------------------------------------------------
@@ -742,8 +765,9 @@ function createWindow(containerId = null) {
   const win = new BrowserWindow({
     width: 1480,
     height: 960,
-    minWidth: 1180,
-    minHeight: 760,
+    // Small enough for a narrow side-by-side window; the chrome is built to fit it.
+    minWidth: 560,
+    minHeight: 400,
     title: 'Toji',
     backgroundColor: '#08090f',
     icon: fs.existsSync(APP_ICON_PATH) ? APP_ICON_PATH : undefined,
@@ -898,14 +922,14 @@ function runContextMenuItem(item, contents, params, win) {
       return contents.session.addWordToSpellCheckerDictionary(params.misspelledWord);
 
     case 'link:open':
-      return openInToji(params.linkURL, tabHostWindow(win));
+      return openInToji(params.linkURL, tabHostWindow(win), { background: true, fromPage: true });
     case 'link:save':
       return contents.downloadURL(params.linkURL);
     case 'link:copy':
       return clipboard.writeText(params.linkURL);
 
     case 'image:open':
-      return openInToji(params.srcURL, tabHostWindow(win));
+      return openInToji(params.srcURL, tabHostWindow(win), { background: true, fromPage: true });
     case 'image:save':
     case 'media:save':
       return contents.downloadURL(params.srcURL);
@@ -998,11 +1022,19 @@ app.on('web-contents-created', (_event, contents) => {
       /* session already gone */
     }
   });
-  contents.setWindowOpenHandler(({ url }) => {
+  // What a page playing sound looks like from the outside: the tab strip shows a speaker
+  // on the tab. The guest's host is the profile window that draws that strip.
+  contents.on('audio-state-changed', (event) => {
+    const host = contents.hostWebContents;
+    if (host && !host.isDestroyed()) host.send('toji:tab-audio', { webContentsId: contents.id, audible: Boolean(event.audible) });
+  });
+  contents.setWindowOpenHandler(({ url, disposition }) => {
     try {
       const scheme = new URL(url).protocol;
       if (scheme === 'http:' || scheme === 'https:') {
-        openInToji(url, windowForContents(contents));
+        // Chromium says how the page (or the click) wanted it: a ⌘-click asks for a
+        // background tab and stays put; a plain target=_blank comes to the front.
+        openInToji(url, windowForContents(contents), { background: disposition === 'background-tab', fromPage: true });
         return { action: 'deny' };
       }
       if (scheme === 'mailto:') void shell.openExternal(url);
@@ -1015,6 +1047,14 @@ app.on('web-contents-created', (_event, contents) => {
 
 // Closing the final tab closes only its window; other profile windows keep running.
 ipcMain.on('toji:close-window', (event) => windowForContents(event.sender)?.close());
+
+// Toji's theme is the theme every page sees: setting Chromium's colour scheme here makes
+// `prefers-color-scheme` follow the toggle in every tab (sites that offer a dark mode
+// switch to it) and in the AI answer pages, which restyle in place instead of
+// regenerating.
+ipcMain.on('toji:set-theme', (_event, theme) => {
+  nativeTheme.themeSource = theme === 'dark' ? 'dark' : 'light';
+});
 
 // Register Toji as the OS handler for http/https (the macOS "default browser").
 //
@@ -1421,6 +1461,9 @@ app.whenReady().then(async () => {
     console.error(`[agent-server] failed to start: ${message}`);
   }
   createWindow();
+  // The filter engine: a moment from its cache, so the first page is already filtered; the
+  // first launch fetches and parses the lists in a worker and filters from then on.
+  void getAdblock().load();
   // A link on the command line (Windows, Linux, or `toji https://…`) at first launch.
   for (const url of urlsFromArgv(process.argv.slice(1))) openExternalUrl(url);
 

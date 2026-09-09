@@ -20,11 +20,11 @@ vi.mock('./model.js', () => ({
   }
 }));
 
-const { streamAnswerPage } = await import('./pageAgent.js');
+const { streamAnswerPage, THEME_PRELUDE } = await import('./pageAgent.js');
 
 async function render(): Promise<string> {
   let out = '';
-  for await (const chunk of streamAnswerPage('dubai work visa', 'light')) out += chunk;
+  for await (const chunk of streamAnswerPage('dubai work visa')) out += chunk;
   return out;
 }
 
@@ -39,7 +39,14 @@ beforeEach(() => {
 describe('streamAnswerPage', () => {
   test('passes the model page through, minus the code fence it wrapped it in', async () => {
     state.chunks = ['```html\n<!DOCTYPE html><h1>Dubai</h1>', '</html>\n```'];
-    expect(await render()).toBe('<!DOCTYPE html><h1>Dubai</h1></html>');
+    expect(await render()).toBe(`<!DOCTYPE html>${THEME_PRELUDE}<h1>Dubai</h1></html>`);
+  });
+
+  test('every page carries the theme prelude, so a theme switch restyles it in place', async () => {
+    state.chunks = ['<html><body><h1>No doctype</h1></body></html>'];
+    expect(await render()).toBe(`${THEME_PRELUDE}<html><body><h1>No doctype</h1></body></html>`);
+    expect(THEME_PRELUDE).toContain('prefers-color-scheme:dark');
+    expect(THEME_PRELUDE).toContain('--bg:');
   });
 
   test('a failing backend explains itself instead of claiming none is configured', async () => {
@@ -68,7 +75,7 @@ describe('streamAnswerPage', () => {
     state.chunks = ['<!DOCTYPE html><h1>Dubai</h1>'];
     state.error = 'connection reset';
     const html = await render();
-    expect(html).toBe('<!DOCTYPE html><h1>Dubai</h1>');
+    expect(html).toBe(`<!DOCTYPE html>${THEME_PRELUDE}<h1>Dubai</h1>`);
     expect(html).not.toContain('could not generate');
   });
 

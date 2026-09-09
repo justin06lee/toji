@@ -1,5 +1,19 @@
 import type { BrowserTab } from '../types';
 
+/**
+ * Where a tab opened FROM another tab goes: right after it, the way every browser does
+ * it, so a run of links opened from one page sits together beside that page. With no
+ * opener in the list (it closed meanwhile), the tab goes on the end.
+ */
+export function insertTabAfter(tabs: BrowserTab[], openerId: string | null | undefined, tab: BrowserTab): BrowserTab[] {
+  const index = openerId ? tabs.findIndex((t) => t.id === openerId) : -1;
+  if (index < 0) return [...tabs, tab];
+  // Past any tabs already opened from this one, so they keep the order they were opened in.
+  let end = index + 1;
+  while (end < tabs.length && tabs[end].openerId === openerId) end += 1;
+  return [...tabs.slice(0, end), tab, ...tabs.slice(end)];
+}
+
 /** Replace the initial untouched tab with onboarding instead of appending a second tab. */
 export function replacePristineTabWithWelcome(tabs: BrowserTab[], activeId: string): BrowserTab[] | null {
   const active = tabs.find((tab) => tab.id === activeId);

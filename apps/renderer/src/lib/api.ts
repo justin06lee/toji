@@ -125,9 +125,11 @@ export function saveSettings(patch: Partial<UserSettings>) {
 }
 
 /** URL the page iframe streams its HTML from (rendered progressively by the browser).
- *  Pass reloadKey > 0 to force a fresh (uncached) regeneration on reload. */
-export function pageStreamUrl(query: string, theme: 'light' | 'dark' = 'light', reloadKey = 0) {
-  const base = `${API_BASE}/api/page/stream?q=${encodeURIComponent(query)}&theme=${theme}`;
+ *  Pass reloadKey > 0 to force a fresh (uncached) regeneration on reload. The page
+ *  carries both themes and follows the app's, so the URL — and the page — never changes
+ *  with the theme. */
+export function pageStreamUrl(query: string, reloadKey = 0) {
+  const base = `${API_BASE}/api/page/stream?q=${encodeURIComponent(query)}`;
   return reloadKey > 0 ? `${base}&fresh=1&n=${reloadKey}` : base;
 }
 

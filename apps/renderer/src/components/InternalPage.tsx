@@ -1,4 +1,4 @@
-import { ArrowRight, BookMarked, Boxes, Brain, Check, Compass, Copy, Cpu, Download, EyeOff, FileText, KeyRound, Loader2, Paperclip, Plus, Puzzle, RefreshCw, Route, Search, Star, Trash2, TrendingUp, X } from 'lucide-react';
+import { ArrowRight, BookMarked, Boxes, Brain, Check, Compass, Copy, Cpu, Download, EyeOff, FileText, Globe, KeyRound, Loader2, Paperclip, Plus, Puzzle, RefreshCw, Route, Search, Star, Trash2, TrendingUp, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   addBookmarks,
@@ -24,7 +24,8 @@ import {
   type ReferenceDoc
 } from '../lib/api';
 import type { AgentChoice, AgentsStatus, Billing, CerebrasModels, InternalPage as InternalPageKind, ModelCatalog, Plan, ThinkingLevel, UserSettings } from '../types';
-import { bridge, type ImportBrowser, type TorStatus, type VaultEntry, type VaultStatus } from '../lib/bridge';
+import { bridge, isElectron, type AdblockStatus, type ImportBrowser, type TorStatus, type VaultEntry, type VaultStatus } from '../lib/bridge';
+import { BOOKMARKS_BAR_EVENT, bookmarksBarPinned, setBookmarksBarPinned } from './BookmarksBar';
 import { PROFILE_AVATARS, newContainer, type Container, type Egress } from '../lib/containers';
 import { describeBrowser, describeImport, describePasswordsFile, planProfiles, plural, type ImportMessage, type ImportTotals } from '../lib/browserImport';
 import { VaultUnavailable } from './VaultBar';
@@ -666,6 +667,7 @@ function SettingsView({
       <VaultSettings containers={containers} />
       <AgentSettings onShowPlans={onShowPlans} />
       <SearchSettings />
+      <BrowsingSettings />
       <MemorySettings />
     </div>
   );
@@ -1352,6 +1354,54 @@ function SearchSettings() {
             }}
           />
         </label>
+      </div>
+    </Section>
+  );
+}
+
+/** What every page gets: ad blocking, and where the bookmarks bar sits. */
+function BrowsingSettings() {
+  const [adblock, setAdblock] = useState<AdblockStatus | null>(null);
+  const [pinned, setPinned] = useState(bookmarksBarPinned);
+  useEffect(() => {
+    void bridge().adblockStatus?.().then(setAdblock).catch(() => {});
+    const sync = () => setPinned(bookmarksBarPinned());
+    window.addEventListener(BOOKMARKS_BAR_EVENT, sync);
+    return () => window.removeEventListener(BOOKMARKS_BAR_EVENT, sync);
+  }, []);
+  const setBlocking = async (enabled: boolean) => {
+    setAdblock((s) => (s ? { ...s, enabled } : s));
+    const next = await bridge().setAdblock?.(enabled);
+    if (next) setAdblock(next);
+  };
+  const row = 'flex items-center justify-between gap-4 py-2.5';
+  return (
+    <Section icon={<Globe size={16} />} title="Browsing">
+      <div className="divide-y divide-black/[0.06] rounded-xl border border-black/10 px-3 dark:divide-white/[0.08] dark:border-white/10">
+        <div className={row}>
+          <div className="min-w-0">
+            <div className="text-[13px]">Block ads and trackers</div>
+            <p className="text-[12px] text-neutral-500">
+              {!isElectron()
+                ? 'Needs the Toji desktop app.'
+                : !adblock
+                  ? 'Checking…'
+                  : !adblock.enabled
+                    ? 'Off. Pages load exactly as the site sends them.'
+                    : adblock.ready
+                      ? `On, with the same lists uBlock Origin uses — on every site, video players included.${adblock.blocked > 0 ? ` ${adblock.blocked.toLocaleString()} blocked since launch.` : ''}`
+                      : 'On. Fetching the filter lists — blocking starts the moment they arrive.'}
+            </p>
+          </div>
+          <Switch checked={Boolean(adblock?.enabled)} disabled={!isElectron() || !adblock} onChange={(v) => void setBlocking(v)} label="Block ads and trackers" />
+        </div>
+        <div className={row}>
+          <div className="min-w-0">
+            <div className="text-[13px]">Always show the bookmarks bar</div>
+            <p className="text-[12px] text-neutral-500">{pinned ? 'The bar sits under the address bar on every page.' : 'The bar slides in when the pointer rests under the address bar.'}</p>
+          </div>
+          <Switch checked={pinned} onChange={(v) => setBookmarksBarPinned(v)} label="Always show the bookmarks bar" />
+        </div>
       </div>
     </Section>
   );

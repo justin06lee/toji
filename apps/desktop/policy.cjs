@@ -14,6 +14,8 @@
  * Must stay in sync with `parsePartition` in apps/renderer/src/lib/containers.ts.
  * Both sides are covered by tests (containers.test.ts / policy.test.cjs).
  */
+const { addRequestCheck } = require('./request-gate.cjs');
+
 const PARTITION_RE = /^(?:persist:)?toji-c-(.+)-(direct|tor)(?:-[et]\d+)?$/;
 
 function parsePartition(partition) {
@@ -66,13 +68,21 @@ function applySessionPolicy(sess, partition, tor) {
  * degrades to "no privacy" is worse than one that visibly refuses.
  */
 function installKillSwitch(sess, tor) {
-  if (sess.__tojiKillSwitch) return; // onBeforeRequest holds a single listener per session
+  if (sess.__tojiKillSwitch) return;
   sess.__tojiKillSwitch = true;
-  sess.webRequest.onBeforeRequest((details, callback) => {
-    const isNetwork = NETWORK_SCHEME_RE.test(details.url || '');
-    if (!isNetwork) return callback({}); // about:, data:, devtools:, extensions
-    callback({ cancel: !(tor && tor.isReady && tor.isReady()) });
-  });
+  // Electron allows one onBeforeRequest listener per session, and the ad blocker needs
+  // it too, so the switch joins the shared gate — at priority 0, ahead of everything
+  // else: an offline Tor container is refused before anyone else gets a say.
+  addRequestCheck(
+    sess,
+    'kill-switch',
+    (details, callback) => {
+      const isNetwork = NETWORK_SCHEME_RE.test(details.url || '');
+      if (!isNetwork) return callback({}); // about:, data:, devtools:, extensions
+      callback({ cancel: !(tor && tor.isReady && tor.isReady()) });
+    },
+    0
+  );
 }
 
 /**

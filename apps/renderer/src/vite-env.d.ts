@@ -8,7 +8,7 @@ interface Window {
       electron: string;
     };
     quit?: () => void;
-    onOpenUrl?: (callback: (url: string) => void) => () => void;
+    onOpenUrl?: (callback: (url: string, options: { background?: boolean; fromPage?: boolean }) => void) => () => void;
     onCloseTab?: (callback: () => void) => () => void;
     onNewTab?: (callback: () => void) => () => void;
   };

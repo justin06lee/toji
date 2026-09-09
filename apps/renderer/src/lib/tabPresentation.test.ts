@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { BrowserTab } from '../types';
-import { tabTitle } from './tabPresentation';
+import { tabMarks, tabTitle } from './tabPresentation';
 
 const tab = (next: Partial<BrowserTab> = {}): BrowserTab => ({
   id: 'tab-1',
@@ -37,5 +37,22 @@ describe('tabTitle', () => {
   test('prefers a web page title and otherwise uses its host', () => {
     expect(tabTitle(tab({ mode: 'web', status: 'ready', url: 'https://example.com/path', title: 'Example' }))).toBe('Example');
     expect(tabTitle(tab({ mode: 'web', status: 'loading', url: 'https://example.com/path' }))).toBe('example.com');
+  });
+});
+
+describe('tabMarks', () => {
+  test('a quiet, idle tab carries no marks', () => {
+    expect(tabMarks(tab(), false)).toEqual([]);
+  });
+
+  test('sound comes before the agent cursor', () => {
+    expect(tabMarks(tab({ audible: true }), true)).toEqual(['audible', 'agent']);
+    expect(tabMarks(tab({ audible: true }), false)).toEqual(['audible']);
+    expect(tabMarks(tab(), true)).toEqual(['agent']);
+  });
+
+  test('a muted tab shows the crossed speaker instead of the plain one, sound or not', () => {
+    expect(tabMarks(tab({ muted: true }), false)).toEqual(['muted']);
+    expect(tabMarks(tab({ muted: true, audible: true }), true)).toEqual(['muted', 'agent']);
   });
 });

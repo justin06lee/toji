@@ -120,7 +120,6 @@ svg {
   border-top: none;
   border-radius: 0 0 13px 13px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
-  animation: toji-drag-notch-in 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .drag-notch:active,
 .drag-notch-holding {
@@ -130,10 +129,6 @@ svg {
   background: #171717;
   border-color: rgba(255, 255, 255, 0.14);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-}
-@keyframes toji-drag-notch-in {
-  from { opacity: 0; transform: translateY(-100%); }
-  to { opacity: 1; transform: translateY(0); }
 }
 /* The dot-grid grip (the ⠿ "drag dots" pattern). */
 .drag-grip {
@@ -149,9 +144,6 @@ svg {
   background: rgba(0, 0, 0, 0.32);
 }
 .dark .drag-grip i { background: rgba(255, 255, 255, 0.42); }
-@media (prefers-reduced-motion: reduce) {
-  .drag-notch { animation: none; }
-}
 
 /* Indeterminate page-loading bar */
 @keyframes toji-load {

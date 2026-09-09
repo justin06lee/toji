@@ -17,8 +17,10 @@ const MAX_ENTRIES = 200;
 let writeChain = Promise.resolve();
 let statePromise: Promise<PageCacheState> | undefined;
 
-function cacheKey(theme: string, query: string) {
-  return hashString(`page|${theme}|${normalizeWhitespace(query).toLowerCase()}`);
+// Pages are theme-neutral (they follow prefers-color-scheme), so one entry serves both
+// themes. The version tag retires entries from when pages were generated per theme.
+function cacheKey(query: string) {
+  return hashString(`page|v2|${normalizeWhitespace(query).toLowerCase()}`);
 }
 
 function isFresh(savedAt: string) {
@@ -40,19 +42,19 @@ function loadCache(): Promise<PageCacheState> {
   return statePromise;
 }
 
-/** Return a previously generated page for this exact (theme, query), if any. */
-export async function getCachedPage(theme: string, query: string): Promise<string | undefined> {
+/** Return a previously generated page for this exact query, if any. */
+export async function getCachedPage(query: string): Promise<string | undefined> {
   const state = await loadCache();
-  const entry = state.entries[cacheKey(theme, query)];
+  const entry = state.entries[cacheKey(query)];
   return entry && isFresh(entry.savedAt) ? entry.html : undefined;
 }
 
 /** Store a fully generated page. Serialized via a write chain; pruned to the newest MAX_ENTRIES. */
-export function putCachedPage(theme: string, query: string, html: string) {
+export function putCachedPage(query: string, html: string) {
   writeChain = writeChain
     .then(async () => {
       const state = await loadCache();
-      state.entries[cacheKey(theme, query)] = { savedAt: new Date().toISOString(), html };
+      state.entries[cacheKey(query)] = { savedAt: new Date().toISOString(), html };
       const entries = Object.entries(state.entries);
       if (entries.length > MAX_ENTRIES) {
         entries.sort(([, a], [, b]) => Date.parse(b.savedAt) - Date.parse(a.savedAt));

@@ -17,6 +17,8 @@ interface WebViewProps {
   onGuestMessage?: (channel: string, payload: unknown) => void;
   /** The tab browses through Tor, so a failed load may simply be Tor being down. */
   tor?: boolean;
+  /** Silence the page's sound (the speaker on the tab). Survives reloads and navigation. */
+  muted?: boolean;
   // Register the underlying <webview> element so the web agent can drive it
   // (executeJavaScript / capturePage) even while this tab is inactive.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -30,7 +32,7 @@ interface WebViewProps {
  * the address bar and tab stay in sync; popups are routed into Toji by the main
  * process (web-contents-created → setWindowOpenHandler).
  */
-export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadingChange, onHistory, onFavicon, onGuestMessage, onRegister, tor }: WebViewProps) {
+export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadingChange, onHistory, onFavicon, onGuestMessage, onRegister, tor, muted = false }: WebViewProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ref = useRef<any>(null);
   // A main-frame load that failed. Chromium leaves the view blank; Toji draws its own
@@ -39,6 +41,10 @@ export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadin
   const [canBack, setCanBack] = useState(false);
   const registerRef = useRef(onRegister);
   registerRef.current = onRegister;
+  // Applied once the guest exists (dom-ready) and again whenever it changes; before
+  // attachment the call throws, so the value is kept here for the first dom-ready.
+  const mutedRef = useRef(muted);
+  mutedRef.current = muted;
 
   useEffect(() => {
     registerRef.current?.(ref.current);
@@ -46,9 +52,16 @@ export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadin
   }, []);
 
   useEffect(() => {
+    try {
+      ref.current?.setAudioMuted?.(muted);
+    } catch {
+      // Not attached yet — dom-ready below applies it.
+    }
+  }, [muted]);
+
+  useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    el.setAttribute('allowpopups', 'true');
     const reportHistory = () => {
       try {
         const back = el.canGoBack();
@@ -81,9 +94,13 @@ export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadin
       } catch {
         // ignore — re-injected on the next load
       }
+      try {
+        if (mutedRef.current) el.setAudioMuted(true);
+      } catch {
+        // the guest went away between events
+      }
       reportHistory();
     };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const onIpc = (e: any) => onGuestMessage?.(e?.channel, e?.args?.[0]);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -145,11 +162,16 @@ export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadin
           backgrounded, so an agent can keep working on it after you switch tabs. */}
       {/* The guest preload is the page-side half of the password manager (see
           apps/desktop/guest-preload.cjs). Absent outside the Electron shell. */}
+      {/* allowpopups must be there when the guest is created — set after the fact it is
+          ignored, and a target=_blank link then does nothing. The main process also
+          reasserts it (will-attach-webview) and turns each popup into a tab. React drops
+          a boolean it does not know, so it goes in as the string Electron reads. */}
       <webview
         ref={ref}
         src={url}
         partition={partition}
         preload={bridge().guestPreload}
+        {...({ allowpopups: 'true' } as Record<string, string>)}
         webpreferences="backgroundThrottling=false"
         className="flex min-h-0 flex-1 bg-white dark:bg-neutral-950"
       />

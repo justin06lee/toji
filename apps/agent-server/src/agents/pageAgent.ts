@@ -1,18 +1,25 @@
 import { normalizeWhitespace, safeHostname } from '../lib/text.js';
 import type { PageSource } from '../types.js';
 import { createHtmlFenceStripper } from '../lib/htmlFence.js';
+import { createPreludeInjector } from '../lib/htmlPrelude.js';
 import { agentAvailable, liveModelName, streamText } from './model.js';
 
-export type PageTheme = 'light' | 'dark';
+/**
+ * The colours of every generated page, for both themes, in one place the page cannot
+ * miss. A page is written once against these custom properties and follows Toji's
+ * theme through `prefers-color-scheme` — which the desktop app sets from its own toggle
+ * — so switching theme restyles the page in place instead of asking the model again.
+ * The html/body rules are the safety net for a model that hardcoded a colour anyway.
+ */
+export const THEME_PRELUDE = [
+  '<style id="toji-theme">',
+  ':root{color-scheme:light dark;--bg:#ffffff;--fg:#0a0a0a;--muted:rgba(0,0,0,0.55);--border:rgba(0,0,0,0.10);--surface:rgba(0,0,0,0.03)}',
+  '@media (prefers-color-scheme:dark){:root{--bg:#000000;--fg:#ffffff;--muted:rgba(255,255,255,0.6);--border:rgba(255,255,255,0.12);--surface:rgba(255,255,255,0.04)}}',
+  'html,body{background:var(--bg)!important;color:var(--fg)!important}',
+  '</style>'
+].join('');
 
-function themeRules(theme: PageTheme): string {
-  return theme === 'dark'
-    ? `THEME = DARK. Background: #000000. Primary text: #ffffff. Secondary text: rgba(255,255,255,0.6). Hairline borders: rgba(255,255,255,0.12). Subtle surface fill: rgba(255,255,255,0.04).`
-    : `THEME = LIGHT. Background: #ffffff. Primary text: #0a0a0a. Secondary text: rgba(0,0,0,0.55). Hairline borders: rgba(0,0,0,0.10). Subtle surface fill: rgba(0,0,0,0.03).`;
-}
-
-function pageSystemPrompt(theme: PageTheme): string {
-  return `You are Toji, an AI browser that answers a query by generating a single, complete, self-contained HTML web page explaining the topic — a clean, editorial, well-typeset article.
+const PAGE_SYSTEM_PROMPT = `You are Toji, an AI browser that answers a query by generating a single, complete, self-contained HTML web page explaining the topic — a clean, editorial, well-typeset article.
 
 STRICT OUTPUT RULES:
 - Output ONLY raw HTML. Start with <!DOCTYPE html> and end with </html>. No markdown, no code fences, no commentary.
@@ -21,10 +28,10 @@ STRICT OUTPUT RULES:
 - Any <a> links MUST include target="_blank" rel="noreferrer".
 
 DESIGN SYSTEM (follow exactly — minimal, monochrome, editorial):
-- ${themeRules(theme)}
+- COLOURS come only from these CSS custom properties, which Toji predefines for both light and dark mode. Never redefine them and never write a literal colour (no hex, rgb, or named colours): var(--bg) page background, var(--fg) primary text, var(--muted) secondary text, var(--border) hairline borders, var(--surface) subtle fills.
 - Font: system stack — font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif.
 - NO gradients anywhere. NO colored accents. NO emojis. Monochrome only — build hierarchy with weight, size, and text opacity, not color.
-- SQUARE corners only (border-radius: 0). Borders are 1px hairlines in the theme border color. Avoid drop shadows.
+- SQUARE corners only (border-radius: 0). Borders are 1px hairlines in var(--border). Avoid drop shadows.
 - Layout: a single centered column, max-width: 680px, margin: 0 auto, with generous horizontal padding (at least 28px) and ample top/bottom padding (~64px top). Comfortable reading: font-size 17px, line-height 1.7.
 - Headings: font-weight 600, letter-spacing -0.01em. h1 ~38px. Clear vertical rhythm and whitespace between sections.
 - Optional thin divider rules (1px border) between major sections. Keep it calm and uncluttered.
@@ -37,7 +44,6 @@ CONTENT:
 - GROUNDING: if a SOURCES list is given in the user message, base the page primarily on those sources — synthesize across them and reflect what they say. You may reference a source naturally in prose (e.g., "According to <site>…"). Do not contradict the sources, and do not invent statistics or quotes that aren't supported by them. You may add widely-known background context.
 
 Write the page now.`;
-}
 
 function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -45,16 +51,11 @@ function escapeHtml(value: string): string {
 
 /**
  * The chrome every locally-generated page shares: the same monochrome type and theme
- * the model is asked to produce, so a demo or an error still looks like Toji rather
- * than a browser error screen.
+ * variables the model is asked to use, so a demo or an error still looks like Toji
+ * rather than a browser error screen.
  */
-function pageShell(title: string, theme: PageTheme, body: string): string {
-  const dark = theme === 'dark';
-  const bg = dark ? '#000000' : '#ffffff';
-  const fg = dark ? '#ffffff' : '#0a0a0a';
-  const muted = dark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.55)';
-  const border = dark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.10)';
-  return `<!DOCTYPE html>
+function pageShell(title: string, body: string): string {
+  return `<!DOCTYPE html>${THEME_PRELUDE}
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -62,24 +63,24 @@ function pageShell(title: string, theme: PageTheme, body: string): string {
 <title>${title}</title>
 <style>
   * { box-sizing: border-box; }
-  html, body { margin: 0; background: ${bg}; }
+  html, body { margin: 0; background: var(--bg); }
   body {
-    color: ${fg};
+    color: var(--fg);
     font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     font-size: 17px; line-height: 1.7;
     -webkit-font-smoothing: antialiased;
   }
   .wrap { max-width: 680px; margin: 0 auto; padding: 64px 28px 96px; }
   h1 { font-size: 38px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.15; margin: 0 0 10px; }
-  .standfirst { color: ${muted}; font-size: 18px; margin: 0 0 36px; }
+  .standfirst { color: var(--muted); font-size: 18px; margin: 0 0 36px; }
   h2 { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; margin: 40px 0 12px; }
   p { margin: 0 0 18px; }
   ul { margin: 0 0 18px; padding-left: 20px; }
   li { margin: 0 0 8px; }
-  hr { border: none; border-top: 1px solid ${border}; margin: 40px 0; }
-  .meta { color: ${muted}; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 28px; }
-  .detail { border: 1px solid ${border}; border-radius: 12px; padding: 16px 18px; margin: 0 0 28px; font-size: 15px; }
-  a { color: ${fg}; text-underline-offset: 3px; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+  .meta { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 28px; }
+  .detail { border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; margin: 0 0 28px; font-size: 15px; }
+  a { color: var(--fg); text-underline-offset: 3px; }
   code { font-size: 0.92em; }
 </style>
 </head>
@@ -91,12 +92,11 @@ ${body}
 </html>`;
 }
 
-/** A self-contained, themed, monochrome HTML page used when no model is configured (demo / offline). */
-export function fallbackPageHtml(query: string, theme: PageTheme = 'light'): string {
+/** A self-contained, monochrome HTML page used when no model is configured (demo / offline). */
+export function fallbackPageHtml(query: string): string {
   const clean = escapeHtml(normalizeWhitespace(query) || 'Toji');
   return pageShell(
     clean,
-    theme,
     `    <p class="meta">Toji · demo render</p>
     <h1>${clean}</h1>
     <p class="standfirst">A live, AI-generated page answering your query.</p>
@@ -122,11 +122,10 @@ export function fallbackPageHtml(query: string, theme: PageTheme = 'light'): str
  * read as "you never set this up", and the message explaining the real problem was
  * only ever written to the server log.
  */
-export function errorPageHtml(query: string, theme: PageTheme, backend: string, reason: string): string {
+export function errorPageHtml(query: string, backend: string, reason: string): string {
   const clean = escapeHtml(normalizeWhitespace(query) || 'Toji');
   return pageShell(
     clean,
-    theme,
     `    <p class="meta">Toji · could not generate</p>
     <h1>${clean}</h1>
     <p class="standfirst">The page didn't generate — ${escapeHtml(backend)} returned an error.</p>
@@ -141,16 +140,14 @@ export function errorPageHtml(query: string, theme: PageTheme, backend: string, 
 }
 
 /**
- * Stream a themed, monochrome HTML answer page for a query. Yields HTML chunks.
+ * Stream a monochrome HTML answer page for a query. Yields HTML chunks.
  * Uses the live model when configured; otherwise streams the local fallback page
  * in small chunks so streaming still works offline / in demo mode.
+ *
+ * The page carries no theme of its own: THEME_PRELUDE is placed at its head and the
+ * page follows whichever colour scheme the viewer prefers.
  */
-export async function* streamAnswerPage(
-  query: string,
-  theme: PageTheme = 'light',
-  signal?: AbortSignal,
-  sources?: PageSource[]
-): AsyncGenerator<string, void, unknown> {
+export async function* streamAnswerPage(query: string, signal?: AbortSignal, sources?: PageSource[]): AsyncGenerator<string, void, unknown> {
   const clean = normalizeWhitespace(query);
   const grounded = Array.isArray(sources) && sources.length > 0;
   const sourceBlock = grounded
@@ -164,10 +161,12 @@ export async function* streamAnswerPage(
     let produced = 0;
     try {
       // Models hand back a ```html fence around the page often enough that the prompt
-      // saying not to is not enough; strip it as the page streams.
+      // saying not to is not enough; strip it as the page streams. The theme prelude
+      // then goes in behind the doctype, the moment there is one.
       const fence = createHtmlFenceStripper();
+      const prelude = createPreludeInjector(THEME_PRELUDE);
       for await (const delta of streamText({
-        system: pageSystemPrompt(theme),
+        system: PAGE_SYSTEM_PROMPT,
         user: `User query: ${clean}${sourceBlock}\n\nGenerate the complete HTML page now${grounded ? ', grounded in the sources above' : ''}.`,
         temperature: grounded ? 0.35 : 0.5,
         maxTokens: 3200,
@@ -176,14 +175,18 @@ export async function* streamAnswerPage(
         const html = fence.push(delta);
         if (html) {
           produced += html.length;
-          yield html;
+          const out = prelude.push(html);
+          if (out) yield out;
         }
       }
       const tail = fence.end();
       if (tail) {
         produced += tail.length;
-        yield tail;
+        const out = prelude.push(tail);
+        if (out) yield out;
       }
+      const rest = prelude.end();
+      if (rest) yield rest;
       if (produced > 0) return;
       failure = 'The model returned an empty page.';
     } catch (error) {
@@ -196,7 +199,7 @@ export async function* streamAnswerPage(
   }
 
   // No model at all is the demo case; a model that failed gets told why.
-  const html = failure ? errorPageHtml(clean, theme, backend, failure) : fallbackPageHtml(clean, theme);
+  const html = failure ? errorPageHtml(clean, backend, failure) : fallbackPageHtml(clean);
   const step = 120;
   for (let i = 0; i < html.length; i += step) {
     if (signal?.aborted) return;

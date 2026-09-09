@@ -8,11 +8,24 @@ contextBridge.exposeInMainWorld('toji', {
   },
   closeWindow: () => ipcRenderer.send('toji:close-window'),
   // The main process asks the renderer to open an http(s) link as a Toji web tab.
+  // `options.background` keeps the current tab in front; `options.fromPage` says a page
+  // opened it (so it belongs beside that page's tab) rather than another app.
   onOpenUrl: (callback) => {
-    const handler = (_event, url) => callback(url);
+    const handler = (_event, url, options) => callback(url, options || {});
     ipcRenderer.on('toji:open-url', handler);
     return () => ipcRenderer.removeListener('toji:open-url', handler);
   },
+  // A guest page started or stopped making sound; the tab shows a speaker meanwhile.
+  onTabAudio: (callback) => {
+    const handler = (_event, state) => callback(state);
+    ipcRenderer.on('toji:tab-audio', handler);
+    return () => ipcRenderer.removeListener('toji:tab-audio', handler);
+  },
+  // Toji's light/dark choice, applied to every page's prefers-color-scheme.
+  setTheme: (theme) => ipcRenderer.send('toji:set-theme', theme),
+  // Built-in ad blocking: on by default, switchable in Settings.
+  adblockStatus: () => ipcRenderer.invoke('toji:adblock-status'),
+  setAdblock: (enabled) => ipcRenderer.invoke('toji:adblock-set', enabled),
   // Links from other apps that arrived before this window could take them (a cold start
   // from a click elsewhere). Calling this also marks the window as able to take more.
   takeExternalUrls: () => ipcRenderer.invoke('toji:external-urls-ready'),
