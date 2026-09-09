@@ -193,13 +193,13 @@ async function enableWebStore(sess) {
  * Page-side fixups for every guest frame of a container session, alongside the password
  * manager's half in guest-preload.cjs. A <webview> takes a single webPreferences.preload
  * and a sandboxed preload cannot require() a sibling, so each further fixup is its own
- * file registered on the session. Today that is web-store-prompt.cjs, which dismisses the
- * Chrome Web Store's "Switch to Chrome?" card as soon as it appears.
+ * file registered on the session. Today that is browser-promos.cjs, which removes the
+ * "switch to our browser" promos of the Chrome Web Store and the search engines.
  */
 function installGuestFixups(sess) {
   if (!sess || typeof sess.registerPreloadScript !== 'function') return;
   try {
-    sess.registerPreloadScript({ type: 'frame', filePath: path.join(__dirname, 'web-store-prompt.cjs') });
+    sess.registerPreloadScript({ type: 'frame', filePath: path.join(__dirname, 'browser-promos.cjs') });
   } catch (error) {
     appendServerLog(`guest fixups unavailable: ${error && error.message}`);
   }
