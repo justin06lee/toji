@@ -3,6 +3,7 @@ const { spawn } = require('node:child_process');
 const { applySessionPolicy, applyWebRtcPolicy, parsePartition } = require('./policy.cjs');
 const { TorController } = require('./tor.cjs');
 const { Vault, generatePassword } = require('./vault.cjs');
+const { ExternalLinkQueue, urlsFromArgv } = require('./external-links.cjs');
 const { redactManifestValues } = require('./page-redaction.cjs');
 const { contextMenuTemplate } = require('./context-menu.cjs');
 const fs = require('node:fs');
@@ -538,6 +539,69 @@ function openInToji(url, targetWindow = focusedWindow()) {
   const win = targetWindow;
   if (win && !win.isDestroyed()) win.webContents.send('toji:open-url', url);
 }
+
+// --- Links from outside ----------------------------------------------------------
+//
+// When Toji is the default browser, a click in Mail or Slack reaches it as an OS
+// event — on macOS whether or not Toji is running, and on a cold start BEFORE 'ready'.
+// So the handlers are registered here at load, and a link that arrives before any
+// renderer can take it waits in the queue until one asks (toji:external-urls-ready).
+const externalLinks = new ExternalLinkQueue();
+/** Renderers that have subscribed to toji:open-url, by webContents id. */
+const linkReadyRenderers = new Set();
+
+function deliverExternalUrl(url) {
+  const win = [focusedWindow(), ...BrowserWindow.getAllWindows()].find(
+    (candidate) => candidate && !candidate.isDestroyed() && linkReadyRenderers.has(candidate.webContents.id)
+  );
+  if (!win) return false;
+  win.webContents.send('toji:open-url', url);
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  return true;
+}
+
+function openExternalUrl(candidate) {
+  if (!externalLinks.push(candidate, deliverExternalUrl)) return;
+  // Held: make sure a window is on its way to ask for it. Before 'ready' the normal
+  // startup creates one; afterwards (macOS with every window closed) nothing would.
+  if (app.isReady() && BrowserWindow.getAllWindows().length === 0) createWindow();
+}
+
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  openExternalUrl(url);
+});
+app.on('open-file', (event, filePath) => {
+  event.preventDefault();
+  openExternalUrl(filePath);
+});
+
+// Windows and Linux start a second copy of the app for a link; that copy hands its
+// command line to the first and exits.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', (_event, argv) => {
+    const urls = urlsFromArgv(argv);
+    for (const url of urls) openExternalUrl(url);
+    if (urls.length === 0) {
+      const win = focusedWindow() || BrowserWindow.getAllWindows()[0];
+      if (win && !win.isDestroyed()) {
+        if (win.isMinimized()) win.restore();
+        win.focus();
+      }
+    }
+  });
+}
+
+ipcMain.handle('toji:external-urls-ready', (event) => {
+  const id = event.sender.id;
+  linkReadyRenderers.add(id);
+  event.sender.once('destroyed', () => linkReadyRenderers.delete(id));
+  return externalLinks.take();
+});
 
 // The renderer reveals its window-drag notch when the pointer nears the top of the
 // window. It cannot learn that from DOM events: the top chrome is largely a native
@@ -1357,6 +1421,8 @@ app.whenReady().then(async () => {
     console.error(`[agent-server] failed to start: ${message}`);
   }
   createWindow();
+  // A link on the command line (Windows, Linux, or `toji https://…`) at first launch.
+  for (const url of urlsFromArgv(process.argv.slice(1))) openExternalUrl(url);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

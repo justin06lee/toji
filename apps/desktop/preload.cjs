@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld('toji', {
     ipcRenderer.on('toji:open-url', handler);
     return () => ipcRenderer.removeListener('toji:open-url', handler);
   },
+  // Links from other apps that arrived before this window could take them (a cold start
+  // from a click elsewhere). Calling this also marks the window as able to take more.
+  takeExternalUrls: () => ipcRenderer.invoke('toji:external-urls-ready'),
   // "Search <engine> for …" from the page context menu. The main process sends the
   // selected phrase rather than a URL, because the engine choice lives here.
   onSearch: (callback) => {

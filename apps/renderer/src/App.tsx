@@ -557,6 +557,26 @@ export function App() {
   }, [openInternal]);
 
   // Open an http(s) link (a source or an in-page link) as a new Toji web tab.
+  /**
+   * A link from outside Toji: another app, the OS, the command line. It lands in the
+   * window's container — and if no profile has been chosen yet, in the default one,
+   * because a link someone just clicked should open, not wait behind a picker.
+   */
+  const openExternalLink = useCallback(
+    (url: string) => {
+      const containerId = windowContainerRef.current ?? DEFAULT_CONTAINER_ID;
+      if (!windowContainerRef.current) selectWindowContainer(containerId);
+      const tab = makeTab(null, containerId);
+      tab.mode = 'web';
+      tab.url = url;
+      tab.query = url;
+      tab.status = 'loading';
+      setTabs((current) => [...current, tab]);
+      setActiveId(tab.id);
+    },
+    [selectWindowContainer]
+  );
+
   const openWebTab = useCallback((url: string) => {
     const from = tabsRef.current.find((t) => t.id === activeRef.current);
     // A link opened from a page stays in that page's container, so following a link
@@ -589,7 +609,15 @@ export function App() {
   // Links opened from the AI page iframe / webviews are routed here by the main process.
   useEffect(() => {
     const toji = (window as unknown as { toji?: { onOpenUrl?: (cb: (url: string) => void) => () => void } }).toji;
-    return toji?.onOpenUrl?.(openWebTab);
+    const off = toji?.onOpenUrl?.(openExternalLink);
+    // Links that arrived before this window's renderer existed — a click in another app
+    // that started Toji cold. Asking for them also tells the main process this window
+    // can take the next one directly.
+    void bridge()
+      .takeExternalUrls?.()
+      .then((urls) => urls.forEach(openExternalLink))
+      .catch(() => {});
+    return off;
   }, [openWebTab]);
 
   // "Search <engine> for …" in the page context menu. The main process sends the phrase;

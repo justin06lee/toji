@@ -118,6 +118,8 @@ export interface TojiBridge {
   onVaultPrompt?: (callback: (prompt: VaultPrompt) => void) => () => void;
   /** file:// URL of the preload every <webview> guest loads. */
   guestPreload?: string;
+  /** Links from other apps held since before this window existed; also marks it able to take more. */
+  takeExternalUrls?: () => Promise<string[]>;
 
   // --- tor ---
   torStatus?: () => Promise<TorStatus>;
