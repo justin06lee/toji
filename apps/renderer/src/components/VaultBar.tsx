@@ -1,4 +1,5 @@
 import { Check, KeyRound, ShieldOff, X } from 'lucide-react';
+import { motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import { bridge, type VaultEntry, type VaultPrompt } from '../lib/bridge';
 import type { Container } from '../lib/containers';
@@ -6,8 +7,10 @@ import type { Container } from '../lib/containers';
 /**
  * Offer to save a login the user just submitted.
  *
- * The password is held in the main process and never reaches this component — the
- * prompt only knows which site and account it is for, which is all it needs to show.
+ * A card hanging off the omnibox — the way every browser asks — rather than a bar that
+ * shoves the page down. The password is held in the main process and never reaches
+ * this component: the prompt only knows which site and account it is for, which is
+ * all it needs to show.
  */
 export function VaultPromptBar({
   prompt,
@@ -38,47 +41,80 @@ export function VaultPromptBar({
   };
 
   const site = prompt.origin.replace(/^https?:\/\//, '');
+  const title = error
+    ? 'Could not save'
+    : prompt.status === 'saved'
+      ? 'Password saved'
+      : prompt.status === 'update'
+        ? 'Update password?'
+        : 'Save password?';
+  // A password Toji generated was used on this site — it is already in the vault, so
+  // there is nothing to decide, only to notice.
+  const decided = Boolean(error) || prompt.status === 'saved';
 
   return (
-    <div className="no-drag flex items-center gap-2.5 rounded-lg border border-black/10 bg-black/[0.03] px-3 py-1.5 text-[12px] dark:border-white/12 dark:bg-white/[0.05]">
-      <KeyRound size={13} className="shrink-0 text-neutral-400" />
-      <span className="min-w-0 flex-1 truncate">
-        {error ? (
-          <span className="text-rose-600 dark:text-rose-400">Could not save: {error}</span>
-        ) : prompt.status === 'saved' ? (
-          // A password Toji generated was used on this site — it's already in the vault.
-          <>
-            Saved the login for <span className="font-medium">{prompt.username || site}</span>
-            {prompt.username && <span className="text-neutral-400"> on {site}</span>} in{' '}
-            <span className="inline-flex items-center gap-1">
-              <span className="inline-block h-1.5 w-1.5 rounded-full align-middle" style={{ background: container.color }} />
-              {container.name}
-            </span>
-            .
-          </>
-        ) : (
-          <>
-            {prompt.status === 'update' ? 'Update the password' : 'Save the password'} for{' '}
-            <span className="font-medium">{prompt.username || site}</span>
-            {prompt.username && <span className="text-neutral-400"> on {site}</span>} in{' '}
-            <span className="inline-flex items-center gap-1">
-              <span className="inline-block h-1.5 w-1.5 rounded-full align-middle" style={{ background: container.color }} />
-              {container.name}
-            </span>
-            ?
-          </>
-        )}
-      </span>
-      {!error && prompt.status !== 'saved' && (
-        <button type="button" onClick={save} disabled={busy} className="inline-flex shrink-0 items-center gap-1 rounded-md bg-neutral-900 px-2 py-1 text-white transition hover:opacity-85 disabled:opacity-40 dark:bg-white dark:text-neutral-900">
-          <Check size={11} />
-          {prompt.status === 'update' ? 'Update' : 'Save'}
+    <motion.div
+      initial={{ opacity: 0, y: -6, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.16, ease: 'easeOut' }}
+      role="dialog"
+      aria-label={title}
+      data-testid="vault-prompt"
+      className="no-drag absolute right-0 top-[calc(100%+8px)] z-50 w-[340px] rounded-2xl border border-black/10 bg-white p-4 text-neutral-900 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.35)] dark:border-white/12 dark:bg-neutral-900 dark:text-neutral-100"
+    >
+      <div className="flex items-start gap-3">
+        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-neutral-700 dark:bg-white/10 dark:text-neutral-200">
+          <KeyRound size={16} />
+        </span>
+        <div className="min-w-0 flex-1 pt-0.5">
+          <p className="text-[13.5px] font-semibold leading-tight">{title}</p>
+          <p className="mt-1 truncate text-[12.5px] text-neutral-500" title={error ?? `${prompt.username || site} on ${site}`}>
+            {error ? (
+              <span className="text-rose-600 dark:text-rose-400">{error}</span>
+            ) : (
+              <>
+                <span className="font-medium text-neutral-700 dark:text-neutral-300">{prompt.username || site}</span>
+                {prompt.username && <> · {site}</>}
+              </>
+            )}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={dismiss}
+          aria-label={decided ? 'Close' : 'Not now'}
+          className="-mr-1 -mt-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:bg-black/[0.06] hover:text-neutral-900 dark:hover:bg-white/10 dark:hover:text-white"
+        >
+          <X size={13} />
         </button>
-      )}
-      <button type="button" onClick={dismiss} aria-label="Dismiss" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-neutral-400 transition hover:bg-black/10 hover:text-neutral-900 dark:hover:bg-white/15 dark:hover:text-white">
-        <X size={12} />
-      </button>
-    </div>
+      </div>
+      <div className="mt-3.5 flex items-center justify-between gap-3">
+        <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-black/[0.05] px-2.5 py-1 text-[11.5px] text-neutral-600 dark:bg-white/10 dark:text-neutral-300" title={`Saved in the ${container.name} container`}>
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: container.color }} />
+          <span className="truncate">{container.name}</span>
+        </span>
+        {!decided && (
+          <span className="flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={dismiss}
+              className="inline-flex h-8 items-center rounded-lg px-3 text-[12.5px] text-neutral-500 transition hover:bg-black/[0.05] hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-white"
+            >
+              Not now
+            </button>
+            <button
+              type="button"
+              onClick={save}
+              disabled={busy}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-neutral-900 px-3.5 text-[12.5px] font-medium text-white transition enabled:hover:opacity-85 disabled:opacity-40 dark:bg-white dark:text-neutral-900"
+            >
+              <Check size={12} />
+              {prompt.status === 'update' ? 'Update' : 'Save'}
+            </button>
+          </span>
+        )}
+      </div>
+    </motion.div>
   );
 }
 

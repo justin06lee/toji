@@ -2,7 +2,7 @@ import { ChevronDown, ChevronRight, FolderPlus, PanelLeftClose, PanelLeftOpen, P
 import { useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { motion, Reorder } from 'motion/react';
 import { tabTitle } from '../lib/tabPresentation';
-import { TabStatus } from './TabStatus';
+import { TabAgentCursor, TabStatus } from './TabStatus';
 import { GROUP_COLORS, type BrowserTab, type TabGroup } from '../types';
 
 interface SidebarProps {
@@ -25,7 +25,7 @@ interface SidebarProps {
   onTabContextMenu: (tabId: string, x: number, y: number) => void;
   /** Reorder the ungrouped tabs (drag along the Y axis). */
   onReorderUngrouped?: (ordered: BrowserTab[]) => void;
-  /** Tabs the agent is currently driving — shown with the agent cursor in place of the favicon. */
+  /** Tabs the agent is currently driving — marked with the agent cursor beside the close button. */
   agentTabIds?: Set<string>;
 }
 
@@ -56,8 +56,9 @@ function TabRow({
         dragging || active ? 'bg-[var(--tab-active)]' : 'text-neutral-500 hover:bg-[var(--tab-hover)] dark:text-neutral-400'
       }`}
     >
-      <TabStatus tab={tab} agentRunning={agentRunning} />
-      <span className={`flex-1 truncate text-[13px] ${active ? 'text-neutral-900 dark:text-neutral-100' : ''}`}>{tabTitle(tab)}</span>
+      <TabStatus tab={tab} />
+      <span className={`min-w-0 flex-1 truncate text-[13px] ${active ? 'text-neutral-900 dark:text-neutral-100' : ''}`}>{tabTitle(tab)}</span>
+      {agentRunning && <TabAgentCursor />}
       <button
         type="button"
         aria-label="Close tab"

@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Copy, FolderPlus, Moon, MousePointer2, PanelLeft, PanelTop, Plus, RefreshCcw, RotateCw, Search, Settings, Sun, WandSparkles, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Copy, FolderPlus, Moon, MousePointer2, PanelLeft, PanelTop, Plus, RefreshCcw, RotateCw, Search, Settings, Star, Sun, WandSparkles, X } from 'lucide-react';
 import { AnimatePresence, motion, Reorder } from 'motion/react';
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
@@ -10,9 +10,9 @@ import { VaultFillButton, VaultPromptBar } from './components/VaultBar';
 import { InternalPage } from './components/InternalPage';
 import { PageView } from './components/PageView';
 import { Sidebar } from './components/Sidebar';
-import { TabStatus } from './components/TabStatus';
+import { TabAgentCursor, TabStatus } from './components/TabStatus';
 import { WebView } from './components/WebView';
-import { addMemory, agentResearch, agentStep, fetchPageSources, getAgents, getReferences, librarian, pageStreamUrl, uploadFile } from './lib/api';
+import { addBookmarks, addMemory, agentResearch, agentStep, deleteBookmark, fetchPageSources, getAgents, getBookmarks, getReferences, librarian, pageStreamUrl, uploadFile, type Bookmark } from './lib/api';
 import { eyesAct, eyesAvailable, pageScreenshot, toPagePoint, PAGE_SIGNATURE_JS } from './lib/agentDom';
 import {
   CONTAINERS_STORAGE_KEY,
@@ -64,7 +64,7 @@ const STARTUP_CONTAINER_ID = new URLSearchParams(window.location.search).get('co
  * mirrored into the toolbar omnibox (typing in one showing up in the other read as a
  * glitch, not a feature).
  */
-function LandingSearch({ onGo, onAi, torActive, onTorToggle }: { onGo: (value: string) => void; onAi: (value: string) => void; torActive: boolean; onTorToggle?: () => void }) {
+function LandingSearch({ onGo, onAi, torActive, onTorToggle, bookmarks }: { onGo: (value: string) => void; onAi: (value: string) => void; torActive: boolean; onTorToggle?: () => void; bookmarks: Bookmark[] }) {
   const [value, setValue] = useState('');
   const submit = () => {
     if (value.trim()) onGo(value);
@@ -102,6 +102,24 @@ function LandingSearch({ onGo, onAi, torActive, onTorToggle }: { onGo: (value: s
         </button>
         <span className="mr-1"><TorHoldButton active={torActive} onGo={submit} onToggle={onTorToggle} /></span>
       </form>
+      {/* Where bookmarks live: a quiet row under the box, so the star in the omnibox has
+          somewhere to lead. Titles only — Toji stores no favicons for them. */}
+      {bookmarks.length > 0 && (
+        <div className="mt-7 flex w-[min(600px,92vw)] flex-wrap justify-center gap-1.5" data-testid="landing-bookmarks">
+          {bookmarks.slice(0, 12).map((b) => (
+            <button
+              key={b.id}
+              type="button"
+              onClick={() => onGo(b.url)}
+              title={b.url}
+              className="inline-flex max-w-[200px] items-center gap-1.5 rounded-full border border-black/[0.08] px-3 py-1.5 text-[12.5px] text-neutral-600 transition hover:bg-black/[0.04] hover:text-neutral-900 dark:border-white/10 dark:text-neutral-300 dark:hover:bg-white/[0.07] dark:hover:text-white"
+            >
+              <Star size={11} className="shrink-0 text-neutral-400" />
+              <span className="truncate">{b.title || hostOf(b.url) || b.url}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -134,6 +152,11 @@ export function App() {
   const [draggingTopTabId, setDraggingTopTabId] = useState<string | null>(null);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tabId: string } | null>(null);
   const [containers, setContainers] = useState<Container[]>(loadContainers);
+  // Bookmarks live in the server's store (the import panel fills it too); the omnibox
+  // star reads and toggles the entry for the page on screen.
+  const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
+  const bookmarksRef = useRef<Bookmark[]>([]);
+  bookmarksRef.current = bookmarks;
   const [windowContainerId, setWindowContainerId] = useState<string | null>(STARTUP_CONTAINER_ID);
   const [profilePickerOpen, setProfilePickerOpen] = useState(!STARTUP_CONTAINER_ID);
   const [forceTor, setForceTor] = useState(false);
@@ -637,11 +660,41 @@ export function App() {
   const toggleGroup = useCallback((id: string) => setGroups((gs) => gs.map((g) => (g.id === id ? { ...g, collapsed: !g.collapsed } : g))), []);
   const renameGroup = useCallback((id: string, name: string) => setGroups((gs) => gs.map((g) => (g.id === id ? { ...g, name } : g))), []);
 
+  const refreshBookmarks = useCallback(async () => {
+    try {
+      setBookmarks((await getBookmarks()).bookmarks);
+    } catch {
+      // No server yet — the star stays hollow and the landing row stays empty.
+    }
+  }, []);
+  useEffect(() => {
+    void refreshBookmarks();
+  }, [refreshBookmarks]);
+
+  /** Bookmark the page a web tab is showing, or remove it if it already is one. */
+  const toggleBookmark = useCallback(
+    async (tab: BrowserTab | undefined) => {
+      if (!tab || tab.mode !== 'web' || !tab.url) return;
+      const existing = bookmarksRef.current.find((b) => b.url === tab.url);
+      try {
+        if (existing) await deleteBookmark(existing.id);
+        else await addBookmarks([{ title: tabTitle(tab), url: tab.url }]);
+      } catch {
+        return;
+      }
+      await refreshBookmarks();
+    },
+    [refreshBookmarks]
+  );
+
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       const mod = event.metaKey || event.ctrlKey;
       if (!mod) return;
-      if (event.key === 't' && !isElectron) {
+      if (event.key === 'd') {
+        event.preventDefault();
+        void toggleBookmark(tabsRef.current.find((t) => t.id === activeRef.current));
+      } else if (event.key === 't' && !isElectron) {
         event.preventDefault();
         openTab(null);
       } else if (event.key === 'w' && !isElectron) {
@@ -660,7 +713,7 @@ export function App() {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [closeTab, openTab]);
+  }, [closeTab, openTab, toggleBookmark]);
 
   // Menu accelerators from the main process (Cmd+W closes the active tab, Cmd+T opens one).
   useEffect(() => {
@@ -1408,6 +1461,7 @@ export function App() {
   }, [theme]);
 
   const canReload = Boolean(activeTab && (activeTab.url || activeTab.query.trim()));
+  const activeBookmarked = Boolean(activeTab?.url && bookmarks.some((b) => b.url === activeTab.url));
 
   const iconBtn =
     'no-drag inline-flex items-center justify-center rounded-full text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-black/5 dark:hover:bg-white/10 transition-colors disabled:opacity-35 disabled:pointer-events-none';
@@ -1478,7 +1532,10 @@ export function App() {
       <button type="button" aria-label="Reload" disabled={!canReload} onClick={reloadActive} className={`${iconBtn} h-9 w-9 border border-black/[0.08] dark:border-white/10`}>
         <RotateCw size={14} />
       </button>
-      <form onSubmit={onSubmit} className="no-drag flex h-9 flex-1 items-center rounded-full border border-black/[0.09] bg-black/[0.03] pl-3.5 pr-1 transition focus-within:bg-transparent dark:border-white/12 dark:bg-white/[0.04]">
+      {/* The omnibox and everything anchored to it: the save-password card hangs off
+          this box's right edge rather than pushing the page down. */}
+      <div className="relative flex min-w-0 flex-1">
+      <form onSubmit={onSubmit} className="no-drag flex h-9 w-full min-w-0 items-center rounded-full border border-black/[0.09] bg-black/[0.03] pl-3.5 pr-1 transition focus-within:bg-transparent dark:border-white/12 dark:bg-white/[0.04]">
         <Search size={15} className="shrink-0 text-neutral-400 mr-2.5 mb-0.25" />
         <input
           ref={inputRef}
@@ -1492,11 +1549,25 @@ export function App() {
           className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-neutral-400"
         />
         {activeTab && <VaultFillButton matches={vaultMatches[activeTab.id] ?? []} onFill={(entryId) => fillCredential(activeTab.id, entryId)} />}
+        {activeTab?.mode === 'web' && activeTab.url && (
+          <button
+            type="button"
+            aria-label={activeBookmarked ? 'Remove bookmark' : 'Bookmark this page'}
+            aria-pressed={activeBookmarked}
+            title={activeBookmarked ? 'Remove bookmark  ⌘D' : 'Bookmark this page  ⌘D'}
+            onClick={() => void toggleBookmark(activeTab)}
+            className="inline-flex h-7 w-7 mr-0.5 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-black/10 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/15 dark:hover:text-white"
+          >
+            <Star size={15} className={activeBookmarked ? 'fill-current' : ''} />
+          </button>
+        )}
         <button type="button" aria-label="Generate an AI page" title="Generate an AI page  ⇧↵" onClick={() => activeTab && go(activeTab.id, activeTab.query, { ai: true })} className="inline-flex h-7 w-7 mr-1 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-black/10 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/15 dark:hover:text-white">
           <WandSparkles size={15} />
         </button>
         <TorHoldButton compact active={torMode} onGo={() => activeTab && go(activeTab.id, activeTab.query)} onToggle={baseContainer.egress === 'tor' ? undefined : toggleWindowTor} />
       </form>
+      {vaultBar}
+      </div>
       <button type="button" aria-label="Toggle tab layout" title={layout === 'side' ? 'Top tabs' : 'Side tabs'} onClick={() => setLayout((l) => (l === 'side' ? 'top' : 'side'))} className={`${iconBtn} h-9 w-9 border border-black/[0.08] dark:border-white/10`}>
         {layout === 'side' ? <PanelTop size={14} /> : <PanelLeft size={14} />}
       </button>
@@ -1516,6 +1587,7 @@ export function App() {
       onTorToggle={baseContainer.egress === 'tor' ? undefined : toggleWindowTor}
       onGo={(value) => go(activeTab.id, value)}
       onAi={(value) => go(activeTab.id, value, { ai: true })}
+      bookmarks={bookmarks}
     />
   ) : null;
 
@@ -1790,7 +1862,6 @@ export function App() {
         {hasCustomTitleBar && dragHandleVisible && windowDragHandle('side')}
         <header className="drag relative shrink-0 border-b border-black/[0.07] px-3 pt-2.5 pb-2.5 dark:border-white/10">
           {addressRow}
-          {vaultBar && <div className="mt-2">{vaultBar}</div>}
           {torBar}
         </header>
         <div className="relative flex min-h-0 flex-1">
@@ -1873,10 +1944,11 @@ export function App() {
                     : 'bg-[var(--tab)] text-neutral-500 hover:bg-[var(--tab-hover)] dark:text-neutral-400'
                 }`}
               >
-                {/* Status lives in the LEADING slot, in place of the favicon: a fixed spot that
-                    can't be squeezed out as tabs shrink, the way trailing badges were. */}
-                <TabStatus tab={tab} color={color} agentRunning={Boolean(agents[tab.id]?.running)} />
-                <span className="flex-1 truncate text-[13px]">{tabTitle(tab)}</span>
+                <TabStatus tab={tab} color={color} />
+                <span className="min-w-0 flex-1 truncate text-[13px]">{tabTitle(tab)}</span>
+                {/* The agent's mark sits just before the close button; the title, not the
+                    favicon, gives up room for it. */}
+                {agents[tab.id]?.running && <TabAgentCursor />}
                 <button
                   type="button"
                   aria-label="Close tab"
@@ -1907,7 +1979,6 @@ export function App() {
         </div>
         {/* Same 10px rhythm as the header's top/bottom padding, so all three gaps match. */}
         <div className="mt-2.5">{addressRow}</div>
-        {vaultBar && <div className="mt-2">{vaultBar}</div>}
         {torBar}
       </header>
       {viewport}
