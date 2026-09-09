@@ -22,7 +22,6 @@ import { listCerebrasModels } from './agents/cerebras.js';
 import { plans, subscriptionStatus } from './lib/billing.js';
 import { modelCatalog, warmCatalog } from './agents/yagamiCatalog.js';
 import { addFact, listFacts, removeFact, readPinned, writePinned, PINNED_CAPS } from './lib/memory.js';
-import { detectBrowsers, importBookmarks } from './lib/browserImport.js';
 import { listBookmarks, addBookmarks, removeBookmark } from './lib/bookmarks.js';
 import { addReference, listReferences, removeReference } from './lib/references.js';
 import { librarianDigest, pinnedDigest } from './agents/librarianAgent.js';
@@ -338,22 +337,20 @@ app.put('/api/memory/pinned', async (req, res, next) => {
   }
 });
 
-// Import bookmarks from other installed browsers (Chrome-family JSON; Safari detected only).
-app.get('/api/import/browsers', (_req, res) => {
-  res.json({ browsers: detectBrowsers() });
-});
-app.post('/api/import/bookmarks', async (req, res, next) => {
+// Bookmarks store. Imports arrive as plain items: the desktop app reads other browsers
+// (and exported files) itself, since that is where the vault for their passwords lives.
+app.post('/api/bookmarks', async (req, res, next) => {
   try {
-    const body = z.object({ browser: z.string().min(1).max(40) }).parse(req.body);
-    const items = await importBookmarks(body.browser);
-    const added = await addBookmarks(items);
-    res.json({ found: items.length, added });
+    const body = z
+      .object({
+        items: z.array(z.object({ title: z.string().max(300), url: z.string().url().max(2048), folder: z.string().max(300).optional() })).max(5000)
+      })
+      .parse(req.body);
+    res.json({ added: await addBookmarks(body.items) });
   } catch (error) {
     next(error);
   }
 });
-
-// Bookmarks store.
 app.get('/api/bookmarks', async (_req, res, next) => {
   try {
     res.json({ bookmarks: await listBookmarks() });

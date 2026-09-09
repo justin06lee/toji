@@ -1,6 +1,7 @@
 import { ArrowRight, BookMarked, Boxes, Brain, Check, Compass, Copy, Cpu, Download, EyeOff, FileText, KeyRound, Loader2, Paperclip, Plus, Puzzle, RefreshCw, Route, Search, Sparkles, Star, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  addBookmarks,
   addMemory,
   addReference,
   deleteBookmark,
@@ -11,23 +12,21 @@ import {
   getBilling,
   getBookmarks,
   getCerebrasModels,
-  getImportBrowsers,
   getMemoryFacts,
   getPinnedMemory,
   getReferences,
   getSettings,
-  importBookmarks,
   saveSettings,
   savePinnedMemory,
   type Bookmark,
-  type DetectedBrowser,
   type MemoryFact,
   type PinnedMemory,
   type ReferenceDoc
 } from '../lib/api';
 import type { AgentChoice, AgentsStatus, Billing, CerebrasModels, InternalPage as InternalPageKind, ModelCatalog, Plan, ThinkingLevel, UserSettings } from '../types';
-import { bridge, type TorStatus, type VaultEntry, type VaultStatus } from '../lib/bridge';
-import { CONTAINER_COLORS, PROFILE_AVATARS, containerId as makeContainerId, type Container, type Egress } from '../lib/containers';
+import { bridge, type ImportBrowser, type TorStatus, type VaultEntry, type VaultStatus } from '../lib/bridge';
+import { PROFILE_AVATARS, newContainer, type Container, type Egress } from '../lib/containers';
+import { describeBrowser, describeImport, describePasswordsFile, planProfiles, plural, type ImportMessage, type ImportTotals } from '../lib/browserImport';
 import { VaultUnavailable } from './VaultBar';
 import { ProfileAvatar } from './WindowProfilePicker';
 import { SEARCH_ENGINES, type SearchEngineId } from '../lib/nav';
@@ -40,6 +39,8 @@ interface InternalPageProps {
   onOpenUrl: (url: string) => void;
   onGetStarted: () => void;
   containers: Container[];
+  /** The container this tab lives in — where imported passwords go. */
+  containerId: string;
   onContainersChange: (containers: Container[]) => void;
   onClearContainer: (containerId: string) => void;
   /** The question that sent the user to the plans page, so it survives the detour. */
@@ -50,14 +51,14 @@ interface InternalPageProps {
   onShowPlans?: () => void;
 }
 
-export function InternalPage({ page, onOpenUrl, onGetStarted, containers, onContainersChange, onClearContainer, pendingQuery, onContinue, onShowPlans }: InternalPageProps) {
+export function InternalPage({ page, onOpenUrl, onGetStarted, containers, containerId, onContainersChange, onClearContainer, pendingQuery, onContinue, onShowPlans }: InternalPageProps) {
   // The plans page is wider than the others: three tiers side by side don't fit 760px.
   const width = page === 'plans' ? 'w-[min(1000px,94vw)]' : 'w-[min(760px,92vw)]';
   return (
     <div className="h-full w-full overflow-y-auto bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
       <div className={`mx-auto ${width} px-6 py-12`}>
         {page === 'welcome' ? (
-          <WelcomeView onOpenUrl={onOpenUrl} onGetStarted={onGetStarted} />
+          <WelcomeView onOpenUrl={onOpenUrl} onGetStarted={onGetStarted} containers={containers} onContainersChange={onContainersChange} containerId={containerId} />
         ) : page === 'plans' ? (
           <PlansView onOpenUrl={onOpenUrl} pendingQuery={pendingQuery} onContinue={onContinue} />
         ) : (
@@ -85,21 +86,48 @@ function Section({ icon, title, children }: { icon: React.ReactNode; title: stri
 // ---------------------------------------------------------------------------
 // Welcome / onboarding
 // ---------------------------------------------------------------------------
-function WelcomeView({ onOpenUrl, onGetStarted }: { onOpenUrl: (url: string) => void; onGetStarted: () => void }) {
+function WelcomeView({
+  onOpenUrl,
+  onGetStarted,
+  containers,
+  onContainersChange,
+  containerId
+}: {
+  onOpenUrl: (url: string) => void;
+  onGetStarted: () => void;
+  containers: Container[];
+  onContainersChange: (containers: Container[]) => void;
+  containerId: string;
+}) {
   const [isDefault, setIsDefault] = useState<boolean | null>(null);
   const [settingDefault, setSettingDefault] = useState(false);
-  const [browsers, setBrowsers] = useState<DetectedBrowser[]>([]);
+  const [browsers, setBrowsers] = useState<ImportBrowser[] | null>(null);
   const [importing, setImporting] = useState<string | null>(null);
-  const [importMsg, setImportMsg] = useState<string>('');
+  const [importMsg, setImportMsg] = useState<ImportMessage | null>(null);
+  const [imports, setImports] = useState(0); // bumps after each import, so the bookmark list below refreshes
   const [extensions, setExtensions] = useState<{ id: string; name: string }[]>([]);
   const [webStoreOk, setWebStoreOk] = useState(false);
+  // An import adds containers as it goes (each browser profile becomes one), so it reads
+  // the latest list rather than the one from the render that started it.
+  const containersRef = useRef(containers);
+  containersRef.current = containers;
+
+  const checkDefault = useCallback(() => {
+    void Promise.resolve(bridge().isDefaultBrowser?.()).then((v) => setIsDefault(Boolean(v)));
+  }, []);
 
   useEffect(() => {
-    void bridge().isDefaultBrowser?.().then((v) => setIsDefault(Boolean(v)));
-    void getImportBrowsers().then((r) => setBrowsers(r.browsers)).catch(() => {});
+    checkDefault();
+    void Promise.resolve(bridge().importBrowsers?.())
+      .then((found) => setBrowsers(found ?? []))
+      .catch(() => setBrowsers([]));
     void bridge().listExtensions?.().then((e) => setExtensions(e ?? [])).catch(() => {});
     void bridge().webStoreAvailable?.().then((v) => setWebStoreOk(Boolean(v))).catch(() => {});
-  }, []);
+    // macOS asks "make Toji the default?" in a dialog of its own. Whatever was answered is
+    // known by the time focus returns, so read it then rather than wait for another click.
+    window.addEventListener('focus', checkDefault);
+    return () => window.removeEventListener('focus', checkDefault);
+  }, [checkDefault]);
 
   const makeDefault = async () => {
     setSettingDefault(true);
@@ -111,18 +139,74 @@ function WelcomeView({ onOpenUrl, onGetStarted }: { onOpenUrl: (url: string) => 
     }
   };
 
-  const doImport = async (id: string) => {
-    setImporting(id);
-    setImportMsg('');
+  /**
+   * Everything a browser has: bookmarks into the store, passwords into the vault (in the
+   * main process — they never come through here), and with several profiles, a Toji
+   * profile for each.
+   */
+  const doImport = async (browser: ImportBrowser) => {
+    setImporting(browser.id);
+    setImportMsg(null);
     try {
-      const r = await importBookmarks(id);
-      setImportMsg(`Imported ${r.added} bookmark${r.added === 1 ? '' : 's'}${r.found && !r.added ? ' (already imported)' : ''}.`);
+      const plan = planProfiles(browser.profiles, containersRef.current, containerId);
+      if (plan.created > 0) onContainersChange(plan.containers);
+      const totals: ImportTotals = { bookmarks: 0, passwords: 0, profiles: plan.created };
+      for (const target of plan.targets) {
+        const result = await bridge().importBrowser?.({ browser: browser.id, profile: target.profile.dir, containerId: target.containerId });
+        if (!result) throw new Error('import is only available in the Toji app');
+        const items = target.prefixFolders
+          ? result.bookmarks.items.map((b) => ({ ...b, folder: b.folder ? `${target.profile.name} / ${b.folder}` : target.profile.name }))
+          : result.bookmarks.items;
+        if (items.length) {
+          totals.bookmarks += (await addBookmarks(items)).added;
+          setImports((n) => n + 1);
+        }
+        totals.passwords += result.passwords.added;
+        totals.bookmarkError ??= result.bookmarks.error;
+        if (result.passwords.error && result.passwords.error !== 'unsupported') totals.passwordError ??= result.passwords.error;
+      }
+      setImportMsg(describeImport(browser.name, totals));
     } catch {
-      setImportMsg('Import failed.');
+      setImportMsg({ text: `Import from ${browser.name} failed.`, tone: 'warn' });
     } finally {
       setImporting(null);
     }
   };
+
+  const importBookmarksFile = async () => {
+    setImporting('bookmarks-file');
+    setImportMsg(null);
+    try {
+      const picked = await bridge().importBookmarksFile?.();
+      if (!picked || picked.canceled) return;
+      const added = picked.bookmarks.length ? (await addBookmarks(picked.bookmarks)).added : 0;
+      if (added) setImports((n) => n + 1);
+      setImportMsg(picked.bookmarks.length ? { text: `Imported ${plural(added, 'bookmark')} from the file.`, tone: 'ok' } : { text: 'No bookmarks found in that file.', tone: 'warn' });
+    } catch {
+      setImportMsg({ text: 'Import failed.', tone: 'warn' });
+    } finally {
+      setImporting(null);
+    }
+  };
+
+  const importPasswordsFile = async () => {
+    setImporting('passwords-file');
+    setImportMsg(null);
+    try {
+      const result = await bridge().importPasswordsFile?.(containerId);
+      if (!result || result.canceled) return;
+      setImportMsg(describePasswordsFile(result));
+    } catch {
+      setImportMsg({ text: 'Import failed.', tone: 'warn' });
+    } finally {
+      setImporting(null);
+    }
+  };
+
+  // Browsers that are here get a row; Safari always does, since every Mac has it and its
+  // route is the exported file. The rest are named once, so it is clear they would work.
+  const shown = (browsers ?? []).filter((b) => b.available || b.id === 'safari');
+  const missing = (browsers ?? []).filter((b) => !b.available && b.id !== 'safari');
 
   const addExt = async () => {
     const res = await bridge().addExtension?.();
@@ -183,32 +267,49 @@ function WelcomeView({ onOpenUrl, onGetStarted }: { onOpenUrl: (url: string) => 
       <Section icon={<Download size={16} />} title="Import from another browser">
         <div className="rounded-xl border border-black/10 p-3 dark:border-white/10">
           <div className="space-y-2">
-            {browsers.length === 0 && <span className="text-[12.5px] text-neutral-400">No other browsers detected.</span>}
-            {browsers.map((b) => {
-              // Safari stores bookmarks in a binary plist we don't parse yet.
-              const unsupported = b.id === 'safari';
-              return (
-                <div key={b.id} className="flex items-center justify-between">
-                  <span className={`text-[13px] ${b.available && !unsupported ? '' : 'text-neutral-400'}`}>{b.name}</span>
-                  {unsupported ? (
-                    <span className="text-[11.5px] text-neutral-400">Not supported yet</span>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={!b.available || importing !== null}
-                      onClick={() => void doImport(b.id)}
-                      className={FIELD_BUTTON_QUIET}
-                    >
-                      {importing === b.id ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />} Import bookmarks
-                    </button>
-                  )}
+            {browsers === null && <span className="text-[12.5px] text-neutral-400">Looking for other browsers…</span>}
+            {browsers?.length === 0 && <span className="text-[12.5px] text-neutral-400">Importing is available in the Toji app.</span>}
+            {shown.map((b) => (
+              <div key={b.id} className="flex items-center justify-between gap-3">
+                <div className="min-w-0 truncate">
+                  <span className={`text-[13px] ${b.available ? '' : 'text-neutral-400'}`}>{b.name}</span>
+                  {b.available && <span className="ml-2 text-[11.5px] text-neutral-400">{describeBrowser(b)}</span>}
                 </div>
-              );
-            })}
+                {b.available ? (
+                  <button type="button" disabled={importing !== null} onClick={() => void doImport(b)} className={FIELD_BUTTON_QUIET}>
+                    {importing === b.id ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />} Import
+                  </button>
+                ) : (
+                  <span className="text-[11.5px] text-neutral-400">Export from Safari, then import the files below</span>
+                )}
+              </div>
+            ))}
           </div>
-          {importMsg && <p className="mt-2 text-[12px] text-emerald-600 dark:text-emerald-400">{importMsg}</p>}
+          {missing.length > 0 && <p className="mt-2 text-[11.5px] text-neutral-400">Not on this Mac: {missing.map((b) => b.name).join(', ')}.</p>}
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-black/[0.06] pt-3 dark:border-white/10">
+            <span className="text-[12px] text-neutral-500">From an exported file</span>
+            <button type="button" disabled={importing !== null} onClick={() => void importBookmarksFile()} className={FIELD_BUTTON_QUIET}>
+              {importing === 'bookmarks-file' ? <Loader2 size={12} className="animate-spin" /> : <BookMarked size={12} />} Bookmarks (HTML)…
+            </button>
+            <button type="button" disabled={importing !== null} onClick={() => void importPasswordsFile()} className={FIELD_BUTTON_QUIET}>
+              {importing === 'passwords-file' ? <Loader2 size={12} className="animate-spin" /> : <KeyRound size={12} />} Passwords (CSV)…
+            </button>
+          </div>
+          <p className="mt-2 text-[11.5px] text-neutral-400">
+            Every browser can export both. Safari: File → Export → Bookmarks. Passwords: in the Passwords app, File → Export All Passwords.
+          </p>
+          {importMsg && (
+            <p className={`mt-2 text-[12px] ${importMsg.tone === 'warn' ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+              {importMsg.text}
+              {importMsg.settings && (
+                <button type="button" onClick={() => void bridge().openFullDiskAccess?.()} className="ml-1.5 underline underline-offset-2">
+                  Open System Settings
+                </button>
+              )}
+            </p>
+          )}
         </div>
-        <BookmarksList onOpenUrl={onOpenUrl} />
+        <BookmarksList onOpenUrl={onOpenUrl} refreshKey={imports} />
       </Section>
 
       <div className="mt-10 flex justify-center">
@@ -421,10 +522,11 @@ function BringYourOwn({ pendingQuery, onContinue }: { pendingQuery?: string; onC
   );
 }
 
-function BookmarksList({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
+/** `refreshKey` changes whenever an import lands, so the list picks it up at once. */
+function BookmarksList({ onOpenUrl, refreshKey = 0 }: { onOpenUrl: (url: string) => void; refreshKey?: number }) {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const refresh = useCallback(() => void getBookmarks().then((r) => setBookmarks(r.bookmarks)).catch(() => {}), []);
-  useEffect(() => refresh(), [refresh]);
+  useEffect(() => refresh(), [refresh, refreshKey]);
   if (bookmarks.length === 0) return null;
   return (
     <div className="mt-3">
@@ -516,17 +618,7 @@ function ContainersSettings({ containers, onChange, onClear }: { containers: Con
   const add = () => {
     const name = newName.trim();
     if (!name) return;
-    onChange([
-      ...containers,
-      {
-        id: makeContainerId(name, containers),
-        name,
-        avatar: PROFILE_AVATARS[containers.length % PROFILE_AVATARS.length],
-        color: CONTAINER_COLORS[containers.length % CONTAINER_COLORS.length],
-        egress: 'direct',
-        ephemeral: false
-      }
-    ]);
+    onChange([...containers, newContainer(name, containers)]);
     setNewName('');
   };
 

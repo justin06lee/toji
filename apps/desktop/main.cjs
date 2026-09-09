@@ -953,20 +953,97 @@ app.on('web-contents-created', (_event, contents) => {
 ipcMain.on('toji:close-window', (event) => windowForContents(event.sender)?.close());
 
 // Register Toji as the OS handler for http/https (the macOS "default browser").
-ipcMain.handle('toji:set-default-browser', () => {
-  try {
-    return app.setAsDefaultProtocolClient('http') && app.setAsDefaultProtocolClient('https');
-  } catch {
-    return false;
-  }
-});
-ipcMain.handle('toji:is-default-browser', () => {
+//
+// On macOS the registration call returns at once, while the system is still asking the user
+// "Do you want to change your default web browser?" — the answer only exists once that dialog
+// closes. So this waits: polling until Toji shows up as the default, or until focus has come
+// back to the window (the dialog is gone) and a moment more has passed without it (they kept
+// their old browser), with a hard limit in case neither happens.
+function isDefaultBrowser() {
   try {
     return app.isDefaultProtocolClient('http');
   } catch {
     return false;
   }
+}
+ipcMain.handle('toji:set-default-browser', async () => {
+  try {
+    if (!(app.setAsDefaultProtocolClient('http') && app.setAsDefaultProtocolClient('https'))) return false;
+  } catch {
+    return false;
+  }
+  let focusedAt = null;
+  const onFocus = () => {
+    focusedAt = focusedAt ?? Date.now();
+  };
+  app.on('browser-window-focus', onFocus);
+  try {
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      if (isDefaultBrowser()) return true;
+      if (focusedAt !== null && Date.now() - focusedAt > 2000) break;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    return isDefaultBrowser();
+  } finally {
+    app.removeListener('browser-window-focus', onFocus);
+  }
 });
+ipcMain.handle('toji:is-default-browser', () => isDefaultBrowser());
+
+// --- Import from other browsers ----------------------------------------------
+// Runs here rather than in the agent server because passwords must land in the vault
+// without ever passing through the renderer. See browser-import.cjs.
+const browserImport = require('./browser-import.cjs');
+
+/** Store imported logins under one container, in a single vault write. */
+function storeImportedLogins(logins, containerId) {
+  if (!logins.length) return 0;
+  return getVault().saveMany(logins.map((login) => ({ ...login, containerId: containerId || null })));
+}
+
+ipcMain.handle('toji:import-browsers', () => browserImport.detectBrowsers());
+ipcMain.handle('toji:import-browser', async (_event, options) => {
+  const { browser, profile, containerId } = options || {};
+  // Logins are collected, then stored together; the collector never lets one escape.
+  const logins = [];
+  const saveSecret = getVault().available() ? (login) => logins.push(login) > 0 : undefined;
+  const result = await browserImport.importFromBrowser({ browser: String(browser || ''), profile: String(profile || 'Default'), saveSecret });
+  if (logins.length) result.passwords.added = storeImportedLogins(logins, containerId);
+  return result;
+});
+ipcMain.handle('toji:import-bookmarks-file', async (event) => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(windowForContents(event.sender), {
+    title: 'Import bookmarks',
+    filters: [{ name: 'Bookmarks (HTML)', extensions: ['html', 'htm'] }],
+    properties: ['openFile']
+  });
+  if (canceled || !filePaths.length) return { canceled: true, bookmarks: [] };
+  try {
+    return { canceled: false, bookmarks: browserImport.parseBookmarksHtml(fs.readFileSync(filePaths[0], 'utf8')) };
+  } catch (error) {
+    appendServerLog(`bookmarks file import failed: ${error && error.message}`);
+    return { canceled: false, bookmarks: [] };
+  }
+});
+ipcMain.handle('toji:import-passwords-file', async (event, containerId) => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(windowForContents(event.sender), {
+    title: 'Import passwords',
+    filters: [{ name: 'Passwords (CSV)', extensions: ['csv'] }],
+    properties: ['openFile']
+  });
+  if (canceled || !filePaths.length) return { canceled: true, found: 0, added: 0, skipped: 0 };
+  if (!getVault().available()) return { canceled: false, found: 0, added: 0, skipped: 0, error: 'no-vault' };
+  try {
+    const { entries, skipped } = browserImport.parsePasswordCsv(fs.readFileSync(filePaths[0], 'utf8'));
+    return { canceled: false, found: entries.length, added: storeImportedLogins(entries, containerId), skipped };
+  } catch (error) {
+    appendServerLog(`passwords file import failed: ${error && error.message}`);
+    return { canceled: false, found: 0, added: 0, skipped: 0, error: 'unreadable' };
+  }
+});
+// macOS keeps ~/Library/Safari behind Full Disk Access; this opens the pane where Toji can be allowed.
+ipcMain.handle('toji:open-full-disk-access', () => shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'));
 // Load an unpacked Chrome extension folder into the default session AND every open per-tab
 // session, so it takes effect on the pages you're browsing right away (Web Store installs
 // go through electron-chrome-web-store instead — see setupExtensions).

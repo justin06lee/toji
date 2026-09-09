@@ -1,3 +1,5 @@
+import type { BookmarkImportError, BrowserProfile, DetectedBrowser as ImportBrowser, ImportResult, ImportedBookmark, PasswordImportError } from '../../../desktop/browser-import.cjs';
+
 // Typed view of the preload bridge (window.toji). Every member is optional: the
 // renderer also runs in a plain browser tab during `bun run dev:web`, where there is
 // no Electron shell at all, so callers use `bridge().thing?.()` throughout.
@@ -68,10 +70,31 @@ export interface VaultStatus {
   error?: string;
 }
 
+export type { BookmarkImportError, BrowserProfile, ImportBrowser, ImportResult, ImportedBookmark, PasswordImportError };
+
+export interface PasswordsFileImport {
+  canceled: boolean;
+  found: number;
+  added: number;
+  /** Rows without a website or a password. */
+  skipped: number;
+  error?: 'no-vault' | 'unreadable';
+}
+
 export interface TojiBridge {
   platform?: string;
+  /** Resolves once macOS has answered — true only when Toji really is the default. */
   setDefaultBrowser?: () => Promise<boolean>;
   isDefaultBrowser?: () => Promise<boolean>;
+
+  // --- import from other browsers ---
+  importBrowsers?: () => Promise<ImportBrowser[]>;
+  /** Bookmarks come back; passwords go straight into the vault under `containerId`. */
+  importBrowser?: (options: { browser: string; profile: string; containerId: string }) => Promise<ImportResult>;
+  importBookmarksFile?: () => Promise<{ canceled: boolean; bookmarks: ImportedBookmark[] }>;
+  importPasswordsFile?: (containerId: string) => Promise<PasswordsFileImport>;
+  /** macOS: the Full Disk Access pane, where Toji can be allowed to read Safari's data. */
+  openFullDiskAccess?: () => Promise<void>;
   addExtension?: () => Promise<{ id: string; name: string } | { error: string } | null>;
   listExtensions?: () => Promise<{ id: string; name: string }[]>;
   webStoreAvailable?: () => Promise<boolean>;

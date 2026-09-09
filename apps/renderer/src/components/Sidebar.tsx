@@ -105,7 +105,7 @@ function SidebarNewButton({ onNewTab, onNewGroup, onNewAgentTab }: { onNewTab: (
   };
 
   const item =
-    'inline-flex h-7 w-7 items-center justify-center rounded-lg text-neutral-500 transition hover:bg-black/[0.05] hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-neutral-100';
+    'inline-flex h-7 w-7 items-center justify-center rounded-full text-neutral-500 transition hover:bg-black/[0.05] hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-neutral-100';
 
   const act = (fn?: () => void) => () => {
     setExpanded(false);
@@ -198,7 +198,7 @@ export function Sidebar({ tabs, groups, activeId, onSelect, onClose, onNewTab, o
           aria-label={peek ? 'Show sidebar' : 'Hide sidebar'}
           title={peek ? 'Show sidebar (keep it open)' : 'Hide sidebar'}
           onClick={onToggleCollapse}
-          className="no-drag inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-black/5 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-neutral-100"
+          className="no-drag inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-neutral-500 transition-colors hover:bg-black/5 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-neutral-100"
         >
           {peek ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
         </button>

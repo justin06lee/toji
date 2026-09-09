@@ -155,6 +155,18 @@ export function containerId(name: string, existing: Container[]): string {
   return id;
 }
 
+/** A fresh direct, persistent container — named by the user, or after an imported profile. */
+export function newContainer(name: string, existing: Container[]): Container {
+  return {
+    id: containerId(name, existing),
+    name: name.trim(),
+    avatar: PROFILE_AVATARS[existing.length % PROFILE_AVATARS.length],
+    color: CONTAINER_COLORS[existing.length % CONTAINER_COLORS.length],
+    egress: 'direct',
+    ephemeral: false
+  };
+}
+
 export function findContainer(containers: Container[], id: string | undefined): Container {
   return containers.find((c) => c.id === id) ?? containers[0] ?? DEFAULT_CONTAINERS[0];
 }

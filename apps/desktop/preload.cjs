@@ -110,6 +110,13 @@ contextBridge.exposeInMainWorld('toji', {
   // Default-browser registration + Chrome extension loading (unpacked + Web Store).
   setDefaultBrowser: () => ipcRenderer.invoke('toji:set-default-browser'),
   isDefaultBrowser: () => ipcRenderer.invoke('toji:is-default-browser'),
+  // Import from other browsers. Bookmarks come back; passwords are written into the vault by
+  // the main process and never pass through here.
+  importBrowsers: () => ipcRenderer.invoke('toji:import-browsers'),
+  importBrowser: (options) => ipcRenderer.invoke('toji:import-browser', options),
+  importBookmarksFile: () => ipcRenderer.invoke('toji:import-bookmarks-file'),
+  importPasswordsFile: (containerId) => ipcRenderer.invoke('toji:import-passwords-file', containerId),
+  openFullDiskAccess: () => ipcRenderer.invoke('toji:open-full-disk-access'),
   addExtension: () => ipcRenderer.invoke('toji:add-extension'),
   listExtensions: () => ipcRenderer.invoke('toji:list-extensions'),
   webStoreAvailable: () => ipcRenderer.invoke('toji:web-store-available')

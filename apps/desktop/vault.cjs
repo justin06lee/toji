@@ -145,7 +145,32 @@ class Vault {
       .map(({ id, origin: o, username, containerId: cid }) => ({ id, name: siteName(o), origin: o, username, containerId: cid }));
   }
 
-  save({ id, origin, username, password, containerId, note }) {
+  save(entry) {
+    this.upsert(entry);
+    this.persist();
+    return true;
+  }
+
+  /**
+   * Save a batch — an import — with a single write. A malformed row is skipped rather than
+   * failing the rest. Returns how many were stored.
+   */
+  saveMany(entries) {
+    let stored = 0;
+    for (const entry of entries) {
+      try {
+        this.upsert(entry);
+        stored += 1;
+      } catch {
+        // skip this row
+      }
+    }
+    if (stored) this.persist();
+    return stored;
+  }
+
+  /** Add or update an entry in memory; callers persist. */
+  upsert({ id, origin, username, password, containerId, note }) {
     const normalized = originOf(origin);
     if (!normalized) throw new Error('a credential needs an http(s) origin');
     if (!password) throw new Error('a credential needs a password');
@@ -169,8 +194,6 @@ class Vault {
         updatedAt: now
       });
     }
-    this.persist();
-    return true;
   }
 
   /**

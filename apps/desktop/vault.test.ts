@@ -211,3 +211,28 @@ describe('captureStatus', () => {
     expect(vault.captureStatus({ origin: 'about:blank', username: 'a', password: 'b' })).toBe('ignore');
   });
 });
+
+describe('saveMany', () => {
+  it('stores a whole import in one write, updating duplicates and skipping malformed rows', () => {
+    const vault = makeVault();
+    const stored = vault.saveMany([
+      { origin: 'https://a.example/login', username: 'a', password: 'first', containerId: 'work' },
+      { origin: 'not a url', username: 'x', password: 'px', containerId: 'work' },
+      { origin: 'https://a.example/', username: 'a', password: 'second', containerId: 'work' },
+      { origin: 'https://b.example/', username: 'b', password: 'pb', containerId: 'personal' }
+    ]);
+    expect(stored).toBe(3);
+    expect(vault.list('work')).toHaveLength(1);
+    expect(vault.list()).toHaveLength(2);
+    // Persisted: a fresh vault over the same file sees the updated password.
+    const again = makeVault();
+    const [entry] = again.list('work');
+    expect(again.secretFor(entry.id, 'https://a.example/', 'work')).toEqual({ username: 'a', password: 'second' });
+  });
+
+  it('writes nothing when every row is malformed', () => {
+    const vault = makeVault();
+    expect(vault.saveMany([{ origin: 'nope', username: '', password: 'p' }])).toBe(0);
+    expect(fs.existsSync(file)).toBe(false);
+  });
+});

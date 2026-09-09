@@ -98,12 +98,7 @@ export function deleteReference(id: string) {
   return jsonFetch<{ removed: boolean }>(`/api/references/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
-// --- Bookmark import ---
-export interface DetectedBrowser {
-  id: string;
-  name: string;
-  available: boolean;
-}
+// --- Bookmarks ---
 export interface Bookmark {
   id: string;
   title: string;
@@ -111,11 +106,9 @@ export interface Bookmark {
   folder?: string;
   addedAt: string;
 }
-export function getImportBrowsers() {
-  return jsonFetch<{ browsers: DetectedBrowser[] }>('/api/import/browsers');
-}
-export function importBookmarks(browser: string) {
-  return jsonFetch<{ found: number; added: number }>('/api/import/bookmarks', { method: 'POST', body: JSON.stringify({ browser }) });
+/** File bookmarks the desktop app read from another browser or an exported file. Dedupes by URL. */
+export function addBookmarks(items: { title: string; url: string; folder?: string }[]) {
+  return jsonFetch<{ added: number }>('/api/bookmarks', { method: 'POST', body: JSON.stringify({ items }) });
 }
 export function getBookmarks() {
   return jsonFetch<{ bookmarks: Bookmark[] }>('/api/bookmarks');

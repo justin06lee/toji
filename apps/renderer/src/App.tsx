@@ -78,7 +78,7 @@ function LandingSearch({ onGo, onAi, torActive, onTorToggle }: { onGo: (value: s
           e.preventDefault();
           submit();
         }}
-        className="flex h-14 w-[min(600px,92vw)] items-center rounded-full border border-black/10 bg-white pl-5 pr-1.5 shadow-sm transition dark:border-white/12 dark:bg-neutral-900 dark:focus-within:border-white/30"
+        className="flex h-14 w-[min(600px,92vw)] items-center rounded-full border border-black/10 bg-white pl-5 pr-1.5 shadow-sm transition dark:border-white/12 dark:bg-neutral-900"
       >
         <Search size={18} className="shrink-0 text-neutral-400 mr-2.5 mb-0.25" />
         <input
@@ -423,7 +423,9 @@ export function App() {
   // Navigate a tab to a real web URL (rendered by <webview> inside Toji).
   const navigateTab = useCallback(
     (tabId: string, url: string) => {
-      patchTab(tabId, { mode: 'web', url, query: url, title: undefined, status: 'loading', sources: [], streamUrl: null });
+      // `internal` must go too: a URL typed into the welcome or settings tab otherwise
+      // kept showing that page, spinning, with the webview never mounted.
+      patchTab(tabId, { internal: undefined, mode: 'web', url, query: url, title: undefined, status: 'loading', sources: [], streamUrl: null });
     },
     [patchTab]
   );
@@ -1476,7 +1478,7 @@ export function App() {
       <button type="button" aria-label="Reload" disabled={!canReload} onClick={reloadActive} className={`${iconBtn} h-9 w-9 border border-black/[0.08] dark:border-white/10`}>
         <RotateCw size={14} />
       </button>
-      <form onSubmit={onSubmit} className="no-drag flex h-9 flex-1 items-center rounded-full border border-black/[0.09] bg-black/[0.03] pl-3.5 pr-1 transition focus-within:bg-transparent dark:border-white/12 dark:bg-white/[0.04] dark:focus-within:border-white/30">
+      <form onSubmit={onSubmit} className="no-drag flex h-9 flex-1 items-center rounded-full border border-black/[0.09] bg-black/[0.03] pl-3.5 pr-1 transition focus-within:bg-transparent dark:border-white/12 dark:bg-white/[0.04]">
         <Search size={15} className="shrink-0 text-neutral-400 mr-2.5 mb-0.25" />
         <input
           ref={inputRef}
@@ -1536,6 +1538,7 @@ export function App() {
               <InternalPage
                 page={tab.internal}
                 containers={containers}
+                containerId={tab.containerId}
                 onContainersChange={setContainers}
                 onClearContainer={clearContainer}
                 onOpenUrl={openWebTab}

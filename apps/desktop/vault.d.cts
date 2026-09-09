@@ -25,6 +25,10 @@ export declare class Vault {
   list(containerId?: string | null): VaultEntryMeta[];
   matchesFor(url: string, containerId?: string | null): VaultEntryMeta[];
   save(entry: { id?: string; origin: string; username: string; password: string; containerId?: string | null; note?: string }): boolean;
+  /** A batch (an import) in a single write; malformed rows are skipped. Returns how many were stored. */
+  saveMany(entries: { id?: string; origin: string; username: string; password: string; containerId?: string | null; note?: string }[]): number;
+  /** Add or update in memory only; callers persist. */
+  upsert(entry: { id?: string; origin: string; username: string; password: string; containerId?: string | null; note?: string }): void;
   /** 'new' | 'update' | 'same' | 'ignore' — whether to offer to save a submitted login. */
   captureStatus(entry: { origin: string; username: string; password: string; containerId?: string | null }): 'new' | 'update' | 'same' | 'ignore';
   remove(id: string): boolean;

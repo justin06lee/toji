@@ -206,6 +206,7 @@ apps/desktop/       Electron main process
                     window — a <webview> refuses to navigate to view-source:)
   guest-preload.cjs runs in every page: login detection and fill
   browser-promos.cjs removes "switch to our browser" promos (Web Store, search engines)
+  browser-import.cjs bookmarks, passwords and profiles from other browsers
 apps/renderer/      React UI (tabs, containers, settings)
 apps/agent-server/  local HTTP server: inference, page generation, memory
 ```
