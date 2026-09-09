@@ -1,4 +1,4 @@
-import { ArrowRight, BookMarked, Boxes, Brain, Check, Compass, Copy, Cpu, Download, EyeOff, FileText, KeyRound, Loader2, Paperclip, Plus, Puzzle, RefreshCw, Route, Search, Sparkles, Star, Trash2, X } from 'lucide-react';
+import { ArrowRight, BookMarked, Boxes, Brain, Check, Compass, Copy, Cpu, Download, EyeOff, FileText, KeyRound, Loader2, Paperclip, Plus, Puzzle, RefreshCw, Route, Search, Star, Trash2, TrendingUp, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   addBookmarks,
@@ -32,6 +32,8 @@ import { ProfileAvatar } from './WindowProfilePicker';
 import { SEARCH_ENGINES, type SearchEngineId } from '../lib/nav';
 import { FIELD, FIELD_BUTTON, FIELD_BUTTON_QUIET, FIELD_MONO, FIELD_TEXTAREA } from '../lib/fieldStyles';
 import { Dropdown, type DropdownOption } from './Dropdown';
+import { ColorPicker } from './ColorPicker';
+import { providerNote } from '../lib/providerState';
 
 
 interface InternalPageProps {
@@ -341,6 +343,11 @@ function PlansView({ onOpenUrl, pendingQuery, onContinue }: { onOpenUrl: (url: s
   const byoRef = useRef<HTMLDivElement>(null);
   const scrollToByo = () => byoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
+  const all = billing?.plans ?? [];
+  const tiers = all.filter((p) => !p.wide);
+  const wide = all.filter((p) => p.wide);
+  const isCurrent = (plan: Plan) => Boolean(billing && billing.subscription.plan === plan.id && billing.subscription.active);
+
   return (
     <div>
       <div className="mb-9 flex flex-col items-center text-center">
@@ -353,13 +360,19 @@ function PlansView({ onOpenUrl, pendingQuery, onContinue }: { onOpenUrl: (url: s
 
       {failed && <p className="mb-6 rounded-xl border border-black/10 p-3 text-[13px] text-neutral-500 dark:border-white/10">Couldn&apos;t reach the local Toji server, so plans are unavailable. Everything below still works.</p>}
 
-      <div className="grid gap-4 md:grid-cols-3">
-        {(billing?.plans ?? []).map((plan) => (
-          <PlanCard key={plan.id} plan={plan} current={billing?.subscription.plan === plan.id && billing.subscription.active} onOpenUrl={onOpenUrl} onPickFree={scrollToByo} />
+      {/* Every column card spans the same five rows of this grid — name, price, tagline,
+          features, button — so a one-line tagline on one card cannot pull its feature
+          list up out of line with its neighbours'. */}
+      <div className="grid gap-4 md:grid-cols-3 md:grid-rows-[auto_auto_auto_1fr_auto]">
+        {tiers.map((plan) => (
+          <PlanCard key={plan.id} plan={plan} current={isCurrent(plan)} onOpenUrl={onOpenUrl} onPickFree={scrollToByo} />
         ))}
       </div>
+      {wide.map((plan) => (
+        <WidePlanCard key={plan.id} plan={plan} current={isCurrent(plan)} onOpenUrl={onOpenUrl} />
+      ))}
 
-      {billing && !billing.subscription.active && billing.plans.some((p) => p.priceUsd > 0 && !p.checkoutUrl) && (
+      {billing && !billing.subscription.active && billing.plans.some((p) => p.pricing !== 'free' && !p.checkoutUrl) && (
         <p className="mt-3 text-center text-[12px] text-neutral-400">Paid plans aren&apos;t open for sign-up yet. Toji is free and fully usable in the meantime.</p>
       )}
 
@@ -371,58 +384,99 @@ function PlansView({ onOpenUrl, pendingQuery, onContinue }: { onOpenUrl: (url: s
 }
 
 function PlanCard({ plan, current, onOpenUrl, onPickFree }: { plan: Plan; current: boolean; onOpenUrl: (url: string) => void; onPickFree: () => void }) {
-  const paid = plan.priceUsd > 0;
-  const purchasable = paid && Boolean(plan.checkoutUrl);
   return (
     <div
-      className={`flex flex-col rounded-2xl border p-5 ${
+      className={`flex flex-col rounded-2xl border p-5 md:row-span-5 md:grid md:grid-rows-subgrid md:gap-y-0 ${
         plan.highlight ? 'border-black/25 dark:border-white/30' : 'border-black/10 dark:border-white/10'
       }`}
     >
-      <div className="mb-1 flex items-center gap-2">
-        <h2 className="text-[15px] font-semibold">{plan.name}</h2>
-        {plan.highlight && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-black/[0.06] px-2 py-0.5 text-[10.5px] uppercase tracking-wide text-neutral-500 dark:bg-white/10">
-            <Sparkles size={10} /> Popular
-          </span>
-        )}
-        {current && <span className="rounded-full bg-black/[0.06] px-2 py-0.5 text-[10.5px] uppercase tracking-wide text-neutral-500 dark:bg-white/10">Current</span>}
-      </div>
-      <p className="mb-4 flex items-baseline gap-1">
-        <span className="text-[30px] font-semibold tracking-tight">{paid ? `$${plan.priceUsd}` : 'Free'}</span>
-        {paid && <span className="text-[13px] text-neutral-400">/month</span>}
-      </p>
+      <PlanName plan={plan} current={current} />
+      <PlanPrice plan={plan} />
       <p className="mb-4 text-[13px] leading-relaxed text-neutral-500">{plan.tagline}</p>
-      <ul className="mb-5 flex-1 space-y-2">
-        {plan.features.map((feature) => (
-          <li key={feature} className="flex gap-2 text-[13px] leading-relaxed">
-            <Check size={14} className="mt-[3px] shrink-0 text-neutral-400" />
-            <span>{feature}</span>
-          </li>
-        ))}
-      </ul>
-      {paid ? (
-        <button
-          type="button"
-          disabled={!purchasable}
-          title={purchasable ? undefined : 'Sign-up opens once Toji billing is live'}
-          onClick={() => onOpenUrl(plan.checkoutUrl)}
-          className={`${purchasable ? FIELD_BUTTON : FIELD_BUTTON_QUIET} w-full`}
-        >
-          {purchasable ? (
-            <>
-              Subscribe <ArrowRight size={14} />
-            </>
-          ) : (
-            'Not open yet'
-          )}
-        </button>
-      ) : (
+      <FeatureList features={plan.features} className="mb-5" />
+      {plan.pricing === 'free' ? (
         <button type="button" onClick={onPickFree} className={`${FIELD_BUTTON_QUIET} w-full`}>
           Use your own agent
         </button>
+      ) : (
+        <SubscribeButton plan={plan} onOpenUrl={onOpenUrl} className="w-full" />
       )}
     </div>
+  );
+}
+
+/**
+ * The tier that is an add-on to the grid rather than a column in it: one wide card
+ * underneath, laid out as name and price, then what it includes, then the button.
+ */
+function WidePlanCard({ plan, current, onOpenUrl }: { plan: Plan; current: boolean; onOpenUrl: (url: string) => void }) {
+  return (
+    <div className="mt-4 grid gap-5 rounded-2xl border border-black/10 p-5 dark:border-white/10 md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)_auto] md:items-center md:gap-8">
+      <div>
+        <PlanName plan={plan} current={current} />
+        <PlanPrice plan={plan} />
+        <p className="text-[13px] leading-relaxed text-neutral-500">{plan.tagline}</p>
+      </div>
+      <FeatureList features={plan.features} />
+      <SubscribeButton plan={plan} onOpenUrl={onOpenUrl} className="w-full md:w-auto md:min-w-[150px]" />
+    </div>
+  );
+}
+
+function PlanName({ plan, current }: { plan: Plan; current: boolean }) {
+  return (
+    <div className="mb-1 flex items-center gap-2">
+      <h2 className="text-[15px] font-semibold">{plan.name}</h2>
+      {plan.highlight && (
+        <span className="inline-flex items-center gap-1 rounded-full bg-black/[0.06] px-2 py-0.5 text-[10.5px] uppercase tracking-wide text-neutral-500 dark:bg-white/10">
+          <TrendingUp size={10} /> Popular
+        </span>
+      )}
+      {current && <span className="rounded-full bg-black/[0.06] px-2 py-0.5 text-[10.5px] uppercase tracking-wide text-neutral-500 dark:bg-white/10">Current</span>}
+    </div>
+  );
+}
+
+function PlanPrice({ plan }: { plan: Plan }) {
+  return (
+    <p className="mb-4 flex items-baseline gap-1">
+      <span className="text-[30px] font-semibold tracking-tight">{plan.pricing === 'usage' ? 'Pay as you go' : plan.pricing === 'monthly' ? `$${plan.priceUsd}` : 'Free'}</span>
+      {plan.pricing === 'monthly' && <span className="text-[13px] text-neutral-400">/month</span>}
+    </p>
+  );
+}
+
+function FeatureList({ features, className = '' }: { features: string[]; className?: string }) {
+  return (
+    <ul className={`space-y-2 ${className}`}>
+      {features.map((feature) => (
+        <li key={feature} className="flex gap-2 text-[13px] leading-relaxed">
+          <Check size={14} className="mt-[3px] shrink-0 text-neutral-400" />
+          <span>{feature}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function SubscribeButton({ plan, onOpenUrl, className = '' }: { plan: Plan; onOpenUrl: (url: string) => void; className?: string }) {
+  const purchasable = Boolean(plan.checkoutUrl);
+  return (
+    <button
+      type="button"
+      disabled={!purchasable}
+      title={purchasable ? undefined : 'Sign-up opens once Toji billing is live'}
+      onClick={() => onOpenUrl(plan.checkoutUrl)}
+      className={`${purchasable ? FIELD_BUTTON : FIELD_BUTTON_QUIET} ${className}`}
+    >
+      {purchasable ? (
+        <>
+          Subscribe <ArrowRight size={14} />
+        </>
+      ) : (
+        'Not open yet'
+      )}
+    </button>
   );
 }
 
@@ -483,11 +537,7 @@ function BringYourOwn({ pendingQuery, onContinue }: { pendingQuery?: string; onC
         ) : (
           <div className="flex flex-wrap gap-2">
             {installed.map((provider) => (
-              <span key={provider.id} className="inline-flex items-center gap-1.5 rounded-lg bg-black/[0.05] px-2.5 py-1 text-[12.5px] dark:bg-white/10">
-                <StatusDot state={provider.usable ? 'on' : 'off'} />
-                {provider.label}
-                {!provider.usable && <span className="text-neutral-400">signed out</span>}
-              </span>
+              <ProviderChip key={provider.id} provider={provider} />
             ))}
           </div>
         )}
@@ -563,6 +613,23 @@ const THINKING: DropdownOption<ThinkingLevel>[] = [
  * The one status mark used across settings: a small neutral dot. Filled = active,
  * hollow = inactive, pulsing hollow = in progress. No traffic-light colors.
  */
+/**
+ * One installed coding CLI and whether it can serve a model right now. The same chip
+ * on the welcome page and in Settings, with the same word for the same state: a CLI
+ * the welcome page calls "signed out" must not become "unavailable" in Settings.
+ * Installed but unusable reads as hollow, not on — it can't actually serve a model.
+ */
+function ProviderChip({ provider }: { provider: AgentsStatus['yagami']['providers'][number] }) {
+  const note = providerNote(provider);
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-lg bg-black/[0.05] px-2.5 py-1 text-[12.5px] text-neutral-900 dark:bg-white/10 dark:text-neutral-100" title={provider.error ?? undefined}>
+      <StatusDot state={note ? 'off' : 'on'} />
+      {provider.label}
+      {note && <span className="text-neutral-400">{note}</span>}
+    </span>
+  );
+}
+
 function StatusDot({ state }: { state: 'on' | 'busy' | 'off' }) {
   return (
     <span
@@ -645,13 +712,7 @@ function ContainersSettings({ containers, onChange, onClear }: { containers: Con
             >
               <ProfileAvatar container={container} />
             </button>
-            <input
-              type="color"
-              aria-label={`${container.name} color`}
-              value={container.color}
-              onChange={(e) => patch(container.id, { color: e.target.value })}
-              className="swatch h-6 w-6 shrink-0 cursor-pointer"
-            />
+            <ColorPicker value={container.color} onChange={(color) => patch(container.id, { color })} label={`${container.name} color`} />
             <input
               value={container.name}
               onChange={(e) => patch(container.id, { name: e.target.value })}
@@ -1125,17 +1186,11 @@ function AgentSettings({ onShowPlans }: { onShowPlans?: () => void }) {
         {agent === 'yagami' && (
           <div className="space-y-2.5">
             {status && (
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-0.5 text-[12px] text-neutral-500">
+              <div className="flex flex-wrap items-center gap-2 text-[12px] text-neutral-500">
                 {installed.map((p) => (
-                  // Installed but unusable (not signed in, ACP handshake failed) reads as
-                  // hollow, not on — it can't actually serve a model.
-                  <span key={p.id} className="inline-flex items-center gap-1.5" title={p.error ?? undefined}>
-                    <StatusDot state={p.usable ? 'on' : 'off'} />
-                    {p.label}
-                    {!p.usable && <span className="text-neutral-400">· unavailable</span>}
-                  </span>
+                  <ProviderChip key={p.id} provider={p} />
                 ))}
-                {installed.length === 0 && <span className="inline-flex items-center gap-1.5"><StatusDot state="off" /> No coding CLIs detected</span>}
+                {installed.length === 0 && <span className="inline-flex items-center gap-1.5 px-0.5"><StatusDot state="off" /> No coding CLIs detected</span>}
                 <button
                   type="button"
                   onClick={() => void loadModels(true)}

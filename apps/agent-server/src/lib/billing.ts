@@ -9,17 +9,24 @@
 // replace. Until then subscriptionStatus() reports the free tier, so the app never
 // claims to have unlocked something it hasn't.
 
-export type PlanId = 'free' | 'pro' | 'max';
+export type PlanId = 'free' | 'pro' | 'max' | 'ultra';
 
 export interface Plan {
   id: PlanId;
   name: string;
-  /** Monthly price in whole US dollars. 0 = free. */
+  /** Monthly price in whole US dollars. 0 when the tier is free or billed by usage. */
   priceUsd: number;
+  /**
+   * How the tier is charged: nothing, a flat monthly fee, or by usage — Ultra is Max
+   * with the limits removed, billed for what is actually used.
+   */
+  pricing: 'free' | 'monthly' | 'usage';
   tagline: string;
   features: string[];
   /** The plan a new install lands on until it is told otherwise. */
   highlight?: boolean;
+  /** Shown as a full-width card under the tier grid rather than as a column in it. */
+  wide?: boolean;
   /**
    * Stripe Payment Link for this plan. Empty until Toji's own Stripe account exists —
    * the plans page shows the tier as not yet purchasable rather than opening a
@@ -42,6 +49,7 @@ export function plans(): Plan[] {
       id: 'free',
       name: 'Free',
       priceUsd: 0,
+      pricing: 'free',
       tagline: 'Bring your own agent. Everything stays on your machine.',
       features: [
         'Every coding CLI you are already signed into',
@@ -55,6 +63,7 @@ export function plans(): Plan[] {
       id: 'pro',
       name: 'Pro',
       priceUsd: 20,
+      pricing: 'monthly',
       tagline: 'Inference that works out of the box — nothing to install or paste.',
       highlight: true,
       features: [
@@ -69,9 +78,20 @@ export function plans(): Plan[] {
       id: 'max',
       name: 'Max',
       priceUsd: 60,
+      pricing: 'monthly',
       tagline: 'For running the agent all day.',
-      features: ['Much higher usage limits', 'The largest models the account can reach', 'Priority capacity at busy times', 'Everything in Pro'],
+      features: ['Everything in Pro', 'Much higher usage limits', 'The largest models the account can reach', 'Priority capacity at busy times'],
       checkoutUrl: checkoutUrlFor('max')
+    },
+    {
+      id: 'ultra',
+      name: 'Ultra',
+      priceUsd: 0,
+      pricing: 'usage',
+      wide: true,
+      tagline: 'Max, without the ceiling. Pay for what you use past its limits.',
+      features: ['Everything in Max', 'Higher usage limits', 'Pay as you go beyond them — no hard stop'],
+      checkoutUrl: checkoutUrlFor('ultra')
     }
   ];
 }

@@ -361,25 +361,31 @@ export interface AgentsStatus {
   };
   local: { configured: boolean; url: string; model: string };
   /** The Toji plan: whether it is active, and what is answering calls while it isn't. */
-  toji: { plan: 'free' | 'pro' | 'max'; active: boolean; reason?: string; fallback: string };
+  toji: { plan: PlanId; active: boolean; reason?: string; fallback: string };
 }
 
 /** Cerebras models the configured key can reach; `error` explains an empty list. */
+export type PlanId = 'free' | 'pro' | 'max' | 'ultra';
+
 /** A Toji subscription tier, as the server describes it. */
 export interface Plan {
-  id: 'free' | 'pro' | 'max';
+  id: PlanId;
   name: string;
+  /** Whole US dollars a month; 0 for a free or usage-billed tier. */
   priceUsd: number;
+  pricing: 'free' | 'monthly' | 'usage';
   tagline: string;
   features: string[];
   highlight?: boolean;
+  /** A full-width card under the tier grid, not a column in it. */
+  wide?: boolean;
   /** Empty until Toji's Stripe account exists; the tier then shows as not yet on sale. */
   checkoutUrl: string;
 }
 
 export interface Billing {
   plans: Plan[];
-  subscription: { plan: 'free' | 'pro' | 'max'; active: boolean; reason?: string };
+  subscription: { plan: PlanId; active: boolean; reason?: string };
 }
 
 export interface CerebrasModels {
