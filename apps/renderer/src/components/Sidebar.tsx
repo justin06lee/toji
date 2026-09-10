@@ -1,6 +1,9 @@
 import { ChevronDown, ChevronRight, PanelLeftClose, PanelLeftOpen, Plus, X } from 'lucide-react';
-import { useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from 'react';
-import { Reorder } from 'motion/react';
+import { useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type Ref, type RefObject } from 'react';
+import { flushSync } from 'react-dom';
+import { AnimatePresence, motion, Reorder } from 'motion/react';
+import { dragBoundsY, type DragBoundsY } from '../lib/dragBounds';
+import { TAB_ENTER, TAB_EXIT, TAB_REST, TAB_TRANSITION } from '../lib/tabMotion';
 import { tabTitle } from '../lib/tabPresentation';
 import { NewTabButton } from './NewTabButton';
 import { TabMarks, TabStatus } from './TabStatus';
@@ -125,7 +128,7 @@ export function Sidebar({ tabs, groups, activeId, onSelect, onClose, onNewTab, o
           const color = GROUP_COLORS[index % GROUP_COLORS.length];
           const groupTabs = tabs.filter((t) => t.groupId === group.id);
           return (
-            <div key={group.id} className="group/grp">
+            <div key={group.id} className="group/grp relative">
               <div className="no-drag relative z-30 flex h-8 items-center gap-1.5 rounded-lg px-1.5 hover:bg-black/[0.03] dark:hover:bg-white/[0.04]">
                 <button type="button" aria-label={group.collapsed ? 'Expand group' : 'Collapse group'} onClick={() => onToggleGroup(group.id)} className="inline-flex h-5 w-5 items-center justify-center text-neutral-400">
                   {group.collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
@@ -161,20 +164,28 @@ export function Sidebar({ tabs, groups, activeId, onSelect, onClose, onNewTab, o
                   <X size={13} />
                 </button>
               </div>
-              {!group.collapsed &&
-                groupTabs.map((tab) => (
-                  <TabRow key={tab.id} tab={tab} active={tab.id === activeId} indent agentRunning={agentTabIds?.has(tab.id)} onSelect={() => onSelect(tab.id)} onClose={() => onClose(tab.id)} onContext={contextHandler(tab.id)} onToggleMute={() => onToggleMute?.(tab.id)} />
-                ))}
+              <AnimatePresence initial={false} mode="popLayout">
+                {!group.collapsed &&
+                  groupTabs.map((tab) => (
+                    <motion.div key={tab.id} layout="position" initial={TAB_ENTER.y} animate={TAB_REST} exit={TAB_EXIT} transition={TAB_TRANSITION}>
+                      <TabRow tab={tab} active={tab.id === activeId} indent agentRunning={agentTabIds?.has(tab.id)} onSelect={() => onSelect(tab.id)} onClose={() => onClose(tab.id)} onContext={contextHandler(tab.id)} onToggleMute={() => onToggleMute?.(tab.id)} />
+                    </motion.div>
+                  ))}
+              </AnimatePresence>
             </div>
           );
         })}
 
         {ungrouped.length > 0 && groups.length > 0 && <div className="my-1 border-t border-black/[0.06] dark:border-white/[0.06]" />}
         {/* Ungrouped tabs drag-reorder along the Y axis only (vertical list). */}
-        <Reorder.Group ref={ungroupedListRef} as="div" axis="y" values={ungrouped} onReorder={(o) => onReorderUngrouped?.(o)} layoutScroll data-testid="sidebar-tab-list" className="space-y-0.5">
-          {ungrouped.map((tab) => (
-            <DraggableTabRow key={tab.id} tab={tab} active={tab.id === activeId} agentRunning={agentTabIds?.has(tab.id)} constraintsRef={ungroupedListRef} onSelect={() => onSelect(tab.id)} onClose={() => onClose(tab.id)} onContext={contextHandler(tab.id)} onToggleMute={() => onToggleMute?.(tab.id)} />
-          ))}
+        <Reorder.Group ref={ungroupedListRef} as="div" axis="y" values={ungrouped} onReorder={(o) => onReorderUngrouped?.(o)} layoutScroll data-testid="sidebar-tab-list" className="relative space-y-0.5">
+          {/* A closing tab leaves the flow at once (popLayout) so the rows below slide up
+              while it fades where it was. */}
+          <AnimatePresence initial={false} mode="popLayout">
+            {ungrouped.map((tab) => (
+              <DraggableTabRow key={tab.id} tab={tab} active={tab.id === activeId} agentRunning={agentTabIds?.has(tab.id)} listRef={ungroupedListRef} onSelect={() => onSelect(tab.id)} onClose={() => onClose(tab.id)} onContext={contextHandler(tab.id)} onToggleMute={() => onToggleMute?.(tab.id)} />
+            ))}
+          </AnimatePresence>
         </Reorder.Group>
         {/* The plus under the last tab: click for a tab, hold for the three choices. */}
         <NewTabButton className="mt-0.5 w-full" onNewTab={() => onNewTab(null)} onNewGroup={onNewGroup} onNewAgentTab={onNewAgentTab} data-testid="sidebar-new-tab" />
@@ -183,17 +194,34 @@ export function Sidebar({ tabs, groups, activeId, onSelect, onClose, onNewTab, o
   );
 }
 
-function DraggableTabRow({ tab, active, constraintsRef, agentRunning, onSelect, onClose, onContext, onToggleMute }: { tab: BrowserTab; active: boolean; constraintsRef: RefObject<HTMLDivElement | null>; agentRunning?: boolean; onSelect: () => void; onClose: () => void; onContext: (e: ReactMouseEvent) => void; onToggleMute: () => void }) {
+function DraggableTabRow({ ref, tab, active, listRef, agentRunning, onSelect, onClose, onContext, onToggleMute }: { ref?: Ref<HTMLDivElement>; tab: BrowserTab; active: boolean; listRef: RefObject<HTMLDivElement | null>; agentRunning?: boolean; onSelect: () => void; onClose: () => void; onContext: (e: ReactMouseEvent) => void; onToggleMute: () => void }) {
   const [dragging, setDragging] = useState(false);
+  // How far this row may be dragged before it leaves the list. Measured on pointer-down
+  // (Motion reads it as the gesture starts) rather than handed over as a ref, which
+  // would put Motion's own resize listener in charge of the row's offset.
+  const [bounds, setBounds] = useState<DragBoundsY | undefined>(undefined);
   return (
     <Reorder.Item
+      // The list's AnimatePresence attaches a ref here to pop a closing row out of the
+      // flow; without it the row would sit in place while fading.
+      ref={ref}
       as="div"
       value={tab}
       data-testid="sidebar-tab"
       data-tab-id={tab.id}
-      dragConstraints={constraintsRef}
+      layout="position"
+      initial={TAB_ENTER.y}
+      animate={TAB_REST}
+      exit={TAB_EXIT}
+      transition={TAB_TRANSITION}
+      dragConstraints={bounds}
       dragElastic={0}
       dragMomentum={false}
+      onPointerDownCapture={(event: ReactPointerEvent<HTMLDivElement>) => {
+        const list = listRef.current;
+        if (event.button !== 0 || !list) return;
+        flushSync(() => setBounds(dragBoundsY(event.currentTarget.getBoundingClientRect(), list.getBoundingClientRect())));
+      }}
       onDragStart={() => {
         setDragging(true);
         onSelect();

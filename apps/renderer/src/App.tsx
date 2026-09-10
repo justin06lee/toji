@@ -1,7 +1,7 @@
 import { ArrowLeft, ArrowRight, Copy, FolderPlus, Moon, MousePointer2, PanelLeft, PanelTop, RefreshCcw, RotateCw, Search, Settings, Star, Sun, Volume2, VolumeX, WandSparkles, X } from 'lucide-react';
 import { AnimatePresence, motion, Reorder } from 'motion/react';
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import { AgentSpotlight, type AgentLogEntry } from './components/AgentSpotlight';
 import { WindowProfilePicker } from './components/WindowProfilePicker';
 import { TorHoldButton } from './components/TorHoldButton';
@@ -29,6 +29,8 @@ import {
 import { hostOf, isOnionUrl, looksLikeUrl, toUrl, webSearchUrl, type SearchEngineId } from './lib/nav';
 import { bridge, type OpenUrlOptions, type TorStatus, type VaultEntry, type VaultPrompt } from './lib/bridge';
 import { DRAG_HANDLE_DWELL_MS, revealDragHandle } from './lib/dragHandle';
+import { dragBoundsX, type DragBoundsX } from './lib/dragBounds';
+import { TAB_ENTER, TAB_EXIT, TAB_REST, TAB_TRANSITION } from './lib/tabMotion';
 import { insertTabAfter, replacePristineTabWithWelcome, startBrowsingInTab } from './lib/tabLifecycle';
 import { tabTitle } from './lib/tabPresentation';
 import { GROUP_COLORS, type BrowserTab, type TabGroup } from './types';
@@ -142,6 +144,10 @@ export function App() {
   const [dragHandleHolding, setDragHandleHolding] = useState(false);
   const [topTabsCrowded, setTopTabsCrowded] = useState(false);
   const [draggingTopTabId, setDraggingTopTabId] = useState<string | null>(null);
+  // How far the tab under the pointer may be dragged before it leaves the strip. Measured
+  // on pointer-down (Motion reads it as the gesture starts) rather than handed over as a
+  // ref, which would put Motion's own resize listener in charge of every tab's offset.
+  const [topDragBounds, setTopDragBounds] = useState<{ id: string; bounds: DragBoundsX } | null>(null);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tabId: string } | null>(null);
   const [containers, setContainers] = useState<Container[]>(loadContainers);
   // Bookmarks live in the server's store (the import panel fills it too); the omnibox
@@ -320,6 +326,8 @@ export function App() {
       const items = Array.from(strip.querySelectorAll<HTMLElement>('[data-testid="top-tab"]'));
       const occupied = items.reduce((sum, item) => sum + item.getBoundingClientRect().width, 0) + Math.max(0, items.length - 1) * 4;
       setTopTabsCrowded(strip.clientWidth - occupied < 120);
+      // Shrinking the window can leave the active tab past the strip's edge; bring it back.
+      if (strip.scrollWidth > strip.clientWidth) strip.querySelector<HTMLElement>('[data-testid="top-tab"][data-active]')?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
     };
     const frame = requestAnimationFrame(measure);
     const observer = new ResizeObserver(measure);
@@ -2066,66 +2074,86 @@ export function App() {
         onReorder={setTabs}
         layoutScroll
         data-testid="top-tab-strip"
-        className="tab-strip flex min-w-0 flex-1 select-none items-center gap-1 overflow-x-auto overflow-y-hidden"
+        // Positioned so a closing tab, popped out of the flow while it fades, stays put.
+        className="tab-strip relative flex min-w-0 flex-1 select-none items-center gap-1 overflow-x-auto overflow-y-hidden"
       >
-        {tabs.map((tab) => {
-          const color = groupColor(tab.groupId);
-          return (
-            <Reorder.Item
-              as="div"
-              key={tab.id}
-              value={tab}
-              // Only positions animate. Animating size too squashed the titles while
-              // the row reflowed — on every open, close and window resize.
-              layout="position"
-              dragConstraints={topTabStripRef}
-              dragElastic={0}
-              dragMomentum={false}
-              data-testid="top-tab"
-              data-tab-id={tab.id}
-              onClick={() => setActiveId(tab.id)}
-              onDragStart={() => {
-                setDraggingTopTabId(tab.id);
-                setActiveId(tab.id);
-              }}
-              onDragEnd={() => setDraggingTopTabId(null)}
-              onContextMenu={(e: React.MouseEvent<HTMLDivElement>) => {
-                e.preventDefault();
-                setActiveId(tab.id);
-                setTabMenu({ x: e.clientX, y: e.clientY, tabId: tab.id });
-              }}
-              whileDrag={{ cursor: 'grabbing', zIndex: 90 }}
-              // Tabs share the row evenly and shrink together as it fills, down to a
-              // width that still shows the favicon and a word of the title; past that
-              // the strip scrolls. Nothing depends on the window being any one size.
-              className={`no-drag group relative flex h-8 w-[210px] min-w-[104px] max-w-[210px] flex-[1_1_210px] cursor-grab items-center gap-2 overflow-hidden rounded-xl px-2.5 transition-colors ${
-                draggingTopTabId === tab.id || tab.id === activeId
-                  ? `bg-[var(--tab-active)]${draggingTopTabId === tab.id ? ' top-tab-dragging' : ''}`
-                  : 'bg-[var(--tab)] text-neutral-500 hover:bg-[var(--tab-hover)] dark:text-neutral-400'
-              }`}
-            >
-              <TabStatus tab={tab} color={color} />
-              <span className="min-w-0 flex-1 truncate text-[13px]">{tabTitle(tab)}</span>
-              {/* Sound first, then the agent's mark, then close; the title, not the
-                  favicon, gives up room for them. */}
-              <TabMarks tab={tab} agentRunning={agents[tab.id]?.running} onToggleMute={() => toggleMute(tab.id)} />
-              <button
-                type="button"
-                aria-label="Close tab"
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  closeTab(tab.id);
+        {/* A closing tab leaves the flow at once (popLayout) so its neighbours slide
+            into the gap while it fades where it was. */}
+        <AnimatePresence initial={false} mode="popLayout">
+          {tabs.map((tab) => {
+            const color = groupColor(tab.groupId);
+            return (
+              <Reorder.Item
+                as="div"
+                key={tab.id}
+                value={tab}
+                // Only positions animate. Animating size too squashed the titles while
+                // the row reflowed — on every open, close and window resize.
+                layout="position"
+                initial={TAB_ENTER.x}
+                animate={TAB_REST}
+                exit={TAB_EXIT}
+                transition={TAB_TRANSITION}
+                dragConstraints={topDragBounds?.id === tab.id ? topDragBounds.bounds : undefined}
+                dragElastic={0}
+                dragMomentum={false}
+                data-testid="top-tab"
+                data-tab-id={tab.id}
+                data-active={tab.id === activeId || undefined}
+                onPointerDownCapture={(event: React.PointerEvent<HTMLDivElement>) => {
+                  const strip = topTabStripRef.current;
+                  if (event.button !== 0 || !strip) return;
+                  flushSync(() => setTopDragBounds({ id: tab.id, bounds: dragBoundsX(event.currentTarget.getBoundingClientRect(), strip.getBoundingClientRect()) }));
                 }}
-                className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-md text-neutral-400 opacity-0 transition group-hover:opacity-100 hover:bg-black/10 hover:text-neutral-900 dark:hover:bg-white/15 dark:hover:text-white"
+                onClick={() => setActiveId(tab.id)}
+                onDragStart={() => {
+                  setDraggingTopTabId(tab.id);
+                  setActiveId(tab.id);
+                }}
+                onDragEnd={() => setDraggingTopTabId(null)}
+                onContextMenu={(e: React.MouseEvent<HTMLDivElement>) => {
+                  e.preventDefault();
+                  setActiveId(tab.id);
+                  setTabMenu({ x: e.clientX, y: e.clientY, tabId: tab.id });
+                }}
+                whileDrag={{ cursor: 'grabbing', zIndex: 90 }}
+                // Tabs share the row evenly and shrink together as it fills, down to a
+                // width that still shows the favicon and a word of the title; past that
+                // the strip scrolls. Nothing depends on the window being any one size.
+                className={`no-drag group relative flex h-8 w-[210px] min-w-[104px] max-w-[210px] flex-[1_1_210px] cursor-grab items-center gap-2 overflow-hidden rounded-xl px-2.5 transition-colors ${
+                  draggingTopTabId === tab.id || tab.id === activeId
+                    ? `bg-[var(--tab-active)]${draggingTopTabId === tab.id ? ' top-tab-dragging' : ''}`
+                    : 'bg-[var(--tab)] text-neutral-500 hover:bg-[var(--tab-hover)] dark:text-neutral-400'
+                }`}
               >
-                <X size={12} />
-              </button>
-            </Reorder.Item>
-          );
-        })}
-        {/* New-tab sits right beside the last tab; once the row fills up it pins to the corner. */}
-        {!topTabsCrowded && <NewTabButton className="ml-0.5" onNewTab={() => openTab(null)} onNewGroup={openTabInNewGroup} onNewAgentTab={openAgentTab} data-testid="top-new-tab" />}
+                <TabStatus tab={tab} color={color} />
+                <span className="min-w-0 flex-1 truncate text-[13px]">{tabTitle(tab)}</span>
+                {/* Sound first, then the agent's mark, then close; the title, not the
+                    favicon, gives up room for them. */}
+                <TabMarks tab={tab} agentRunning={agents[tab.id]?.running} onToggleMute={() => toggleMute(tab.id)} />
+                <button
+                  type="button"
+                  aria-label="Close tab"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeTab(tab.id);
+                  }}
+                  className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-md text-neutral-400 opacity-0 transition group-hover:opacity-100 hover:bg-black/10 hover:text-neutral-900 dark:hover:bg-white/15 dark:hover:text-white"
+                >
+                  <X size={12} />
+                </button>
+              </Reorder.Item>
+            );
+          })}
+        </AnimatePresence>
+        {/* New-tab sits right beside the last tab and slides along with it as tabs come
+            and go; once the row fills up it pins to the corner. */}
+        {!topTabsCrowded && (
+          <motion.div layout="position" transition={TAB_TRANSITION} className="flex shrink-0">
+            <NewTabButton className="ml-0.5" onNewTab={() => openTab(null)} onNewGroup={openTabInNewGroup} onNewAgentTab={openAgentTab} data-testid="top-new-tab" />
+          </motion.div>
+        )}
       </Reorder.Group>
       {topTabsCrowded && <NewTabButton className="ml-1.5" onNewTab={() => openTab(null)} onNewGroup={openTabInNewGroup} onNewAgentTab={openAgentTab} data-testid="top-new-tab" />}
     </div>
@@ -2154,24 +2182,26 @@ export function App() {
         {!sideTabs && topTabStrip}
         {/* Same 10px rhythm as the header's top/bottom padding, so all three gaps match. */}
         <div className={sideTabs ? '' : 'mt-2.5'}>{addressRow}</div>
-        {bookmarksPinned && <div className="mt-1.5 -mb-1">{bookmarksBar}</div>}
+        {/* Tight under the address bar: the bar's own 3px chip inset plus 2px each side,
+            and it eats most of the header's bottom padding so the border sits close too. */}
+        {bookmarksPinned && <div className="mt-0.5 -mb-2">{bookmarksBar}</div>}
         {torBar}
         {!bookmarksPinned && (
-          // Unpinned, the bar lives just below the address bar and shows itself when the
-          // pointer rests along the header's bottom edge — over the page, never moving it.
-          // The header is a native drag region, which never sees the pointer, so the
-          // strip that senses it is carved out of that region.
-          <div className="no-drag absolute inset-x-0 bottom-0 z-[60]" onMouseEnter={showBookmarksPeek} onMouseLeave={hideBookmarksPeek} data-testid="bookmarks-bar-trigger">
-            <div className="h-2" />
+          // Unpinned, the bar shows itself when the pointer rests anywhere in the gap
+          // between the address bar and the header's bottom edge — over the page, never
+          // moving it. The header is a native drag region, which never sees the pointer,
+          // so the strip that senses it is carved out of that region. What appears is
+          // laid out exactly as the pinned bar: same gaps, same border, no shadow.
+          <div className="no-drag absolute inset-x-0 bottom-0 z-[60] h-2.5" onMouseEnter={showBookmarksPeek} onMouseLeave={hideBookmarksPeek} data-testid="bookmarks-bar-trigger">
             <AnimatePresence>
               {bookmarksPeek && (
                 <motion.div
-                  className="absolute inset-x-0 top-full border-b border-black/[0.07] bg-white px-3 shadow-[0_6px_16px_rgba(0,0,0,0.08)] dark:border-white/10 dark:bg-neutral-950 dark:shadow-[0_6px_16px_rgba(0,0,0,0.4)]"
+                  className="absolute inset-x-0 top-0 border-b border-black/[0.07] bg-white px-3 pt-0.5 pb-0.5 dark:border-white/10 dark:bg-neutral-950"
                   data-testid="bookmarks-bar-peek"
-                  initial={{ opacity: 0, y: -6 }}
+                  initial={{ opacity: 0, y: -4 }}
                   animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
-                  transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
                 >
                   {bookmarksBar}
                 </motion.div>

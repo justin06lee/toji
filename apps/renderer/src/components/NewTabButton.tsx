@@ -1,5 +1,5 @@
 import { FolderPlus, Plus, WandSparkles } from 'lucide-react';
-import { motion } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 
 /** How long the plus must be held before it opens into the three choices. */
@@ -56,52 +56,62 @@ export function NewTabButton({ onNewTab, onNewGroup, onNewAgentTab, className = 
 
   return (
     <div className={`no-drag relative z-30 flex h-8 shrink-0 items-center justify-center ${className}`} onMouseLeave={() => setExpanded(false)} data-testid={testId}>
-      {expanded ? (
-        <motion.div initial={{ opacity: 0, x: -4 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.12, ease: 'easeOut' }} className="flex items-center gap-1" data-testid="new-tab-choices">
-          <button type="button" aria-label="New tab" title="New tab" onClick={act(onNewTab)} className={item}>
+      {/* The plus and the three choices trade places with the same short slide-and-fade
+          each way; the one leaving is popped out of the flow so the other can take its
+          spot at once and the two cross over where the plus sits. */}
+      <AnimatePresence initial={false} mode="popLayout">
+        {expanded ? (
+          <motion.div key="choices" initial={{ opacity: 0, x: -4 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -4 }} transition={{ duration: 0.12, ease: 'easeOut' }} className="flex items-center gap-1" data-testid="new-tab-choices">
+            <button type="button" aria-label="New tab" title="New tab" onClick={act(onNewTab)} className={item}>
+              <Plus size={15} />
+            </button>
+            <button type="button" aria-label="New tab in a new group" title="New tab in a new group" onClick={act(onNewGroup)} className={item}>
+              <FolderPlus size={15} />
+            </button>
+            <button type="button" aria-label="New AI tab" title="New AI tab" onClick={act(onNewAgentTab)} className={item}>
+              <WandSparkles size={15} />
+            </button>
+          </motion.div>
+        ) : (
+          <motion.button
+            key="plus"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.12, ease: 'easeOut' }}
+            type="button"
+            aria-label="New tab. Hold for more"
+            title="New tab — hold for more"
+            onPointerDown={down}
+            onPointerUp={stop}
+            onPointerCancel={stop}
+            onPointerLeave={stop}
+            onClick={() => {
+              if (suppressClick.current) {
+                suppressClick.current = false;
+                return;
+              }
+              onNewTab();
+            }}
+            className="relative inline-flex h-7 w-7 touch-none select-none items-center justify-center rounded-full text-neutral-500 transition hover:bg-black/[0.05] hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-neutral-100"
+          >
             <Plus size={15} />
-          </button>
-          <button type="button" aria-label="New tab in a new group" title="New tab in a new group" onClick={act(onNewGroup)} className={item}>
-            <FolderPlus size={15} />
-          </button>
-          <button type="button" aria-label="New AI tab" title="New AI tab" onClick={act(onNewAgentTab)} className={item}>
-            <WandSparkles size={15} />
-          </button>
-        </motion.div>
-      ) : (
-        <button
-          type="button"
-          aria-label="New tab. Hold for more"
-          title="New tab — hold for more"
-          onPointerDown={down}
-          onPointerUp={stop}
-          onPointerCancel={stop}
-          onPointerLeave={stop}
-          onClick={() => {
-            if (suppressClick.current) {
-              suppressClick.current = false;
-              return;
-            }
-            onNewTab();
-          }}
-          className="relative inline-flex h-7 w-7 touch-none select-none items-center justify-center rounded-full text-neutral-500 transition hover:bg-black/[0.05] hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-neutral-100"
-        >
-          <Plus size={15} />
-          <svg className="pointer-events-none absolute inset-0 -rotate-90 overflow-visible" width={diameter} height={diameter} viewBox={`0 0 ${diameter} ${diameter}`} aria-hidden>
-            <circle
-              cx={diameter / 2}
-              cy={diameter / 2}
-              r={radius}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeDasharray={circumference}
-              strokeDashoffset={charging ? 0 : circumference}
-              style={{ transition: charging ? `stroke-dashoffset ${NEW_TAB_HOLD_MS}ms linear` : 'none' }}
-            />
-          </svg>
-        </button>
-      )}
+            <svg className="pointer-events-none absolute inset-0 -rotate-90 overflow-visible" width={diameter} height={diameter} viewBox={`0 0 ${diameter} ${diameter}`} aria-hidden>
+              <circle
+                cx={diameter / 2}
+                cy={diameter / 2}
+                r={radius}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeDasharray={circumference}
+                strokeDashoffset={charging ? 0 : circumference}
+                style={{ transition: charging ? `stroke-dashoffset ${NEW_TAB_HOLD_MS}ms linear` : 'none' }}
+              />
+            </svg>
+          </motion.button>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
