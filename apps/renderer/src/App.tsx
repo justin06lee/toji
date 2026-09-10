@@ -51,6 +51,10 @@ interface AgentFile {
 }
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const DEFAULT_AGENT_MAX_STEPS = 40;
+/** How long the pointer rests under the address bar before the unpinned bookmarks bar shows. */
+const BOOKMARKS_PEEK_DWELL_MS = 90;
+/** How long the bar stays after the pointer leaves it. */
+const BOOKMARKS_PEEK_LINGER_MS = 160;
 
 const isMac = (window as unknown as { toji?: { platform?: string } }).toji?.platform === 'darwin';
 // Only macOS hides the native title bar (titleBarStyle: 'hiddenInset'), so only macOS
@@ -136,7 +140,12 @@ export function App() {
   // bar when not. The pin state is shared with Settings through localStorage.
   const [bookmarksPinned, setBookmarksPinned] = useState(bookmarksBarPinned);
   const [bookmarksPeek, setBookmarksPeek] = useState(false);
-  const bookmarksPeekTimer = useRef<number | null>(null);
+  const bookmarksPeekRef = useRef(false);
+  bookmarksPeekRef.current = bookmarksPeek;
+  const bookmarksPeekShowTimer = useRef<number | null>(null);
+  const bookmarksPeekHideTimer = useRef<number | null>(null);
+  /** The revealed bar itself, for the cursor-stream check below. */
+  const bookmarksPeekEl = useRef<HTMLDivElement | null>(null);
   // Mirrors dragHandleVisible for the cursor stream (which reads it far more often
   // than React re-renders), and pins it while the pointer is on the notch or holding it.
   const dragHandleVisibleRef = useRef(false);
@@ -286,21 +295,45 @@ export function App() {
       window.removeEventListener('storage', sync);
     };
   }, []);
+  // The unpinned bookmarks bar appears while the pointer rests where the bar would be:
+  // the gap under the address bar (Toji's own, see the trigger in the header) and the
+  // top of the page (reported by the guest, whose mouse events never reach here). It
+  // waits a moment before showing, so a pointer merely passing through on its way to the
+  // omnibox does not flash it, and lingers a moment after the pointer leaves.
   const showBookmarksPeek = useCallback(() => {
-    if (bookmarksPeekTimer.current !== null) window.clearTimeout(bookmarksPeekTimer.current);
-    bookmarksPeekTimer.current = null;
-    setBookmarksPeek(true);
+    if (bookmarksPeekHideTimer.current !== null) window.clearTimeout(bookmarksPeekHideTimer.current);
+    bookmarksPeekHideTimer.current = null;
+    if (bookmarksPeekRef.current || bookmarksPeekShowTimer.current !== null || bookmarksBarPinned()) return;
+    bookmarksPeekShowTimer.current = window.setTimeout(() => {
+      bookmarksPeekShowTimer.current = null;
+      setBookmarksPeek(true);
+    }, BOOKMARKS_PEEK_DWELL_MS);
   }, []);
   const hideBookmarksPeek = useCallback(() => {
-    if (bookmarksPeekTimer.current !== null) window.clearTimeout(bookmarksPeekTimer.current);
-    bookmarksPeekTimer.current = window.setTimeout(() => {
-      bookmarksPeekTimer.current = null;
+    if (bookmarksPeekShowTimer.current !== null) window.clearTimeout(bookmarksPeekShowTimer.current);
+    bookmarksPeekShowTimer.current = null;
+    if (bookmarksPeekHideTimer.current !== null) window.clearTimeout(bookmarksPeekHideTimer.current);
+    bookmarksPeekHideTimer.current = window.setTimeout(() => {
+      bookmarksPeekHideTimer.current = null;
       setBookmarksPeek(false);
-    }, 160);
+    }, BOOKMARKS_PEEK_LINGER_MS);
   }, []);
   useEffect(() => {
     if (bookmarksPinned) setBookmarksPeek(false);
   }, [bookmarksPinned]);
+  // The chrome above the bar is a native drag region, and macOS delivers no mouse events
+  // over those — a pointer that leaves the bar upward can leave it hanging, its
+  // mouseleave never fired. The cursor stream (the window-drag notch uses it for the same
+  // reason) closes it once the pointer is clearly somewhere else.
+  useEffect(() => {
+    if (!bookmarksPeek) return;
+    return bridge().onWindowCursor?.((cursor) => {
+      const zone = bookmarksPeekEl.current?.getBoundingClientRect();
+      if (!zone) return;
+      const over = cursor.inside && cursor.x >= zone.left && cursor.x <= zone.right && cursor.y >= zone.top && cursor.y <= zone.bottom;
+      if (!over) hideBookmarksPeek();
+    });
+  }, [bookmarksPeek, hideBookmarksPeek]);
   // Keep the active tab in view in the top strip: after a switch, a resize, or a layout
   // change the strip may have scrolled it out of sight.
   useEffect(() => {
@@ -542,6 +575,19 @@ export function App() {
   // Navigate a tab to a real web URL (rendered by <webview> inside Toji).
   const navigateTab = useCallback(
     (tabId: string, url: string) => {
+      // The address a web tab is already at: load it again, as any browser does on Enter.
+      // Writing the same URL into the tab would change nothing the page could see and
+      // leave the tab marked loading for good.
+      const tab = tabsRef.current.find((t) => t.id === tabId);
+      if (tab && tab.mode === 'web' && !tab.internal && tab.url === url) {
+        try {
+          const result = webviewRefs.current[tabId]?.loadURL?.(url);
+          if (result && typeof result.catch === 'function') result.catch(() => {});
+        } catch {
+          patchTab(tabId, (t) => ({ reloadKey: t.reloadKey + 1 }));
+        }
+        return;
+      }
       // `internal` must go too: a URL typed into the welcome or settings tab otherwise
       // kept showing that page, spinning, with the webview never mounted.
       patchTab(tabId, { internal: undefined, mode: 'web', url, query: url, title: undefined, status: 'loading', sources: [], streamUrl: null });
@@ -971,6 +1017,14 @@ export function App() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   /** Messages from a tab's guest preload (see apps/desktop/guest-preload.cjs). */
   const onGuestMessage = useCallback((tabId: string, channel: string, payload: unknown) => {
+    if (channel === 'toji:top-edge') {
+      // The pointer entered or left the top of the page — where the unpinned bookmarks
+      // bar goes. Only the page in front can be under the pointer at all.
+      if (tabId !== activeRef.current) return;
+      if ((payload as { inside?: boolean } | undefined)?.inside) showBookmarksPeek();
+      else hideBookmarksPeek();
+      return;
+    }
     if (channel !== 'toji-vault:form') return;
     const { hasLogin, url: reportedUrl } = (payload ?? {}) as { hasLogin?: boolean; url?: string };
     const watch = autosaveWatch.current;
@@ -987,7 +1041,7 @@ export function App() {
     void bridge()
       .vaultMatches?.(webContentsId)
       .then((result) => setVaultMatches((m) => ({ ...m, [tabId]: result?.ok ? result.value : [] })));
-  }, []);
+  }, [hideBookmarksPeek, showBookmarksPeek]);
 
   /** Ask the main process to fill a credential into a tab's page. */
   const fillCredential = useCallback((tabId: string, entryId: string) => {
@@ -2196,6 +2250,7 @@ export function App() {
             <AnimatePresence>
               {bookmarksPeek && (
                 <motion.div
+                  ref={bookmarksPeekEl}
                   className="absolute inset-x-0 top-0 border-b border-black/[0.07] bg-white px-3 pt-0.5 pb-0.5 dark:border-white/10 dark:bg-neutral-950"
                   data-testid="bookmarks-bar-peek"
                   initial={{ opacity: 0, y: -4 }}

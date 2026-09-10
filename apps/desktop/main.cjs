@@ -7,6 +7,7 @@ const { ExternalLinkQueue, urlsFromArgv } = require('./external-links.cjs');
 const { redactManifestValues } = require('./page-redaction.cjs');
 const { contextMenuTemplate } = require('./context-menu.cjs');
 const { Adblock } = require('./adblock.cjs');
+const { chromeUserAgent, popupPlacement } = require('./site-compat.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -14,6 +15,12 @@ const { pathToFileURL } = require('node:url');
 // electron-chrome-web-store reads app.getName() for its install button label.
 // Keep the human-facing product name independent of the internal package id.
 app.setName('Toji');
+
+// Pages see a plain Chrome. Electron's own user agent names the app and Electron, which
+// sites read as an unknown or embedded browser (see site-compat.cjs). Set before any
+// session exists, so every container and every popup inherits it.
+const USER_AGENT = chromeUserAgent(app.userAgentFallback);
+app.userAgentFallback = USER_AGENT;
 
 const isDev = Boolean(process.env.ELECTRON_START_URL);
 const SERVER_PORT = 8788;
@@ -225,7 +232,9 @@ ipcMain.handle('toji:adblock-set', (_event, enabled) => getAdblock().setEnabled(
 function setupExtensions() {
   // Default session powers the app shell (and any Web Store page opened without a partition).
   if (webStore) void enableWebStore(session.defaultSession);
+  session.defaultSession.setUserAgent(USER_AGENT);
   app.on('session-created', (sess) => {
+    sess.setUserAgent(USER_AGENT);
     if (sess === session.defaultSession) return;
     partitionSessions.add(sess);
     // Re-apply if we already know this session's partition (see attachContainerPolicy,
@@ -532,7 +541,38 @@ function focusedWindow() {
 
 function windowForContents(contents) {
   if (!contents) return focusedWindow();
-  return exactWindowForContents(contents) || focusedWindow();
+  const own = exactWindowForContents(contents);
+  if (own && appWindows.has(own)) return own;
+  // A popup a page opened has a window of its own, but no tabs: what it wants opened,
+  // and what it asks to have saved, belongs to the profile window its opener lives in.
+  return popupOwners.get(contents) || own || focusedWindow();
+}
+
+/** Popup windows pages opened, each mapped to the profile window whose page opened it. */
+const popupOwners = new WeakMap();
+
+/**
+ * How a popup a page opens is dressed. Chromium sizes it from the page's own request
+ * (the width/height in window.open's features) and gives it the opener's session, so it
+ * stays inside the same container. The security boundary is reasserted here as for
+ * every guest, and it gets the guest preload too — a sign-in popup is exactly where the
+ * password manager should be — since a child window does not inherit its opener's.
+ */
+function popupWindowOptions() {
+  return {
+    backgroundColor: '#ffffff',
+    autoHideMenuBar: true,
+    icon: fs.existsSync(APP_ICON_PATH) ? APP_ICON_PATH : undefined,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      webviewTag: false,
+      preload: path.join(__dirname, 'guest-preload.cjs')
+    }
+  };
 }
 
 function exactWindowForContents(contents) {
@@ -551,7 +591,8 @@ function senderOwnsTarget(event, webContentsId) {
     return false; // fail closed on a malformed id instead of rejecting the whole IPC call
   }
   const senderWindow = exactWindowForContents(event && event.sender);
-  const targetWindow = exactWindowForContents(target);
+  // A popup a page opened belongs to the profile window that page lives in.
+  const targetWindow = popupOwners.get(target) || exactWindowForContents(target);
   return Boolean(target && !target.isDestroyed() && senderWindow && targetWindow && senderWindow.id === targetWindow.id);
 }
 
@@ -893,7 +934,7 @@ async function showContextMenu(contents, params) {
   // 'window' is Toji's own UI. Its tab and group menus are drawn by the renderer (which
   // calls preventDefault, so this event never fires for them); what reaches here is a
   // right-click on the omnibox or the agent transcript, where only editing applies.
-  const chrome = contents.getType() === 'window';
+  const chrome = contents.getType() === 'window' && appWindows.has(BrowserWindow.fromWebContents(contents));
   const history = contents.navigationHistory;
   // Only the "Search … for" label needs the engine, so only that right-click pays for
   // the round trip to the renderer.
@@ -1028,20 +1069,33 @@ app.on('web-contents-created', (_event, contents) => {
     const host = contents.hostWebContents;
     if (host && !host.isDestroyed()) host.send('toji:tab-audio', { webContentsId: contents.id, audible: Boolean(event.audible) });
   });
+  // Windows a page opens. A sized window.open() — a sign-in popup, a payment window —
+  // becomes a real window that keeps window.opener, since the page that opened it is
+  // waiting to hear back through it; everything else on the web becomes a tab. Chromium
+  // says how the page (or the click) wanted it: a ⌘-click asks for a background tab and
+  // stays put; a plain target=_blank comes to the front. See popupPlacement.
   contents.setWindowOpenHandler(({ url, disposition }) => {
-    try {
-      const scheme = new URL(url).protocol;
-      if (scheme === 'http:' || scheme === 'https:') {
-        // Chromium says how the page (or the click) wanted it: a ⌘-click asks for a
-        // background tab and stays put; a plain target=_blank comes to the front.
+    switch (popupPlacement({ url, disposition })) {
+      case 'window':
+        return { action: 'allow', overrideBrowserWindowOptions: popupWindowOptions() };
+      case 'tab':
         openInToji(url, windowForContents(contents), { background: disposition === 'background-tab', fromPage: true });
         return { action: 'deny' };
-      }
-      if (scheme === 'mailto:') void shell.openExternal(url);
-    } catch {
-      // Ignore malformed URLs rather than handing them to the OS.
+      case 'mail':
+        void shell.openExternal(url);
+        return { action: 'deny' };
+      default:
+        return { action: 'deny' };
     }
-    return { action: 'deny' };
+  });
+  contents.on('did-create-window', (win) => {
+    const owner = windowForContents(contents);
+    if (owner && appWindows.has(owner)) popupOwners.set(win.webContents, owner);
+    try {
+      applyWebRtcPolicy(win.webContents, sessionPartitions.get(win.webContents.session));
+    } catch {
+      /* the popup may already be gone */
+    }
   });
 });
 

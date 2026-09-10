@@ -111,3 +111,24 @@ window.addEventListener('load', reportLoginForm);
 // Single-page apps swap the login form in long after load, so keep watching.
 const observer = new MutationObserver(() => reportLoginForm());
 if (document.documentElement) observer.observe(document.documentElement, { childList: true, subtree: true });
+
+// The pointer along the top of the page.
+//
+// Toji's bookmarks bar, when it is not pinned, appears over the top of the page while the
+// pointer rests where it would be. The page's mouse events never reach Toji, so the guest
+// says when the pointer enters and leaves that band; only the crossings are sent.
+const TOP_BAND_PX = 36;
+let atTop = false;
+function reportTop(inside) {
+  if (inside === atTop) return;
+  atTop = inside;
+  try {
+    ipcRenderer.sendToHost('toji:top-edge', { inside });
+  } catch {
+    /* host went away */
+  }
+}
+window.addEventListener('mousemove', (event) => reportTop(event.clientY <= TOP_BAND_PX), { capture: true, passive: true });
+// Leaving the page altogether (into Toji's chrome, or onto the bar itself) ends the band.
+window.addEventListener('mouseout', (event) => !event.relatedTarget && reportTop(false), { capture: true, passive: true });
+document.addEventListener('mouseleave', () => reportTop(false));

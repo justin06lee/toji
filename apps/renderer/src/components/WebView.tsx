@@ -31,10 +31,24 @@ interface WebViewProps {
  * X-Frame-Options / frame-ancestors. Navigation and title changes flow back up so
  * the address bar and tab stay in sync; popups are routed into Toji by the main
  * process (web-contents-created → setWindowOpenHandler).
+ *
+ * The `url` prop is a request, not a mirror. Electron loads the page again whenever
+ * the src attribute is written — even with the address the guest is already showing —
+ * so if src simply followed the tab's URL, every navigation the page made on its own
+ * (a link, a pushState, a hash change) came straight back down as a reload of the
+ * page it had just reached. Instead src is written once, and a later `url` that the
+ * guest did not itself report is carried out with loadURL.
  */
 export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadingChange, onHistory, onFavicon, onGuestMessage, onRegister, tor, muted = false }: WebViewProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ref = useRef<any>(null);
+  /** The address the guest is created with; never changes for the life of the element. */
+  const [initialUrl] = useState(url);
+  /**
+   * The last address the guest reported. A `url` prop equal to it is the tab echoing
+   * the guest's own navigation; a different one is somewhere new to go.
+   */
+  const guestUrl = useRef(url);
   // A main-frame load that failed. Chromium leaves the view blank; Toji draws its own
   // page over it (see LoadErrorPage) until the next navigation starts.
   const [failure, setFailure] = useState<LoadFailure | null>(null);
@@ -59,6 +73,20 @@ export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadin
     }
   }, [muted]);
 
+  // A new address from above (the omnibox, a bookmark, a link opened into this tab).
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || url === guestUrl.current) return;
+    guestUrl.current = url;
+    try {
+      const result = el.loadURL(url);
+      if (result && typeof result.catch === 'function') result.catch(() => {}); // did-fail-load reports it
+    } catch {
+      // Not attached yet: the guest has not been created, so src is still what it will load.
+      el.setAttribute('src', url);
+    }
+  }, [url]);
+
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -81,7 +109,10 @@ export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadin
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const onNav = (e: any) => {
-      if (e?.url) onNavigate(e.url);
+      if (e?.url) {
+        guestUrl.current = e.url;
+        onNavigate(e.url);
+      }
       reportHistory();
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -107,7 +138,7 @@ export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadin
     const onFailLoad = (e: any) => {
       // -3 = ERR_ABORTED (a navigation was superseded) — harmless, ignore.
       if (e?.errorCode === -3 || e?.isMainFrame === false) return;
-      setFailure({ code: Number(e?.errorCode) || 0, description: String(e?.errorDescription ?? ''), url: String(e?.validatedURL || url) });
+      setFailure({ code: Number(e?.errorCode) || 0, description: String(e?.errorDescription ?? ''), url: String(e?.validatedURL || guestUrl.current) });
       onLoadingChange(false);
       reportHistory();
     };
@@ -131,7 +162,7 @@ export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadin
       el.removeEventListener('did-fail-load', onFailLoad);
       el.removeEventListener('ipc-message', onIpc);
     };
-  }, [onHistory, onLoadingChange, onNavigate, onTitle, onFavicon, onGuestMessage, url]);
+  }, [onHistory, onLoadingChange, onNavigate, onTitle, onFavicon, onGuestMessage]);
 
   const retry = () => {
     const el = ref.current;
@@ -168,7 +199,7 @@ export function WebView({ url, loading, partition, onNavigate, onTitle, onLoadin
           a boolean it does not know, so it goes in as the string Electron reads. */}
       <webview
         ref={ref}
-        src={url}
+        src={initialUrl}
         partition={partition}
         preload={bridge().guestPreload}
         {...({ allowpopups: 'true' } as Record<string, string>)}
