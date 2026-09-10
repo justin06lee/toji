@@ -173,6 +173,10 @@ export function App() {
   // partition — cookies from a previous Tor session in this window can never carry over.
   const torHoldEpoch = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  // A long address is cut off by the star at the omnibox's right end. While it is
+  // longer than the box (and not being edited) its tail fades out just before the
+  // buttons instead of stopping dead against them.
+  const [omniboxOverflows, setOmniboxOverflows] = useState(false);
   const topTabStripRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -407,6 +411,16 @@ export function App() {
     strip.addEventListener('wheel', onWheel, { passive: false });
     return () => strip.removeEventListener('wheel', onWheel);
   }, [layout]);
+  const omniboxValue = activeTab?.query ?? '';
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    const measure = () => setOmniboxOverflows(input.scrollWidth > input.clientWidth + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(input);
+    return () => observer.disconnect();
+  }, [omniboxValue, layout, sidebarOpen]);
   useEffect(() => {
     if (!tabMenu) return;
     const onEsc = (e: KeyboardEvent) => e.key === 'Escape' && setTabMenu(null);
@@ -1710,7 +1724,7 @@ export function App() {
           spellCheck={false}
           autoComplete="off"
           aria-label="Search"
-          className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-neutral-400"
+          className={`min-w-0 flex-1 bg-transparent pr-3 text-sm outline-none placeholder:text-neutral-400${omniboxOverflows ? ' omnibox-overflowing' : ''}`}
         />
         {activeTab && <VaultFillButton matches={vaultMatches[activeTab.id] ?? []} onFill={(entryId) => fillCredential(activeTab.id, entryId)} />}
         {activeTab?.mode === 'web' && activeTab.url && (

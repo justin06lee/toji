@@ -145,6 +145,16 @@ svg {
 }
 .dark .drag-grip i { background: rgba(255, 255, 255, 0.42); }
 
+/* A long address in the omnibox fades out over its last stretch, ending just before
+   the buttons at the right end, rather than being cut off against the star. Only while
+   it overflows (see omniboxOverflows) and only while it is not being edited — the caret
+   lives at the end of the text while typing, and must stay legible. The text is laid
+   out inside the content box, so the fade ends at the padding edge. */
+.omnibox-overflowing:not(:focus) {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 64px), transparent calc(100% - 12px));
+  mask-image: linear-gradient(to right, #000 calc(100% - 64px), transparent calc(100% - 12px));
+}
+
 /* Indeterminate page-loading bar */
 @keyframes toji-load {
   0% { transform: translateX(-110%); }
