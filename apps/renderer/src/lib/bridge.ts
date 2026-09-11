@@ -98,6 +98,43 @@ export interface VaultStatus {
 
 export type { BookmarkImportError, BrowserProfile, ImportBrowser, ImportResult, ImportedBookmark, PasswordImportError };
 
+/** Who files bug reports from this machine, and so which route they take (see bug-report.cjs). */
+export interface BugReportAccount {
+  mode: 'direct' | 'form';
+  repo: string;
+  login?: string;
+  /** Where the login came from: 'gh' (the GitHub CLI's), or the variable holding the token. */
+  source?: string;
+  reason?: 'no-login' | 'no-access' | 'bad-login' | 'unreachable';
+}
+
+export interface BugReportFile {
+  type: string;
+  role: 'recording' | 'poster' | 'image';
+  data: Uint8Array;
+}
+
+export interface BugReportDraft {
+  kind: 'recording' | 'written';
+  title: string;
+  description: string;
+  /** Only when the reporter chose to include it: reports are public. */
+  pageUrl?: string;
+  /** How long the recording runs, in seconds. */
+  seconds?: number;
+  context: { window: string; layout: string; theme: string };
+  files: BugReportFile[];
+  /** Take GitHub's form even though filing directly is available (after it failed). */
+  via?: 'form';
+}
+
+export type BugReportResult =
+  | { ok: true; mode: 'direct'; number: number; url: string }
+  | { ok: true; mode: 'form'; reportId: string; url: string; files: string[]; bodyOnClipboard: boolean }
+  | { ok: false; error: string; canUseForm?: boolean };
+
+export type BugReportAttach = { ok: true; method: 'drop' | 'input' } | { ok: false; error: string };
+
 export interface PasswordsFileImport {
   canceled: boolean;
   found: number;
@@ -168,6 +205,22 @@ export interface TojiBridge {
   /** Request fresh circuits (Tor NEWNYM). */
   torNewCircuit?: () => Promise<boolean>;
   onTorStatus?: (callback: (status: TorStatus) => void) => () => void;
+
+  // --- bug reports ---
+  /** Help › Report a Bug… (⌥⇧I) was chosen while this window was in front. */
+  onReportBug?: (callback: () => void) => () => void;
+  /** A capture id for this window's own contents, for the rolling recording. Valid a few seconds. */
+  replaySourceId?: () => Promise<string | null>;
+  /** A still of this window as it is right now. */
+  captureWindow?: () => Promise<{ type: string; data: Uint8Array } | null>;
+  bugReportAccount?: (options?: { refresh?: boolean }) => Promise<BugReportAccount>;
+  submitBugReport?: (draft: BugReportDraft) => Promise<BugReportResult>;
+  /** Drop a waiting report's files onto GitHub's issue form in one of this window's tabs. */
+  attachBugReport?: (webContentsId: number, reportId: string) => Promise<BugReportAttach>;
+  /** Start a native drag of one of a waiting report's files, to drop onto the form by hand. */
+  dragBugReportFile?: (reportId: string, name: string) => void;
+  /** Show a waiting report's files in Finder / the file manager. */
+  revealBugReport?: (reportId: string) => Promise<boolean>;
 
   // --- window chrome ---
   /** Cursor tracking for the window-drag notch; see WindowCursor. */

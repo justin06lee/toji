@@ -8,6 +8,8 @@ import { TorHoldButton } from './components/TorHoldButton';
 import { TorStatusBar } from './components/TorStatusBar';
 import { VaultFillButton, VaultPromptBar } from './components/VaultBar';
 import { InternalPage } from './components/InternalPage';
+import { BugReportSheet, type BugReportRequest, type FormReportResult } from './components/BugReportSheet';
+import { BugReportTray, type FormReport } from './components/BugReportTray';
 import { PageView } from './components/PageView';
 import { Sidebar } from './components/Sidebar';
 import { NewTabButton } from './components/NewTabButton';
@@ -35,6 +37,8 @@ import { insertTabAfter, replacePristineTabWithWelcome, startBrowsingInTab } fro
 import { tabTitle } from './lib/tabPresentation';
 import { GROUP_COLORS, type BrowserTab, type TabGroup } from './types';
 import { AUTOSAVE_TIMEOUT_MS, autosaveEnabled, autosaveVerdict } from './lib/vaultAutosave';
+import { REPLAY_EVENT, isReplayStorageKey, issuePageState, replayEnabled } from './lib/bugReport';
+import { ReplayRecorder, type ReplayState } from './lib/replayRecorder';
 
 interface AgentState {
   running: boolean;
@@ -1683,6 +1687,142 @@ export function App() {
   // prefers-color-scheme (see the theme effect), so nothing reloads or regenerates.
   const toggleTheme = useCallback(() => setTheme((current) => (current === 'dark' ? 'light' : 'dark')), []);
 
+  // ---- Bug reports ----
+  // Each window keeps a rolling recording of itself (lib/replayRecorder.ts) unless that is
+  // switched off in Settings; private and Tor windows are never recorded. Help › Report a
+  // Bug… (⌥⇧I) takes the clip and a still of the window, and opens the report sheet.
+  const [replayOn, setReplayOn] = useState(replayEnabled);
+  const [replayState, setReplayState] = useState<ReplayState>('idle');
+  const recorderRef = useRef<ReplayRecorder | null>(null);
+  const recordable = !activeContainer.ephemeral && activeContainer.egress !== 'tor';
+  const replayLive = useRef({ on: replayOn, recordable, state: replayState });
+  replayLive.current = { on: replayOn, recordable, state: replayState };
+  useEffect(() => {
+    const sync = () => setReplayOn(replayEnabled());
+    const fromAnotherWindow = (event: StorageEvent) => {
+      if (isReplayStorageKey(event.key)) sync();
+    };
+    window.addEventListener(REPLAY_EVENT, sync);
+    window.addEventListener('storage', fromAnotherWindow);
+    return () => {
+      window.removeEventListener(REPLAY_EVENT, sync);
+      window.removeEventListener('storage', fromAnotherWindow);
+    };
+  }, []);
+  useEffect(() => {
+    const sourceId = bridge().replaySourceId;
+    // Not before the window has a profile (there is nothing to record yet, and it may turn
+    // out private), and not at all while it is private or on Tor: the capture stops
+    // outright, and whatever it held goes with it.
+    if (!replayOn || profilePickerOpen || !recordable || !sourceId) return;
+    const recorder = new ReplayRecorder(sourceId, setReplayState);
+    recorderRef.current = recorder;
+    void recorder.start();
+    return () => {
+      recorder.stop();
+      if (recorderRef.current === recorder) recorderRef.current = null;
+    };
+  }, [replayOn, profilePickerOpen, recordable]);
+
+  const [bugReport, setBugReport] = useState<BugReportRequest | null>(null);
+  const bugReportOpen = useRef(false);
+  const pickerOpenRef = useRef(profilePickerOpen);
+  pickerOpenRef.current = profilePickerOpen;
+  const openBugReport = useCallback(async () => {
+    // Before the window has a profile there is nothing to report on, and the picker covers
+    // the whole window, so a sheet opened now would only turn up later, out of date.
+    if (bugReportOpen.current || pickerOpenRef.current) return;
+    bugReportOpen.current = true;
+    const recorder = recorderRef.current;
+    recorder?.pause('report');
+    const live = replayLive.current;
+    const unavailable: BugReportRequest['unavailable'] = !live.on
+      ? 'off'
+      : !live.recordable
+        ? 'private'
+        : !recorder || live.state === 'unsupported' || live.state === 'failed'
+          ? 'unsupported'
+          : null;
+    const clip = recorder && !unavailable ? recorder.snapshot().catch(() => null) : null;
+    // The still is taken before the sheet paints over the window.
+    const shot = (await bridge().captureWindow?.().catch(() => null)) ?? null;
+    const tab = tabsRef.current.find((t) => t.id === activeRef.current);
+    setBugReport({
+      clip,
+      unavailable,
+      screenshot: shot ? new Blob([shot.data as Uint8Array<ArrayBuffer>], { type: shot.type }) : null,
+      pageUrl: tab && tab.mode === 'web' && !tab.internal && tab.url ? tab.url : null,
+      context: { window: `${window.innerWidth}×${window.innerHeight}`, layout, theme }
+    });
+  }, [layout, theme]);
+  const closeBugReport = useCallback(() => {
+    bugReportOpen.current = false;
+    setBugReport(null);
+    recorderRef.current?.resume('report');
+  }, []);
+  useEffect(() => bridge().onReportBug?.(() => void openBugReport()), [openBugReport]);
+  // The picker can come back mid-session (the window's profile was deleted); a report
+  // open underneath it closes rather than reappearing stale afterwards.
+  useEffect(() => {
+    if (profilePickerOpen && bugReportOpen.current) closeBugReport();
+  }, [closeBugReport, profilePickerOpen]);
+
+  // A report finished on GitHub's own form: it opens in a tab beside this one, and once
+  // the form is showing (after a sign-in, if need be) the files are dropped onto it.
+  const [formReport, setFormReport] = useState<FormReport | null>(null);
+  const formReportRef = useRef(formReport);
+  formReportRef.current = formReport;
+  const continueOnGitHub = useCallback((result: FormReportResult) => {
+    const from = tabsRef.current.find((t) => t.id === activeRef.current);
+    const tab = makeTab(from?.groupId ?? null, windowContainerRef.current ?? DEFAULT_CONTAINER_ID);
+    tab.mode = 'web';
+    tab.url = result.url;
+    tab.query = result.url;
+    tab.status = 'loading';
+    tab.openerId = from?.id;
+    setTabs((current) => insertTabAfter(current, from?.id, tab));
+    setActiveId(tab.id);
+    setFormReport(result.files.length || result.bodyOnClipboard ? { result, tabId: tab.id, status: 'waiting' } : null);
+  }, []);
+  const formTab = formReport ? tabs.find((t) => t.id === formReport.tabId) : undefined;
+  const formPage = formReport && formTab ? issuePageState(formTab.url, formReport.result.url) : null;
+  const formPageState = formPage?.state ?? null;
+  const filedNumber = formPage?.state === 'filed' ? formPage.number : null;
+  const formTabReady = formTab?.status === 'ready';
+  const formTabGone = Boolean(formReport) && !formTab;
+  useEffect(() => {
+    if (formTabGone) setFormReport(null);
+  }, [formTabGone]);
+  const attachingReport = useRef(false);
+  const attachReportFiles = useCallback(async () => {
+    const report = formReportRef.current;
+    const webContentsId = report ? webviewRefs.current[report.tabId]?.getWebContentsId?.() : undefined;
+    if (!report || attachingReport.current || typeof webContentsId !== 'number') return;
+    const reportId = report.result.reportId;
+    attachingReport.current = true;
+    setFormReport((current) => (current && current.result.reportId === reportId ? { ...current, status: 'attaching' } : current));
+    const outcome = await bridge().attachBugReport?.(webContentsId, reportId).catch(() => null);
+    attachingReport.current = false;
+    setFormReport((current) =>
+      current && current.result.reportId === reportId ? { ...current, status: outcome?.ok ? 'attached' : 'failed', error: outcome && !outcome.ok ? outcome.error : undefined } : current
+    );
+  }, []);
+  useEffect(() => {
+    if (!formReport) return;
+    if (filedNumber !== null) {
+      if (formReport.status !== 'filed') setFormReport({ ...formReport, status: 'filed', number: filedNumber });
+      return;
+    }
+    if (formPageState === 'form' && formTabReady && formReport.status === 'waiting' && formReport.result.files.length) void attachReportFiles();
+  }, [attachReportFiles, filedNumber, formPageState, formReport, formTabReady]);
+  // Once GitHub shows the filed issue, the note lingers a moment, then goes.
+  const formReportStatus = formReport?.status;
+  useEffect(() => {
+    if (formReportStatus !== 'filed') return;
+    const timer = window.setTimeout(() => setFormReport(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [formReportStatus]);
+
   const canReload = Boolean(activeTab && (activeTab.url || activeTab.query.trim()));
   const activeBookmarked = Boolean(activeTab?.url && bookmarks.some((b) => b.url === activeTab.url));
 
@@ -1855,6 +1995,7 @@ export function App() {
                 onOpenUrl={openWebTab}
                 pendingQuery={tab.internal === 'plans' ? tab.query.trim() || undefined : undefined}
                 onShowPlans={() => openInternal('plans')}
+                onReportBug={() => void openBugReport()}
                 onContinue={() => {
                   // Whatever they changed on the plans page decides where this goes, so
                   // re-check the gate before handing the question back.
@@ -2290,6 +2431,33 @@ export function App() {
         )}
       </div>
       <AnimatePresence>{agentSpotlight}</AnimatePresence>
+      <AnimatePresence>
+        {bugReport && (
+          <BugReportSheet
+            key="bug-report"
+            request={bugReport}
+            insetLeft={layout === 'side' && sidebarOpen ? 240 : 0}
+            onOpenUrl={(url) => openWebTab(url)}
+            onOpenSettings={() => {
+              closeBugReport();
+              openInternal('settings');
+            }}
+            onContinueOnGitHub={continueOnGitHub}
+            onClose={closeBugReport}
+          />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {formReport && formReport.tabId === activeId && (
+          <BugReportTray
+            key="bug-report-tray"
+            report={formReport}
+            onForm={formPageState === 'form'}
+            onRetry={() => setFormReport((current) => (current ? { ...current, status: 'waiting', error: undefined } : current))}
+            onDismiss={() => setFormReport(null)}
+          />
+        )}
+      </AnimatePresence>
       {agentCursorEl}
       {tabContextMenu}
     </div>

@@ -47,6 +47,20 @@ contextBridge.exposeInMainWorld('toji', {
     ipcRenderer.on('toji:new-tab', handler);
     return () => ipcRenderer.removeListener('toji:new-tab', handler);
   },
+  // Bug reports (Help › Report a Bug…). The window records itself for the last-15-seconds
+  // clip; filing, and the GitHub login it uses, stay in the main process.
+  onReportBug: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('toji:report-bug', handler);
+    return () => ipcRenderer.removeListener('toji:report-bug', handler);
+  },
+  replaySourceId: () => ipcRenderer.invoke('toji:replay-source'),
+  captureWindow: () => ipcRenderer.invoke('toji:capture-window'),
+  bugReportAccount: (options) => ipcRenderer.invoke('toji:bug-report-account', options),
+  submitBugReport: (draft) => ipcRenderer.invoke('toji:bug-report-submit', draft),
+  attachBugReport: (webContentsId, reportId) => ipcRenderer.invoke('toji:bug-report-attach', { webContentsId, reportId }),
+  dragBugReportFile: (reportId, name) => ipcRenderer.send('toji:bug-report-drag', { reportId, name }),
+  revealBugReport: (reportId) => ipcRenderer.invoke('toji:bug-report-reveal', reportId),
   // The main process detects a tap of the Option/Alt key across the app shell AND every
   // <webview> (whose key events never reach this window) and asks us to toggle the agent bar,
   // so it works even while a page is focused or the agent is running.
