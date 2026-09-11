@@ -1,5 +1,5 @@
 const { app, BrowserWindow, Menu, ipcMain, shell, nativeImage, nativeTheme, webContents, dialog, session, screen, systemPreferences, clipboard } = require('electron');
-const { spawn } = require('node:child_process');
+const { spawn, execFile } = require('node:child_process');
 const { applySessionPolicy, applyWebRtcPolicy, parsePartition } = require('./policy.cjs');
 const { TorController } = require('./tor.cjs');
 const { Vault, generatePassword } = require('./vault.cjs');
@@ -9,6 +9,7 @@ const { contextMenuTemplate } = require('./context-menu.cjs');
 const { Adblock } = require('./adblock.cjs');
 const { chromeUserAgent, popupPlacement } = require('./site-compat.cjs');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
@@ -1466,6 +1467,162 @@ ipcMain.handle('toji:upload-file-input', async (event, { webContentsId, filePath
   }
 });
 
+// --- Bug reports -------------------------------------------------------------------
+// Help › Report a Bug… files a GitHub issue on Toji's repository: the window's last 15
+// seconds (recorded by the renderer, see replayRecorder.ts) or a written report with
+// images. Which GitHub login files it, and by which route, is bug-report.cjs; this half
+// wires that to the windows. The token never leaves this process.
+const bugReports = require('./bug-report.cjs');
+const bugReportEnv = () => ({ ...process.env, ...loadTojiEnv() });
+let bugReporter = null;
+function getBugReporter() {
+  if (!bugReporter) {
+    bugReporter = new bugReports.GitHubReporter({
+      target: bugReports.reportTarget(bugReportEnv()),
+      fetch: globalThis.fetch,
+      token: () => bugReports.resolveToken(bugReportEnv(), () => bugReports.readGhToken(execFile)),
+      log: appendServerLog
+    });
+  }
+  return bugReporter;
+}
+
+/** Where the form route keeps a report's files until they are dropped onto GitHub's form. */
+const bugReportDir = () => path.join(app.getPath('temp'), 'toji-bug-reports');
+const BUG_REPORT_KEEP_MS = 24 * 60 * 60 * 1000;
+/** Reports waiting on GitHub's form, by id: their files, and a picture to drag them by. */
+const pendingBugReports = new Map();
+
+/** Toji's own version. Run from source, Electron reports its own instead, so read the manifest. */
+function tojiVersion() {
+  let version = app.getVersion();
+  if (version === process.versions.electron) {
+    try {
+      version = require('../../package.json').version;
+    } catch {
+      // Keep what Electron said.
+    }
+  }
+  return isDev ? `${version} (from source)` : version;
+}
+
+function osLabel() {
+  const name = { darwin: 'macOS', win32: 'Windows', linux: 'Linux' }[process.platform] || process.platform;
+  let release = os.release();
+  try {
+    release = process.getSystemVersion();
+  } catch {
+    // Older Electron: the kernel release will do.
+  }
+  return `${name} ${release} (${process.arch})`;
+}
+
+// A capture id for the asking window's own contents, which its renderer turns into the
+// rolling recording. Tab capture includes every page composited into the window and
+// needs no screen-recording permission.
+ipcMain.handle('toji:replay-source', (event) => {
+  try {
+    return event.sender.getMediaSourceId(event.sender);
+  } catch (error) {
+    appendServerLog(`replay source unavailable: ${error && error.message}`);
+    return null;
+  }
+});
+
+// A still of the asking window, taken before the report sheet covers it.
+ipcMain.handle('toji:capture-window', async (event) => {
+  try {
+    const image = await event.sender.capturePage();
+    if (image.isEmpty()) return null;
+    const png = image.toPNG();
+    // GitHub takes images up to 10 MB; a photo-heavy page can pass that as PNG.
+    return png.length < 9.5 * 1024 * 1024 ? { type: 'image/png', data: png } : { type: 'image/jpeg', data: image.toJPEG(88) };
+  } catch (error) {
+    appendServerLog(`capture-window failed: ${error && error.message}`);
+    return null;
+  }
+});
+
+ipcMain.handle('toji:bug-report-account', (_event, options) => getBugReporter().account({ refresh: Boolean(options && options.refresh) }));
+
+ipcMain.handle('toji:bug-report-submit', async (_event, submitted) => {
+  const { draft, error } = bugReports.checkDraft(submitted);
+  if (!draft) return { ok: false, error };
+  const reporter = getBugReporter();
+  const facts = { app: tojiVersion(), os: osLabel(), chrome: process.versions.chrome, electron: process.versions.electron };
+  const reportId = bugReports.newReportId();
+  const account = draft.via === 'form' ? { mode: 'form' } : await reporter.account();
+  if (account.mode === 'direct') {
+    try {
+      const issue = await reporter.fileIssue(draft, facts, reportId);
+      appendServerLog(`bug report ${reportId} filed as #${issue.number}`);
+      return { ok: true, mode: 'direct', number: issue.number, url: issue.url };
+    } catch (failure) {
+      appendServerLog(`bug report ${reportId} failed: ${failure && failure.message}`);
+      return { ok: false, error: String((failure && failure.message) || failure), canUseForm: true };
+    }
+  }
+  // GitHub's own form. The files wait on disk until the form opens and they are dropped
+  // onto it; the poster stays behind — GitHub shows the video itself on this route.
+  try {
+    const now = Date.now();
+    for (const [id, pending] of pendingBugReports) if (now - pending.at > BUG_REPORT_KEEP_MS) pendingBugReports.delete(id);
+    const written = draft.files.length ? bugReports.writeReportFiles(bugReportDir(), reportId, draft.files) : [];
+    const poster = written.find((file) => file.name.startsWith('recording-poster.'));
+    const files = written.filter((file) => file !== poster);
+    const body = bugReports.issueBody({ ...draft, files: draft.files.filter((file) => file.role !== 'poster') }, facts, null);
+    const { url, overflow } = bugReports.newIssueUrl(reporter.target, draft.title, body);
+    if (overflow) clipboard.writeText(body);
+    pendingBugReports.set(reportId, { files, poster, at: now });
+    return { ok: true, mode: 'form', reportId, url, files: files.map((file) => file.name), bodyOnClipboard: overflow };
+  } catch (failure) {
+    appendServerLog(`bug report ${reportId} could not be prepared: ${failure && failure.message}`);
+    return { ok: false, error: String((failure && failure.message) || failure) };
+  }
+});
+
+// Drop a waiting report's files onto GitHub's issue form in one of this window's tabs.
+// Only files this process wrote for that report, and only onto the repository's form.
+ipcMain.handle('toji:bug-report-attach', async (event, { webContentsId, reportId } = {}) => {
+  const pending = pendingBugReports.get(reportId);
+  if (!pending || !pending.files.length) return { ok: false, error: 'Nothing is waiting to be attached.' };
+  if (!senderOwnsTarget(event, webContentsId)) return { ok: false, error: 'page does not belong to this window' };
+  const wc = webContents.fromId(Number(webContentsId));
+  if (!wc || wc.isDestroyed() || !bugReports.isIssueForm(getBugReporter().target, wc.getURL())) return { ok: false, error: 'That tab is not the issue form.' };
+  try {
+    const dbg = ensureDebugger(wc);
+    const result = await bugReports.attachToIssueForm((method, params) => dbg.sendCommand(method, params), pending.files);
+    appendServerLog(`bug report ${reportId}: ${result.ok ? `attached by ${result.method}` : `not attached (${result.error})`}`);
+    return result;
+  } catch (failure) {
+    appendServerLog(`bug report ${reportId}: attach failed: ${failure && failure.message}`);
+    return { ok: false, error: String((failure && failure.message) || failure) };
+  }
+});
+
+// When attaching by itself fails, the files are dragged in by hand from the report tray.
+ipcMain.on('toji:bug-report-drag', (event, { reportId, name } = {}) => {
+  const pending = pendingBugReports.get(reportId);
+  const file = pending && pending.files.find((candidate) => candidate.name === name);
+  if (!file) return;
+  const picture = file.type.startsWith('image/') ? file.path : pending.poster ? pending.poster.path : APP_ICON_PATH;
+  let icon = fs.existsSync(picture) ? nativeImage.createFromPath(picture) : nativeImage.createEmpty();
+  if (!icon.isEmpty()) icon = icon.resize({ width: 96 });
+  // macOS refuses a drag without a picture.
+  if (icon.isEmpty()) icon = nativeImage.createFromBitmap(Buffer.from([128, 128, 128, 255]), { width: 1, height: 1 });
+  try {
+    event.sender.startDrag({ file: file.path, icon });
+  } catch (error) {
+    appendServerLog(`bug report drag failed: ${error && error.message}`);
+  }
+});
+
+ipcMain.handle('toji:bug-report-reveal', (_event, reportId) => {
+  const file = pendingBugReports.get(reportId)?.files[0];
+  if (file) shell.showItemInFolder(file.path);
+  return Boolean(file);
+});
+
 // Install an app menu so Cmd+W closes the active TAB (not the window). Window-close
 // moves to Cmd+Shift+W. Standard roles keep copy/paste/quit/devtools intact.
 function buildAppMenu() {
@@ -1491,7 +1648,9 @@ function buildAppMenu() {
     },
     { role: 'editMenu' },
     { role: 'viewMenu' },
-    { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }, ...(isMacOS ? [{ role: 'front' }] : [])] }
+    { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }, ...(isMacOS ? [{ role: 'front' }] : [])] },
+    // Chrome's shortcut for its own "Report an Issue…".
+    { role: 'help', submenu: [{ label: 'Report a Bug…', accelerator: 'Alt+Shift+I', click: () => send('toji:report-bug') }] }
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -1507,6 +1666,8 @@ app.whenReady().then(async () => {
   buildAppMenu();
   setupTor();
   setupExtensions();
+  // Files a form-route report left behind the last time, if Toji quit before cleaning up.
+  bugReports.pruneReportDirs(bugReportDir(), BUG_REPORT_KEEP_MS);
   try {
     await ensureBundledAgentServer();
   } catch (error) {
@@ -1533,6 +1694,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   serverProcess?.kill();
   serverProcess = null;
+  bugReports.pruneReportDirs(bugReportDir(), 0);
   try {
     tor.stop();
   } catch {

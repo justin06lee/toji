@@ -1,4 +1,4 @@
-import { ArrowRight, BookMarked, Boxes, Brain, Check, Compass, Copy, Cpu, Download, EyeOff, FileText, Globe, KeyRound, Loader2, Paperclip, Plus, Puzzle, RefreshCw, Route, Search, Star, Trash2, TrendingUp, X } from 'lucide-react';
+import { ArrowRight, BookMarked, Boxes, Brain, Bug, Check, Compass, Copy, Cpu, Download, EyeOff, FileText, Globe, KeyRound, Loader2, Paperclip, Plus, Puzzle, RefreshCw, Route, Search, Star, Trash2, TrendingUp, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   addBookmarks,
@@ -24,7 +24,7 @@ import {
   type ReferenceDoc
 } from '../lib/api';
 import type { AgentChoice, AgentsStatus, Billing, CerebrasModels, InternalPage as InternalPageKind, ModelCatalog, Plan, ThinkingLevel, UserSettings } from '../types';
-import { bridge, isElectron, type AdblockStatus, type ImportBrowser, type TorStatus, type VaultEntry, type VaultStatus } from '../lib/bridge';
+import { bridge, isElectron, type AdblockStatus, type BugReportAccount, type ImportBrowser, type TorStatus, type VaultEntry, type VaultStatus } from '../lib/bridge';
 import { BOOKMARKS_BAR_EVENT, bookmarksBarPinned, setBookmarksBarPinned } from './BookmarksBar';
 import { PROFILE_AVATARS, newContainer, type Container, type Egress } from '../lib/containers';
 import { describeBrowser, describeImport, describePasswordsFile, planProfiles, plural, type ImportMessage, type ImportTotals } from '../lib/browserImport';
@@ -37,6 +37,7 @@ import { ColorPicker } from './ColorPicker';
 import { Switch } from './Switch';
 import { autosaveEnabled, setAutosaveEnabled } from '../lib/vaultAutosave';
 import { providerNote } from '../lib/providerState';
+import { REPLAY_EVENT, REPLAY_SECONDS, replayEnabled, setReplayEnabled } from '../lib/bugReport';
 
 
 interface InternalPageProps {
@@ -54,9 +55,11 @@ interface InternalPageProps {
   onContinue?: () => void;
   /** Open the plans page (from Settings, where there is no room for it inline). */
   onShowPlans?: () => void;
+  /** Open the bug report sheet (the Help menu does the same). */
+  onReportBug?: () => void;
 }
 
-export function InternalPage({ page, onOpenUrl, onGetStarted, containers, containerId, onContainersChange, onClearContainer, pendingQuery, onContinue, onShowPlans }: InternalPageProps) {
+export function InternalPage({ page, onOpenUrl, onGetStarted, containers, containerId, onContainersChange, onClearContainer, pendingQuery, onContinue, onShowPlans, onReportBug }: InternalPageProps) {
   // The plans page is wider than the others: three tiers side by side don't fit 760px.
   const width = page === 'plans' ? 'w-[min(1000px,94vw)]' : 'w-[min(760px,92vw)]';
   return (
@@ -67,7 +70,7 @@ export function InternalPage({ page, onOpenUrl, onGetStarted, containers, contai
         ) : page === 'plans' ? (
           <PlansView onOpenUrl={onOpenUrl} pendingQuery={pendingQuery} onContinue={onContinue} />
         ) : (
-          <SettingsView containers={containers} onContainersChange={onContainersChange} onClearContainer={onClearContainer} onShowPlans={onShowPlans} />
+          <SettingsView containers={containers} onContainersChange={onContainersChange} onClearContainer={onClearContainer} onShowPlans={onShowPlans} onReportBug={onReportBug} />
         )}
       </div>
     </div>
@@ -652,12 +655,14 @@ function SettingsView({
   containers,
   onContainersChange,
   onClearContainer,
-  onShowPlans
+  onShowPlans,
+  onReportBug
 }: {
   containers: Container[];
   onContainersChange: (containers: Container[]) => void;
   onClearContainer: (containerId: string) => void;
   onShowPlans?: () => void;
+  onReportBug?: () => void;
 }) {
   return (
     <div>
@@ -669,6 +674,7 @@ function SettingsView({
       <SearchSettings />
       <BrowsingSettings />
       <MemorySettings />
+      <BugReportSettings onReportBug={onReportBug} />
     </div>
   );
 }
@@ -1401,6 +1407,60 @@ function BrowsingSettings() {
             <p className="text-[12px] text-neutral-500">{pinned ? 'The bar sits under the address bar on every page.' : 'The bar slides in when the pointer rests under the address bar.'}</p>
           </div>
           <Switch checked={pinned} onChange={(v) => setBookmarksBarPinned(v)} label="Always show the bookmarks bar" />
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+/** The rolling recording, and where a report goes. */
+function BugReportSettings({ onReportBug }: { onReportBug?: () => void }) {
+  const [on, setOn] = useState(replayEnabled);
+  const [account, setAccount] = useState<BugReportAccount | null>(null);
+  useEffect(() => {
+    const sync = () => setOn(replayEnabled());
+    window.addEventListener(REPLAY_EVENT, sync);
+    void bridge()
+      .bugReportAccount?.()
+      .then(setAccount)
+      .catch(() => {});
+    return () => window.removeEventListener(REPLAY_EVENT, sync);
+  }, []);
+  const shortcut = bridge().platform === 'darwin' ? '⌥⇧I' : 'Alt+Shift+I';
+  const route = !isElectron()
+    ? 'Needs the Toji desktop app.'
+    : !account
+      ? 'Checking your GitHub login…'
+      : account.mode === 'direct'
+        ? `Filed straight to ${account.repo} as @${account.login}${account.source === 'gh' ? ', with the GitHub CLI’s login' : ''}.`
+        : 'Finished on GitHub’s own issue form, in a new tab, with the files attached for you.';
+  const row = 'flex items-center justify-between gap-4 py-2.5';
+  return (
+    <Section icon={<Bug size={16} />} title="Bug reports">
+      <div className="divide-y divide-black/[0.06] rounded-xl border border-black/10 px-3 dark:divide-white/[0.08] dark:border-white/10">
+        <div className={row}>
+          <div className="min-w-0">
+            <div className="text-[13px]">Keep the last {REPLAY_SECONDS} seconds</div>
+            <p className="text-[12px] text-neutral-500">
+              {!isElectron()
+                ? 'Needs the Toji desktop app.'
+                : on
+                  ? `Each window keeps a rolling ${REPLAY_SECONDS}-second recording of itself in memory, so a report can show what just happened. It is never saved, and only sent in a report you send. Private and Tor windows are not recorded.`
+                  : 'Off. Reports can still be written, with screenshots.'}
+            </p>
+          </div>
+          <Switch checked={on && isElectron()} disabled={!isElectron()} onChange={setReplayEnabled} label={`Keep the last ${REPLAY_SECONDS} seconds`} />
+        </div>
+        <div className={row}>
+          <div className="min-w-0">
+            <div className="text-[13px]">Report a bug</div>
+            <p className="text-[12px] text-neutral-500">
+              {route} Also in the Help menu, or {shortcut}.
+            </p>
+          </div>
+          <button type="button" className={FIELD_BUTTON_QUIET} disabled={!isElectron() || !onReportBug} onClick={onReportBug}>
+            Report a bug…
+          </button>
         </div>
       </div>
     </Section>

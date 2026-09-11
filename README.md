@@ -179,6 +179,37 @@ browser works — profiles, Tor, the vault, the agent — for as long as you lik
 > an unsubscribed Toji plan simply runs whatever CLI you are signed into, so choosing it
 > never takes away a setup that already worked.
 
+## Bug reports
+
+**Help › Report a Bug…** (⌥⇧I on macOS, Alt+Shift+I elsewhere, or the button in Settings)
+files an issue on this repository, in one of two forms:
+
+- **The last 15 seconds.** Each window keeps a rolling recording of itself in memory. It is
+  Chromium's own capture of the window, so it needs no screen-recording permission, and it
+  is encoded as it goes (hardware H.264 where the machine has it) and trimmed to what a
+  15-second clip needs. Opening the report freezes it, and the sheet plays back exactly
+  what would be sent. Nothing is written to disk or sent anywhere unless you submit it.
+  Private and Tor windows are never recorded: while a window is private or on Tor it is not
+  captured at all, and what it held before is dropped. Settings can switch the recording off.
+- **A written report**: a title, what happened, and images, whether pasted, dropped,
+  picked, or a screenshot of the window taken just before the sheet opened.
+
+Issues are public, so the page's address stays out unless you include it. Every report
+carries Toji's version, the OS and the window size.
+
+How a report reaches GitHub depends on the login on the machine. With a token that can
+write to the repository (`TOJI_GITHUB_TOKEN`, `GH_TOKEN` or `GITHUB_TOKEN` in the
+environment or `.env.local`, or else the GitHub CLI's own login), Toji files the issue
+itself. GitHub's API has no way to attach a file to an issue, so the recording and images
+are committed to the repository under `refs/bug-reports/<id>`, a ref no branch or tag
+points at and that `git clone` never downloads, and the issue links them from
+raw.githubusercontent.com, where images show inline.
+
+Everyone else finishes on GitHub's own new-issue form. It opens in a tab with the title and
+text filled in, and Toji drops the files onto it, so GitHub uploads them itself and the
+video plays in the issue. If the drop doesn't take, the files wait in a small tray over the
+tab, ready to drag in by hand.
+
 ## What this does not do
 
 Worth being clear, because privacy tools invite assumptions:
@@ -207,6 +238,7 @@ apps/desktop/       Electron main process
   guest-preload.cjs runs in every page: login detection and fill
   browser-promos.cjs removes "switch to our browser" promos (Web Store, search engines)
   browser-import.cjs bookmarks, passwords and profiles from other browsers
+  bug-report.cjs    files bug reports as GitHub issues; the token stays in main
 apps/renderer/      React UI (tabs, containers, settings)
 apps/agent-server/  local HTTP server: inference, page generation, memory
 ```
