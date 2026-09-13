@@ -294,7 +294,7 @@ bundles into `resource:///modules/toji/lib/*.sys.mjs`. No C++.
 | 3 | Tor per container, kill switch, onion routing, Tor UI, `make tor-check` | `feat/gecko-containers` | done in the browser (`gecko/test/tor-browser.ts`; tag `feat-gecko-containers`); Tor UI not yet checked |
 | 4 | Styling and extras on native widgets; Settings, Welcome, Plans | `feat/gecko-containers` | pages done (`gecko/test/phase4.ts`; tag `feat-gecko-containers`); toolbar styling and extras not yet checked |
 | 5 | Agent server as compiled sidecar; AI pages; web agent; spotlight | `feat/gecko-agent` | done (`gecko/test/phase5.ts`, `--live` for the model-backed checks; tag `feat-gecko-agent`) |
-| 6 | Passwords, imports, uBlock Origin | | |
+| 6 | Passwords, imports, uBlock Origin | `feat/gecko-vault` | in progress — uBlock Origin and file-free imports verified (`gecko/test/phase6.ts`); the vault waits for the user's go-ahead (it uses the macOS Keychain) |
 | 7 | Bug reports, shortcuts, default browser, links from other apps | | |
 | 8 | Data migration, retire Electron | | |
 
@@ -313,12 +313,12 @@ State per item: — not started · WIP · works · works differently · dropped 
 | Omnibox | engine choice, long-URL fade, star, vault fill, Go/Tor button | — |
 | Bookmarks | ⌘D, pinned or hover bar, imports | — |
 | Tabs | top/side, groups with colours, drag reorder, long-press new-tab menu, background tabs, audio/mute, agent indicator, open/close animation | — |
-| Ad blocking | uBlock Origin, on by default | — |
+| Ad blocking | uBlock Origin, on by default | works — the pinned 1.74.0, active in new profiles and private windows; blocks a tracker a page requests; the Settings switch turns it off and on (`phase6.ts`) |
 | Pages | Settings, Welcome, Plans | WIP — Settings, Welcome, Plans, start page and bug report render with `window.toji`; web pages get no bridge; ⌘T opens about:start. Plans shows no tiers yet (they come from the agent server, phase 5) |
 | System | default browser, cold-start links from other apps | — |
 | Theme | toggle drives prefers-color-scheme | — |
 | Bug reports | written + images + screenshot; 15 s clip if a Gecko capture path holds up | — |
-| Imports | Chrome family incl. Helium, Arc, Dia; Safari; files | — |
+| Imports | Chrome family incl. Helium, Arc, Dia; Safari; files | WIP — Helium bookmarks (Toji's own Chromium reader, also used for Arc and Dia) import into a "From Helium (<profile>)" folder, tested from a fake home (`TOJI_IMPORT_HOME`); Firefox's migrators (Chrome, Brave, Edge…), Safari, password import and the file pickers not yet checked |
 | Extensions | Firefox add-ons (not the Chrome Web Store) | — |
 | Linux | packages | — |
 
@@ -569,7 +569,24 @@ State per item: — not started · WIP · works · works differently · dropped 
   `ownerGlobal` change: all pass.
 - Phase 5 merged to master (tag `feat-gecko-agent`).
 
-**Next:** phase 6 — the vault, imports (bookmarks and passwords from files; importing
-Chrome's passwords reads the user's real data and brings up a Keychain prompt, so it
-waits for the user's go-ahead) and uBlock Origin; then bug reports, shortcuts, default
-browser and links from other apps (7).
+### 2026-09-13 — phase 6: uBlock Origin and imports
+
+- `gecko/test/phase6.ts`, all 9 checks, touching neither the user's data nor their
+  Keychain: uBlock Origin is the pinned 1.74.0, active in a new profile and allowed in
+  private windows; a page's request to a tracker beacon is blocked while one to
+  example.com goes through; Settings' switch turns uBlock off (the same request then
+  goes out) and back on (blocked again); Helium bookmarks import from a fake home
+  (`TOJI_IMPORT_HOME`) into "From Helium (Personal)"; a profile with no `Login Data`
+  returns before any Keychain access.
+- Two test lessons: uBlock swaps ad *scripts* such as `adsbygoogle.js` for a harmless
+  stand-in bundled in the extension, so a request for one "succeeds"; and EasyList
+  exempts DoubleClick click-through links, or ads' links would break. The check uses a
+  tracker beacon that is blocked outright.
+- **Not exercised: the vault.** `OSKeyStore` keeps the vault key in the macOS login
+  Keychain ("Toji Encrypted Storage"), and every rebuilt, ad-hoc-signed test app would
+  raise a Keychain prompt on the user's screen. Waiting for the user's go-ahead; the
+  vault's logic is covered by `gecko/lib/vault.test.ts`.
+
+**Next:** phase 7 — bug reports, shortcuts, default browser and links from other apps
+— checked without filing real issues or changing the system's default browser. Then
+the vault (with the user's go-ahead) and phase 8.
