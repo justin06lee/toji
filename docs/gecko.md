@@ -294,8 +294,8 @@ bundles into `resource:///modules/toji/lib/*.sys.mjs`. No C++.
 | 3 | Tor per container, kill switch, onion routing, Tor UI, `make tor-check` | `feat/gecko-containers` | done in the browser (`gecko/test/tor-browser.ts`; tag `feat-gecko-containers`); Tor UI not yet checked |
 | 4 | Styling and extras on native widgets; Settings, Welcome, Plans | `feat/gecko-containers` | pages done (`gecko/test/phase4.ts`; tag `feat-gecko-containers`); toolbar styling and extras not yet checked |
 | 5 | Agent server as compiled sidecar; AI pages; web agent; spotlight | `feat/gecko-agent` | done (`gecko/test/phase5.ts`, `--live` for the model-backed checks; tag `feat-gecko-agent`) |
-| 6 | Passwords, imports, uBlock Origin | | |
-| 7 | Bug reports, shortcuts, default browser, links from other apps | | |
+| 6 | Passwords, imports, uBlock Origin | `feat/gecko-vault` | in progress — uBlock Origin and file-free imports verified (`gecko/test/phase6.ts`); the vault waits for the user's go-ahead (it uses the macOS Keychain) |
+| 7 | Bug reports, shortcuts, default browser, links from other apps | `feat/gecko-vault` | done (`gecko/test/phase7.ts`; tag `feat-gecko-reports`) — filing a real issue and setting the system default browser not exercised |
 | 8 | Data migration, retire Electron | | |
 
 ## Parity checklist
@@ -313,12 +313,12 @@ State per item: — not started · WIP · works · works differently · dropped 
 | Omnibox | engine choice, long-URL fade, star, vault fill, Go/Tor button | — |
 | Bookmarks | ⌘D, pinned or hover bar, imports | — |
 | Tabs | top/side, groups with colours, drag reorder, long-press new-tab menu, background tabs, audio/mute, agent indicator, open/close animation | — |
-| Ad blocking | uBlock Origin, on by default | — |
+| Ad blocking | uBlock Origin, on by default | works — the pinned 1.74.0, active in new profiles and private windows; blocks a tracker a page requests; the Settings switch turns it off and on (`phase6.ts`) |
 | Pages | Settings, Welcome, Plans | WIP — Settings, Welcome, Plans, start page and bug report render with `window.toji`; web pages get no bridge; ⌘T opens about:start. Plans shows no tiers yet (they come from the agent server, phase 5) |
-| System | default browser, cold-start links from other apps | — |
+| System | default browser, cold-start links from other apps | WIP — a link handed over at launch waits for "Who's browsing?" and opens in the container chosen; an external link lands in its window's container; `isDefaultBrowser()` answers (it reads true while the Electron app shares the bundle id). Setting the default browser not exercised |
 | Theme | toggle drives prefers-color-scheme | — |
-| Bug reports | written + images + screenshot; 15 s clip if a Gecko capture path holds up | — |
-| Imports | Chrome family incl. Helium, Arc, Dia; Safari; files | — |
+| Bug reports | written + images + screenshot; 15 s clip if a Gecko capture path holds up | WIP — ⌥⇧I and Help › Report a Bug… open the sheet beside the tab with the page and window size; the window still is a PNG (no Screen Recording needed). Filing to GitHub and the 15 s clip not exercised |
+| Imports | Chrome family incl. Helium, Arc, Dia; Safari; files | WIP — Helium bookmarks (Toji's own Chromium reader, also used for Arc and Dia) import into a "From Helium (<profile>)" folder, tested from a fake home (`TOJI_IMPORT_HOME`); Firefox's migrators (Chrome, Brave, Edge…), Safari, password import and the file pickers not yet checked |
 | Extensions | Firefox add-ons (not the Chrome Web Store) | — |
 | Linux | packages | — |
 
@@ -569,7 +569,39 @@ State per item: — not started · WIP · works · works differently · dropped 
   `ownerGlobal` change: all pass.
 - Phase 5 merged to master (tag `feat-gecko-agent`).
 
-**Next:** phase 6 — the vault, imports (bookmarks and passwords from files; importing
-Chrome's passwords reads the user's real data and brings up a Keychain prompt, so it
-waits for the user's go-ahead) and uBlock Origin; then bug reports, shortcuts, default
-browser and links from other apps (7).
+### 2026-09-13 — phase 6: uBlock Origin and imports
+
+- `gecko/test/phase6.ts`, all 9 checks, touching neither the user's data nor their
+  Keychain: uBlock Origin is the pinned 1.74.0, active in a new profile and allowed in
+  private windows; a page's request to a tracker beacon is blocked while one to
+  example.com goes through; Settings' switch turns uBlock off (the same request then
+  goes out) and back on (blocked again); Helium bookmarks import from a fake home
+  (`TOJI_IMPORT_HOME`) into "From Helium (Personal)"; a profile with no `Login Data`
+  returns before any Keychain access.
+- Two test lessons: uBlock swaps ad *scripts* such as `adsbygoogle.js` for a harmless
+  stand-in bundled in the extension, so a request for one "succeeds"; and EasyList
+  exempts DoubleClick click-through links, or ads' links would break. The check uses a
+  tracker beacon that is blocked outright.
+- **Not exercised: the vault.** `OSKeyStore` keeps the vault key in the macOS login
+  Keychain ("Toji Encrypted Storage"), and every rebuilt, ad-hoc-signed test app would
+  raise a Keychain prompt on the user's screen. Waiting for the user's go-ahead; the
+  vault's logic is covered by `gecko/lib/vault.test.ts`.
+
+### 2026-09-13 — phase 7 verified
+
+- `gecko/test/phase7.ts`, all 8 checks, filing nothing and changing no system
+  setting: a link given on the command line (as another app hands one over) waits
+  while "Who's browsing?" shows and opens in Work once Work is chosen; an external open
+  (`browserDOMWindow.openURI(…, OPEN_EXTERNAL)`) into a Work window gets Work's
+  userContextId, not the default container; ⌥⇧I and Help › Report a Bug… exist, and the
+  shortcut opens `about:report` beside the tab with the page and window size filled
+  in; `captureWindow` returns a PNG of the whole window; `isDefaultBrowser()` answers;
+  tapping Option opens the agent spotlight.
+- Phases 6 (uBlock Origin and imports) and 7 merged to master (tag
+  `feat-gecko-reports`).
+
+**Next — both need the user's go-ahead:**
+- the vault (its key lives in the macOS login Keychain; a test raises Keychain prompts
+  on the user's screen), with password import from CSV and from Chrome's profile;
+- phase 8: migrate the Electron app's data and retire it (it still shares the bundle id
+  `com.ezzy.toji`, which is why `isDefaultBrowser()` reads true).
