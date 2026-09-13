@@ -1,0 +1,14 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# Toji's own layer on top of Firefox. browser/moz.build exports
+# DIST_SUBDIR = "browser", so ".." is the GRE directory
+# (Toji.app/Contents/Resources on macOS).
+
+# Locked prefs that strip Mozilla's services, read by autoconfig
+# (general.config.filename in the branding prefs).
+FINAL_TARGET_FILES[".."] += ["toji.cfg"]
+
+# Enterprise policies: the second lock on the same services.
+FINAL_TARGET_FILES[".."].distribution += ["distribution/policies.json"]

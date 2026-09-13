@@ -1,0 +1,46 @@
+# Toji's mozconfig. gecko/build.ts points MOZCONFIG here and exports
+# TOJI_OBJDIR (and TOJI_SCCACHE_DIR); nothing in this file is machine-specific.
+
+ac_add_options --enable-application=browser
+mk_add_options MOZ_OBJDIR="${TOJI_OBJDIR:?TOJI_OBJDIR must be set by gecko/build.ts}"
+
+# Identity: Toji.app, bundle id com.ezzy.toji, profile dir "Toji".
+ac_add_options --with-branding=browser/branding/toji
+ac_add_options --with-app-name=toji
+ac_add_options --with-app-basename=Toji
+ac_add_options --with-distribution-id=com.ezzy
+# Vendor "Toji" and the UA's "Firefox/<version>" token are implied values
+# (configure refuses them from a mozconfig), so patch 0002 sets them.
+ac_add_options --enable-update-channel=esr
+
+# A release build without Mozilla's services compiled in.
+ac_add_options --enable-release
+ac_add_options --enable-optimize
+ac_add_options --disable-debug
+ac_add_options --disable-tests
+ac_add_options --disable-crashreporter
+ac_add_options --disable-updater
+ac_add_options --disable-default-browser-agent
+
+# Add-on signing stays mandatory (ESR otherwise lets a pref turn it off).
+export MOZ_REQUIRE_SIGNING=1
+
+# Widevine arrives through GMP; keep EME built in.
+ac_add_options --enable-eme=widevine
+
+# Tor containers fail closed. Compiled-in guarantees, as Tor Browser builds:
+# no "conservative" request ever fails over from a dead proxy to DIRECT, and
+# nothing may set bypassProxy on a channel.
+ac_add_options --disable-proxy-direct-failover
+ac_add_options --enable-proxy-bypass-protection
+
+if [ -n "$TOJI_SCCACHE_DIR" ]; then
+  ac_add_options --with-ccache=sccache
+  export SCCACHE_DIR="$TOJI_SCCACHE_DIR"
+  export SCCACHE_CACHE_SIZE=30G
+fi
+
+# 8 GB machines swap hard at the default job count; build.ts sets this.
+if [ -n "$TOJI_JOBS" ]; then
+  mk_add_options MOZ_PARALLEL_BUILD="$TOJI_JOBS"
+fi

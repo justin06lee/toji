@@ -1,0 +1,13 @@
+--- a/browser/moz.configure	2026-09-13 01:48:01
++++ b/browser/moz.configure	2026-09-13 01:59:19
+@@ -11,7 +11,9 @@
+ imply_option("MOZ_PROFILE_MIGRATOR", True)
+ 
+ 
+-imply_option("MOZ_APP_VENDOR", "Mozilla")
++imply_option("MOZ_APP_VENDOR", "Toji")
++# Toji presents honestly as Firefox: keep "Firefox/<version>" in the UA.
++imply_option("MOZ_APP_UA_NAME", "Firefox")
+ imply_option("MOZ_APP_ID", "{ec8030f7-c20a-464f-9b0e-13a3a9e97384}")
+ # Include the DevTools client, not just the server (which is the default)
+ imply_option("MOZ_DEVTOOLS", "all")

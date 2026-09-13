@@ -1,0 +1,7 @@
+{
+  "version": "153.2.0esr",
+  "source": "https://archive.mozilla.org/pub/firefox/releases/153.2.0esr/source/firefox-153.2.0esr.source.tar.xz",
+  "sha256": "c443c99704aadaf60fb267d709c42bc283e49e82292084f976369c8327ad833c",
+  "tree": "mozilla-esr153",
+  "revision": "92c5bf513a3e4e39fa70df2df6a565a1049a9920"
+}
