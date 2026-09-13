@@ -5,6 +5,7 @@ import { createPortal, flushSync } from 'react-dom';
 import { AgentSpotlight, type AgentLogEntry } from './components/AgentSpotlight';
 import { WindowProfilePicker } from './components/WindowProfilePicker';
 import { TorHoldButton } from './components/TorHoldButton';
+import { LandingSearch } from './components/LandingSearch';
 import { TorStatusBar } from './components/TorStatusBar';
 import { VaultFillButton, VaultPromptBar } from './components/VaultBar';
 import { InternalPage } from './components/InternalPage';
@@ -69,55 +70,7 @@ const hasCustomTitleBar = isMac;
 // In Electron, Cmd+W / Cmd+T are owned by the app menu; the keydown fallback below is
 // only for running the renderer in a plain browser during development.
 const isElectron = Boolean((window as unknown as { toji?: unknown }).toji);
-const ICON = `${import.meta.env.BASE_URL}toji-round.png`;
 const STARTUP_CONTAINER_ID = new URLSearchParams(window.location.search).get('container');
-
-/**
- * The New Tab landing's big search box. Deliberately holds its own text: it is NOT
- * mirrored into the toolbar omnibox (typing in one showing up in the other read as a
- * glitch, not a feature).
- */
-function LandingSearch({ onGo, onAi, torActive, onTorToggle }: { onGo: (value: string) => void; onAi: (value: string) => void; torActive: boolean; onTorToggle?: () => void }) {
-  const [value, setValue] = useState('');
-  const submit = () => {
-    if (value.trim()) onGo(value);
-  };
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center px-6 pb-[9vh]">
-      <img src={ICON} alt="Toji" className="mb-5 h-[72px] w-[72px] rounded-[20px] shadow-sm" />
-      <h1 className="mb-7 text-2xl font-semibold tracking-tight">Toji</h1>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit();
-        }}
-        className="flex h-14 w-[min(600px,92vw)] items-center rounded-full border border-black/10 bg-white pl-5 pr-1.5 shadow-sm transition dark:border-white/12 dark:bg-neutral-900"
-      >
-        <Search size={18} className="shrink-0 text-neutral-400 mr-2.5 mb-0.25" />
-        <input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && e.shiftKey) {
-              e.preventDefault();
-              if (value.trim()) onAi(value);
-            }
-          }}
-          placeholder="search or enter a url"
-          spellCheck={false}
-          autoComplete="off"
-          autoFocus
-          aria-label="Search"
-          className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-neutral-400"
-        />
-        <button type="button" aria-label="Generate an AI page" title="Generate an AI page  ⇧↵" onClick={() => value.trim() && onAi(value)} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-black/10 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/15 dark:hover:text-white mr-1.5">
-          <WandSparkles size={18} />
-        </button>
-        <span className="mr-1"><TorHoldButton active={torActive} onGo={submit} onToggle={onTorToggle} /></span>
-      </form>
-    </div>
-  );
-}
 
 /** A tab's icon: the site's favicon for web tabs (falling back to the Toji mark), else the Toji mark. */
 
@@ -1963,8 +1916,7 @@ export function App() {
   const landing = activeTab ? (
     <LandingSearch
       key={activeTab.id}
-      torActive={torMode}
-      onTorToggle={baseContainer.egress === 'tor' ? undefined : toggleWindowTor}
+      tor={{ active: torMode, onToggle: baseContainer.egress === 'tor' ? undefined : toggleWindowTor }}
       onGo={(value) => go(activeTab.id, value)}
       onAi={(value) => go(activeTab.id, value, { ai: true })}
     />

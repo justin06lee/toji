@@ -25,6 +25,7 @@
     "build:server": "bun scripts/build-server.ts",
     "build:server:bin": "bun scripts/build-server.ts --compile",
     "build:web": "vite build",
+    "build:pages": "vite build --config vite.gecko.config.ts",
     "preview:web": "vite preview --host 127.0.0.1 --port 5173",
     "start": "bun run start:server",
     "start:server": "tsx apps/agent-server/src/index.ts",

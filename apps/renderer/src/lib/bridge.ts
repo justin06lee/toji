@@ -197,6 +197,13 @@ export interface TojiBridge {
   onSettingsChanged?: (callback: (settings: BrowserSettings) => void) => () => void;
   /** Opens a URL in a tab of this window (next to this page). */
   openTab?: (url: string, options?: { background?: boolean }) => void;
+  /**
+   * The start page's search box hands over exactly what was typed. The browser decides
+   * whether it is an address or a search (with the default engine) and loads it in this tab.
+   */
+  navigate?: (input: string) => void;
+  /** Shift+Enter or the wand: the browser opens an AI answer page for `query` in this tab. */
+  askAI?: (query: string) => void;
   /** Opens one of Toji's own pages: 'settings', 'welcome', 'plans' (optionally carrying a question). */
   openPage?: (page: 'settings' | 'welcome' | 'plans', options?: { query?: string; replace?: boolean }) => void;
   /** Firefox's add-ons manager (extensions are Firefox add-ons now). */
