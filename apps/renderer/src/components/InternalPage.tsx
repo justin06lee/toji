@@ -1,4 +1,4 @@
-import { ArrowRight, BookMarked, Boxes, Brain, Bug, Check, Compass, Copy, Cpu, Download, EyeOff, FileText, Globe, KeyRound, Loader2, Paperclip, Plus, Puzzle, RefreshCw, Route, Search, Star, Trash2, TrendingUp, X } from 'lucide-react';
+import { ArrowRight, BookMarked, Boxes, Brain, Bug, Check, Compass, Copy, Cpu, Download, EyeOff, FileText, Globe, KeyRound, Loader2, Palette, Paperclip, Plus, Puzzle, RefreshCw, Route, Search, Star, Trash2, TrendingUp, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   addBookmarks,
@@ -24,12 +24,14 @@ import {
   type ReferenceDoc
 } from '../lib/api';
 import type { AgentChoice, AgentsStatus, Billing, CerebrasModels, InternalPage as InternalPageKind, ModelCatalog, Plan, ThinkingLevel, UserSettings } from '../types';
-import { bridge, isElectron, type AdblockStatus, type BugReportAccount, type ImportBrowser, type TorStatus, type VaultEntry, type VaultStatus } from '../lib/bridge';
+import { bridge, isElectron, type AdblockStatus, type BrowserSettings, type BugReportAccount, type ImportBrowser, type TorStatus, type VaultEntry, type VaultStatus } from '../lib/bridge';
+import { hasBrowserSettings, setBrowserSetting, useBrowserSettings } from '../lib/browserSettings';
+import { publicAsset } from '../lib/publicAsset';
 import { BOOKMARKS_BAR_EVENT, bookmarksBarPinned, setBookmarksBarPinned } from './BookmarksBar';
 import { PROFILE_AVATARS, newContainer, type Container, type Egress } from '../lib/containers';
 import { describeBrowser, describeImport, describePasswordsFile, planProfiles, plural, type ImportMessage, type ImportTotals } from '../lib/browserImport';
 import { VaultUnavailable } from './VaultBar';
-import { ProfileAvatar } from './WindowProfilePicker';
+import { ProfileAvatar } from './ProfileAvatar';
 import { SEARCH_ENGINES, type SearchEngineId } from '../lib/nav';
 import { FIELD, FIELD_BUTTON, FIELD_BUTTON_QUIET, FIELD_MONO, FIELD_TEXTAREA } from '../lib/fieldStyles';
 import { Dropdown, type DropdownOption } from './Dropdown';
@@ -60,24 +62,34 @@ interface InternalPageProps {
 }
 
 export function InternalPage({ page, onOpenUrl, onGetStarted, containers, containerId, onContainersChange, onClearContainer, pendingQuery, onContinue, onShowPlans, onReportBug }: InternalPageProps) {
-  // The plans page is wider than the others: three tiers side by side don't fit 760px.
-  const width = page === 'plans' ? 'w-[min(1000px,94vw)]' : 'w-[min(760px,92vw)]';
+  return (
+    <PageFrame wide={page === 'plans'}>
+      {page === 'welcome' ? (
+        <WelcomeView onOpenUrl={onOpenUrl} onGetStarted={onGetStarted} containers={containers} onContainersChange={onContainersChange} containerId={containerId} />
+      ) : page === 'plans' ? (
+        <PlansView onOpenUrl={onOpenUrl} pendingQuery={pendingQuery} onContinue={onContinue} />
+      ) : (
+        <SettingsView containers={containers} onContainersChange={onContainersChange} onClearContainer={onClearContainer} onShowPlans={onShowPlans} onReportBug={onReportBug} />
+      )}
+    </PageFrame>
+  );
+}
+
+/**
+ * The scrolling sheet every internal page sits on — a tab in the Electron app, a whole
+ * document in the Gecko browser. The plans page is wider than the others: three tiers
+ * side by side don't fit 760px.
+ */
+export function PageFrame({ wide = false, children }: { wide?: boolean; children: React.ReactNode }) {
+  const width = wide ? 'w-[min(1000px,94vw)]' : 'w-[min(760px,92vw)]';
   return (
     <div className="h-full w-full overflow-y-auto bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
-      <div className={`mx-auto ${width} px-6 py-12`}>
-        {page === 'welcome' ? (
-          <WelcomeView onOpenUrl={onOpenUrl} onGetStarted={onGetStarted} containers={containers} onContainersChange={onContainersChange} containerId={containerId} />
-        ) : page === 'plans' ? (
-          <PlansView onOpenUrl={onOpenUrl} pendingQuery={pendingQuery} onContinue={onContinue} />
-        ) : (
-          <SettingsView containers={containers} onContainersChange={onContainersChange} onClearContainer={onClearContainer} onShowPlans={onShowPlans} onReportBug={onReportBug} />
-        )}
-      </div>
+      <div className={`mx-auto ${width} px-6 py-12`}>{children}</div>
     </div>
   );
 }
 
-const ICON = `${import.meta.env.BASE_URL}toji-round.png`;
+const ICON = publicAsset('toji-round.png');
 
 function Section({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
@@ -91,10 +103,24 @@ function Section({ icon, title, children }: { icon: React.ReactNode; title: stri
   );
 }
 
+/**
+ * The calm stand-in for something the browser this page runs in cannot do yet (the
+ * Gecko browser grows its half of the bridge a piece at a time). Every section checks
+ * for the bridge calls it needs rather than assuming them.
+ */
+function NotAvailable({ children }: { children: React.ReactNode }) {
+  return <p className="rounded-xl border border-dashed border-black/10 p-4 text-center text-[13px] text-neutral-400 dark:border-white/12">{children}</p>;
+}
+
+/** What a switch says when its bridge call is missing: outside Toji, or in a build that lacks it. */
+const notHere = () => (isElectron() ? 'Not available in this version yet.' : 'Needs the Toji desktop app.');
+
+const ADDONS_SITE = 'https://addons.mozilla.org/firefox/';
+
 // ---------------------------------------------------------------------------
 // Welcome / onboarding
 // ---------------------------------------------------------------------------
-function WelcomeView({
+export function WelcomeView({
   onOpenUrl,
   onGetStarted,
   containers,
@@ -222,6 +248,19 @@ function WelcomeView({
     else void bridge().listExtensions?.().then((e) => setExtensions(e ?? []));
   };
 
+  // Each part of this page shows only if the browser it runs in can do it. The Gecko
+  // browser installs Firefox add-ons rather than Chrome extensions, and may not offer
+  // importing or the default-browser switch yet.
+  const toji = bridge();
+  const addons = Boolean(toji.openAddons);
+  const canListExtensions = Boolean(toji.listExtensions);
+  const canLoadUnpacked = Boolean(toji.addExtension);
+  const canSetDefault = Boolean(toji.setDefaultBrowser);
+  const canImportBrowsers = Boolean(toji.importBrowsers);
+  const canImportBookmarksFile = Boolean(toji.importBookmarksFile);
+  const canImportPasswordsFile = Boolean(toji.importPasswordsFile);
+  const canImportFiles = canImportBookmarksFile || canImportPasswordsFile;
+
   return (
     <div>
       <div className="mb-10 flex flex-col items-center text-center">
@@ -234,49 +273,79 @@ function WelcomeView({
       <Section icon={<Puzzle size={16} />} title="Extensions">
         <div className="rounded-xl border border-black/10 p-3 dark:border-white/10">
           <div className="flex min-h-9 flex-wrap items-center gap-2">
-            {extensions.length === 0 && <span className="text-[12.5px] text-neutral-400">No extensions yet.</span>}
+            {canListExtensions && extensions.length === 0 && <span className="text-[12.5px] text-neutral-400">No extensions yet.</span>}
             {extensions.map((e) => (
               <span key={e.id} className="inline-flex items-center gap-1.5 rounded-lg bg-black/[0.05] px-2 py-1 text-[12px] dark:bg-white/10">
                 <Puzzle size={12} /> {e.name}
               </span>
             ))}
-            {webStoreOk && (
-              <button type="button" onClick={() => onOpenUrl('https://chromewebstore.google.com/')} className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-white transition hover:opacity-85 dark:bg-white dark:text-neutral-900">
-                <Puzzle size={13} /> Chrome Web Store
+            {addons ? (
+              <button type="button" onClick={() => toji.openAddons?.()} className={FIELD_BUTTON}>
+                <Puzzle size={13} /> Browse add-ons
               </button>
+            ) : (
+              <>
+                {webStoreOk && (
+                  <button type="button" onClick={() => onOpenUrl('https://chromewebstore.google.com/')} className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-white transition hover:opacity-85 dark:bg-white dark:text-neutral-900">
+                    <Puzzle size={13} /> Chrome Web Store
+                  </button>
+                )}
+                {canLoadUnpacked && (
+                  <button type="button" onClick={() => void addExt()} className={`${FIELD_BUTTON_QUIET} border-dashed border-black/15 text-neutral-600 dark:text-neutral-300`}>
+                    <Plus size={13} /> Load unpacked…
+                  </button>
+                )}
+              </>
             )}
-            <button type="button" onClick={() => void addExt()} className={`${FIELD_BUTTON_QUIET} border-dashed border-black/15 text-neutral-600 dark:text-neutral-300`}>
-              <Plus size={13} /> Load unpacked…
+            {!addons && !webStoreOk && !canLoadUnpacked && !canListExtensions && <span className="text-[12.5px] text-neutral-400">Extensions aren&rsquo;t available here yet.</span>}
+          </div>
+          {(addons || webStoreOk || canLoadUnpacked) && (
+            <p className="mt-2 text-[11.5px] text-neutral-400">
+              {addons ? (
+                <>
+                  Toji runs Firefox add-ons. Find more on{' '}
+                  <button type="button" onClick={() => onOpenUrl(ADDONS_SITE)} className="underline underline-offset-2 transition hover:text-neutral-600 dark:hover:text-neutral-200">
+                    addons.mozilla.org
+                  </button>
+                  , and manage the ones you have under Browse add-ons.
+                </>
+              ) : webStoreOk ? (
+                'Open the Chrome Web Store and click “Add to Chrome” to install — or load an unpacked folder. Extensions apply across all tabs. Support is experimental.'
+              ) : (
+                'Load an unpacked Chrome extension folder. (Web Store integration unavailable in this build.)'
+              )}
+            </p>
+          )}
+        </div>
+      </Section>
+
+      {canSetDefault && (
+        <Section icon={<Star size={16} />} title="Make Toji your default browser">
+          <div className="flex items-center justify-between rounded-xl border border-black/10 p-3 dark:border-white/10">
+            <span className="text-[13px] text-neutral-500">{isDefault ? 'Toji is your default browser.' : 'Open links from other apps in Toji.'}</span>
+            <button
+              type="button"
+              onClick={() => void makeDefault()}
+              disabled={settingDefault || isDefault === true}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3.5 py-1.5 text-[12.5px] font-medium text-white transition enabled:hover:opacity-85 disabled:opacity-40 dark:bg-white dark:text-neutral-900"
+            >
+              {settingDefault && <Loader2 size={12} className="animate-spin" />}
+              {isDefault ? <><Check size={13} /> Default</> : 'Set as default'}
             </button>
           </div>
-          <p className="mt-2 text-[11.5px] text-neutral-400">
-            {webStoreOk
-              ? 'Open the Chrome Web Store and click “Add to Chrome” to install — or load an unpacked folder. Extensions apply across all tabs. Support is experimental.'
-              : 'Load an unpacked Chrome extension folder. (Web Store integration unavailable in this build.)'}
-          </p>
-        </div>
-      </Section>
-
-      <Section icon={<Star size={16} />} title="Make Toji your default browser">
-        <div className="flex items-center justify-between rounded-xl border border-black/10 p-3 dark:border-white/10">
-          <span className="text-[13px] text-neutral-500">{isDefault ? 'Toji is your default browser.' : 'Open links from other apps in Toji.'}</span>
-          <button
-            type="button"
-            onClick={() => void makeDefault()}
-            disabled={settingDefault || isDefault === true}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3.5 py-1.5 text-[12.5px] font-medium text-white transition enabled:hover:opacity-85 disabled:opacity-40 dark:bg-white dark:text-neutral-900"
-          >
-            {settingDefault && <Loader2 size={12} className="animate-spin" />}
-            {isDefault ? <><Check size={13} /> Default</> : 'Set as default'}
-          </button>
-        </div>
-      </Section>
+        </Section>
+      )}
 
       <Section icon={<Download size={16} />} title="Import from another browser">
+        {!canImportBrowsers && !canImportFiles ? (
+          <NotAvailable>Importing from other browsers isn&rsquo;t available in this version yet.</NotAvailable>
+        ) : (
         <div className="rounded-xl border border-black/10 p-3 dark:border-white/10">
+          {canImportBrowsers && (
+          <>
           <div className="space-y-2">
             {browsers === null && <span className="text-[12.5px] text-neutral-400">Looking for other browsers…</span>}
-            {browsers?.length === 0 && <span className="text-[12.5px] text-neutral-400">Importing is available in the Toji app.</span>}
+            {browsers?.length === 0 && <span className="text-[12.5px] text-neutral-400">No other browsers found.</span>}
             {shown.map((b) => (
               <div key={b.id} className="flex items-center justify-between gap-3">
                 <div className="min-w-0 truncate">
@@ -294,18 +363,28 @@ function WelcomeView({
             ))}
           </div>
           {missing.length > 0 && <p className="mt-2 text-[11.5px] text-neutral-400">Not on this Mac: {missing.map((b) => b.name).join(', ')}.</p>}
-          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-black/[0.06] pt-3 dark:border-white/10">
+          </>
+          )}
+          {canImportFiles && (
+          <>
+          <div className={`flex flex-wrap items-center gap-2 ${canImportBrowsers ? 'mt-3 border-t border-black/[0.06] pt-3 dark:border-white/10' : ''}`}>
             <span className="text-[12px] text-neutral-500">From an exported file</span>
-            <button type="button" disabled={importing !== null} onClick={() => void importBookmarksFile()} className={FIELD_BUTTON_QUIET}>
-              {importing === 'bookmarks-file' ? <Loader2 size={12} className="animate-spin" /> : <BookMarked size={12} />} Bookmarks (HTML)…
-            </button>
-            <button type="button" disabled={importing !== null} onClick={() => void importPasswordsFile()} className={FIELD_BUTTON_QUIET}>
-              {importing === 'passwords-file' ? <Loader2 size={12} className="animate-spin" /> : <KeyRound size={12} />} Passwords (CSV)…
-            </button>
+            {canImportBookmarksFile && (
+              <button type="button" disabled={importing !== null} onClick={() => void importBookmarksFile()} className={FIELD_BUTTON_QUIET}>
+                {importing === 'bookmarks-file' ? <Loader2 size={12} className="animate-spin" /> : <BookMarked size={12} />} Bookmarks (HTML)…
+              </button>
+            )}
+            {canImportPasswordsFile && (
+              <button type="button" disabled={importing !== null} onClick={() => void importPasswordsFile()} className={FIELD_BUTTON_QUIET}>
+                {importing === 'passwords-file' ? <Loader2 size={12} className="animate-spin" /> : <KeyRound size={12} />} Passwords (CSV)…
+              </button>
+            )}
           </div>
           <p className="mt-2 text-[11.5px] text-neutral-400">
             Every browser can export both. Safari: File → Export → Bookmarks. Passwords: in the Passwords app, File → Export All Passwords.
           </p>
+          </>
+          )}
           {importMsg && (
             <p className={`mt-2 text-[12px] ${importMsg.tone === 'warn' ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
               {importMsg.text}
@@ -317,6 +396,7 @@ function WelcomeView({
             </p>
           )}
         </div>
+        )}
         <BookmarksList onOpenUrl={onOpenUrl} refreshKey={imports} />
       </Section>
 
@@ -336,7 +416,7 @@ function WelcomeView({
  * stuck. Hence BringYourOwn directly below the tiers: it explains what yagami is,
  * switches the backend in place, and hands the original question back.
  */
-function PlansView({ onOpenUrl, pendingQuery, onContinue }: { onOpenUrl: (url: string) => void; pendingQuery?: string; onContinue?: () => void }) {
+export function PlansView({ onOpenUrl, pendingQuery, onContinue }: { onOpenUrl: (url: string) => void; pendingQuery?: string; onContinue?: () => void }) {
   const [billing, setBilling] = useState<Billing | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -506,7 +586,9 @@ function BringYourOwn({ pendingQuery, onContinue }: { pendingQuery?: string; onC
     setCatalog(await getAgentModels().catch(() => null));
   }, []);
   useEffect(() => {
-    void load();
+    // The server may be unreachable (or, in the Gecko browser, still starting): the
+    // section then just shows nothing found, as it does before the answer arrives.
+    void load().catch(() => {});
   }, [load]);
 
   const use = async (nextModel: string) => {
@@ -516,6 +598,8 @@ function BringYourOwn({ pendingQuery, onContinue }: { pendingQuery?: string; onC
       setModel(nextModel);
       setStatus(await getAgents());
       setSaved(true);
+    } catch {
+      // Not saved: the button stays "Use this", so it can be tried again.
     } finally {
       setSaving(false);
     }
@@ -651,7 +735,7 @@ function StatusDot({ state }: { state: 'on' | 'busy' | 'off' }) {
   );
 }
 
-function SettingsView({
+export function SettingsView({
   containers,
   onContainersChange,
   onClearContainer,
@@ -672,6 +756,7 @@ function SettingsView({
       <VaultSettings containers={containers} />
       <AgentSettings onShowPlans={onShowPlans} />
       <SearchSettings />
+      {hasBrowserSettings() && <AppearanceSettings />}
       <BrowsingSettings />
       <MemorySettings />
       <BugReportSettings onReportBug={onReportBug} />
@@ -708,6 +793,7 @@ function ContainersSettings({ containers, onChange, onClear }: { containers: Con
       </p>
 
       <div className="divide-y divide-black/[0.07] rounded-xl border border-black/10 dark:divide-white/10 dark:border-white/12">
+        {containers.length === 0 && <p className="p-3 text-[13px] text-neutral-400">Loading containers…</p>}
         {containers.map((container) => (
           <div key={container.id} className="flex flex-wrap items-center gap-3 p-3">
             <button
@@ -811,8 +897,9 @@ function TorSettings() {
     return bridge().onTorStatus?.(setStatus);
   }, []);
 
-  const run = (fn: (() => Promise<unknown>) | undefined) => async () => {
-    if (!fn) return;
+  // Called on the bridge object, not handed around loose: the Gecko bridge's methods may need it.
+  const available = Boolean(bridge().torStatus);
+  const run = (fn: () => Promise<unknown> | undefined) => async () => {
     setBusy(true);
     try {
       await fn();
@@ -831,6 +918,9 @@ function TorSettings() {
         the direct connection.
       </p>
 
+      {!available ? (
+        <NotAvailable>Tor controls aren&rsquo;t available in this version yet.</NotAvailable>
+      ) : (
       <div className="rounded-xl border border-black/10 p-3 dark:border-white/12">
         <div className="flex flex-wrap items-center gap-3">
           <StatusDot state={status.ready ? 'on' : running ? 'busy' : 'off'} />
@@ -841,14 +931,14 @@ function TorSettings() {
           {running && !status.ready && <span className="shrink-0 text-[12px] tabular-nums text-neutral-400">{status.progress}%</span>}
 
           {status.ready && (
-            <button type="button" onClick={run(bridge().torNewCircuit)} disabled={busy} className={FIELD_BUTTON_QUIET}>
+            <button type="button" onClick={run(() => bridge().torNewCircuit?.())} disabled={busy} className={FIELD_BUTTON_QUIET}>
               <RefreshCw size={12} className={busy ? 'animate-spin' : undefined} />
               New circuit
             </button>
           )}
           <button
             type="button"
-            onClick={run(running ? bridge().torStop : bridge().torStart)}
+            onClick={run(() => (running ? bridge().torStop?.() : bridge().torStart?.()))}
             disabled={busy}
             className={FIELD_BUTTON}
           >
@@ -873,6 +963,7 @@ function TorSettings() {
           </p>
         )}
       </div>
+      )}
 
       <p className="mt-3 text-[12px] leading-relaxed text-neutral-400">
         Tor protects what the network can see about you. It does not make this browser indistinguishable from other
@@ -890,7 +981,23 @@ function VaultSettings({ containers }: { containers: Container[] }) {
   const [entries, setEntries] = useState<VaultEntry[]>([]);
   const [generated, setGenerated] = useState('');
   const [copied, setCopied] = useState(false);
-  const [autosave, setAutosave] = useState(() => autosaveEnabled());
+  // With the Gecko bridge, autosave is a browser setting; in the Electron app it is a
+  // localStorage key (never touched under the bridge: a system-principal page has none).
+  const settings = useBrowserSettings();
+  const viaBrowser = hasBrowserSettings();
+  const [localAutosave, setLocalAutosave] = useState(() => (viaBrowser ? true : autosaveEnabled()));
+  const autosave = viaBrowser ? (settings?.vaultAutosave ?? true) : localAutosave;
+  const changeAutosave = (next: boolean) => {
+    if (viaBrowser) {
+      void setBrowserSetting('vaultAutosave', next);
+      return;
+    }
+    setAutosaveEnabled(next);
+    setLocalAutosave(next);
+  };
+  const toji = bridge();
+  const vault = Boolean(toji.vaultStatus || toji.vaultList);
+  const canGenerate = Boolean(toji.vaultGenerate);
 
   const refresh = useCallback(async () => {
     const s = await bridge().vaultStatus?.();
@@ -934,6 +1041,8 @@ function VaultSettings({ containers }: { containers: Container[] }) {
 
       {status && !status.available ? (
         <VaultUnavailable message={status.error ?? 'The vault is unavailable on this system.'} />
+      ) : !vault && !viaBrowser ? (
+        <NotAvailable>Saved passwords aren&rsquo;t available here yet.</NotAvailable>
       ) : (
         <>
           <div className="mb-4 flex items-center justify-between gap-4 rounded-xl border border-black/10 p-3 dark:border-white/12">
@@ -946,26 +1055,28 @@ function VaultSettings({ containers }: { containers: Container[] }) {
             <Switch
               checked={autosave}
               label="Save passwords automatically"
-              onChange={(next) => {
-                setAutosaveEnabled(next);
-                setAutosave(next);
-              }}
+              disabled={viaBrowser && !settings}
+              onChange={changeAutosave}
             />
           </div>
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            <button type="button" onClick={generate} className={FIELD_BUTTON_QUIET}>
-              <RefreshCw size={12} />
-              Generate a password
-            </button>
-            {generated && (
-              <button type="button" onClick={copy} title="Copy to clipboard" className={`${FIELD_BUTTON_QUIET} min-w-0 font-mono`}>
-                <span className="truncate">{generated}</span>
-                {copied ? <Check size={12} className="shrink-0 text-neutral-500" /> : <Copy size={12} className="shrink-0 text-neutral-400" />}
+          {canGenerate && (
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <button type="button" onClick={generate} className={FIELD_BUTTON_QUIET}>
+                <RefreshCw size={12} />
+                Generate a password
               </button>
-            )}
-          </div>
+              {generated && (
+                <button type="button" onClick={copy} title="Copy to clipboard" className={`${FIELD_BUTTON_QUIET} min-w-0 font-mono`}>
+                  <span className="truncate">{generated}</span>
+                  {copied ? <Check size={12} className="shrink-0 text-neutral-500" /> : <Copy size={12} className="shrink-0 text-neutral-400" />}
+                </button>
+              )}
+            </div>
+          )}
 
-          {entries.length === 0 ? (
+          {!vault ? (
+            <NotAvailable>Saved logins aren&rsquo;t available in this version yet.</NotAvailable>
+          ) : entries.length === 0 ? (
             <p className="rounded-xl border border-dashed border-black/10 p-4 text-center text-[13px] text-neutral-400 dark:border-white/12">
               {autosave ? 'No saved logins yet. Sign in to a site and Toji keeps the login for you.' : 'No saved logins yet. Sign in to a site and Toji will offer to save it.'}
             </p>
@@ -1342,24 +1453,108 @@ function AgentSettings({ onShowPlans }: { onShowPlans?: () => void }) {
 }
 
 
+/** The default engine: Firefox's search service under the Gecko bridge, else Toji's own five. */
 function SearchSettings() {
-  const [engine, setEngine] = useState<SearchEngineId>(() => (localStorage.getItem('toji-search-engine') as SearchEngineId | null) ?? 'duckduckgo');
-  const options: DropdownOption<SearchEngineId>[] = SEARCH_ENGINES.map((e) => ({ value: e.id, label: e.name }));
+  return hasBrowserSettings() ? <BrowserSearchEngine /> : <LocalSearchEngine />;
+}
+
+function SearchSection({ note, children }: { note: string; children: React.ReactNode }) {
   return (
     <Section icon={<Search size={16} />} title="Search">
-      <p className="mb-3 text-[12.5px] text-neutral-500">The engine used when you search the web (the globe button or Shift+Enter).</p>
+      <p className="mb-3 text-[12.5px] text-neutral-500">{note}</p>
       <div className="rounded-xl border border-black/10 p-3 dark:border-white/10">
         <label className="block">
           <span className="mb-1 block text-[11px] text-neutral-400">Default search engine</span>
-          <Dropdown<SearchEngineId>
-            value={engine}
-            options={options}
-            onChange={(v) => {
-              setEngine(v);
-              localStorage.setItem('toji-search-engine', v);
-            }}
-          />
+          {children}
         </label>
+      </div>
+    </Section>
+  );
+}
+
+function LocalSearchEngine() {
+  const [engine, setEngine] = useState<SearchEngineId>(() => (localStorage.getItem('toji-search-engine') as SearchEngineId | null) ?? 'duckduckgo');
+  const options: DropdownOption<SearchEngineId>[] = SEARCH_ENGINES.map((e) => ({ value: e.id, label: e.name }));
+  return (
+    <SearchSection note="The engine used when you search the web (the globe button or Shift+Enter).">
+      <Dropdown<SearchEngineId>
+        value={engine}
+        options={options}
+        onChange={(v) => {
+          setEngine(v);
+          localStorage.setItem('toji-search-engine', v);
+        }}
+      />
+    </SearchSection>
+  );
+}
+
+function BrowserSearchEngine() {
+  const settings = useBrowserSettings();
+  const options: DropdownOption<string>[] = (settings?.searchEngines ?? []).map((e) => ({ value: e.name, label: e.name }));
+  // The current default stays selectable even if the browser left it out of the list.
+  if (settings?.searchEngine && !options.some((o) => o.value === settings.searchEngine)) {
+    options.unshift({ value: settings.searchEngine, label: settings.searchEngine });
+  }
+  return (
+    <SearchSection note="The engine used when what you type is not an address, in the address bar and on the new tab page.">
+      <Dropdown<string>
+        value={settings?.searchEngine ?? ''}
+        options={options}
+        disabled={!settings}
+        placeholder={settings ? 'Choose an engine' : 'Loading…'}
+        onChange={(v) => void setBrowserSetting('searchEngine', v)}
+      />
+    </SearchSection>
+  );
+}
+
+const THEME_OPTIONS: DropdownOption<BrowserSettings['theme']>[] = [
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' }
+];
+
+const LAYOUT_OPTIONS: DropdownOption<BrowserSettings['layout']>[] = [
+  { value: 'top', label: 'Along the top' },
+  { value: 'side', label: 'Down the side' }
+];
+
+/**
+ * Theme and tab layout. The Electron app keeps these as toolbar buttons; in the Gecko
+ * browser they are browser settings, so they live here.
+ */
+function AppearanceSettings() {
+  const settings = useBrowserSettings();
+  const row = 'flex items-center justify-between gap-4 py-2.5';
+  return (
+    <Section icon={<Palette size={16} />} title="Appearance">
+      <div className="divide-y divide-black/[0.06] rounded-xl border border-black/10 px-3 dark:divide-white/[0.08] dark:border-white/10">
+        <div className={row}>
+          <div className="min-w-0">
+            <div className="text-[13px]">Theme</div>
+            <p className="text-[12px] text-neutral-500">Toji&rsquo;s pages and the browser around them.</p>
+          </div>
+          <Dropdown<BrowserSettings['theme']>
+            value={settings?.theme ?? 'light'}
+            options={THEME_OPTIONS}
+            disabled={!settings}
+            onChange={(v) => void setBrowserSetting('theme', v)}
+            className="w-[170px] shrink-0"
+          />
+        </div>
+        <div className={row}>
+          <div className="min-w-0">
+            <div className="text-[13px]">Tabs</div>
+            <p className="text-[12px] text-neutral-500">{settings?.layout === 'side' ? 'Tabs run down the side of the window.' : 'Tabs sit in a strip above the page.'}</p>
+          </div>
+          <Dropdown<BrowserSettings['layout']>
+            value={settings?.layout ?? 'top'}
+            options={LAYOUT_OPTIONS}
+            disabled={!settings}
+            onChange={(v) => void setBrowserSetting('layout', v)}
+            className="w-[170px] shrink-0"
+          />
+        </div>
       </div>
     </Section>
   );
@@ -1367,18 +1562,51 @@ function SearchSettings() {
 
 /** What every page gets: ad blocking, and where the bookmarks bar sits. */
 function BrowsingSettings() {
+  // Ad blocking: the Electron app reports detailed status (adblockStatus); the Gecko
+  // browser runs uBlock Origin and exposes only the on/off setting. The bookmarks bar is a
+  // localStorage key in the Electron app and a browser setting under the bridge.
+  const settings = useBrowserSettings();
+  const viaBrowser = hasBrowserSettings();
+  const detailed = Boolean(bridge().adblockStatus);
   const [adblock, setAdblock] = useState<AdblockStatus | null>(null);
-  const [pinned, setPinned] = useState(bookmarksBarPinned);
+  const [localPinned, setLocalPinned] = useState(() => (viaBrowser ? true : bookmarksBarPinned()));
   useEffect(() => {
     void bridge().adblockStatus?.().then(setAdblock).catch(() => {});
-    const sync = () => setPinned(bookmarksBarPinned());
+    if (viaBrowser) return;
+    const sync = () => setLocalPinned(bookmarksBarPinned());
     window.addEventListener(BOOKMARKS_BAR_EVENT, sync);
     return () => window.removeEventListener(BOOKMARKS_BAR_EVENT, sync);
-  }, []);
+  }, [viaBrowser]);
   const setBlocking = async (enabled: boolean) => {
+    if (!detailed) {
+      await setBrowserSetting('adblock', enabled);
+      return;
+    }
     setAdblock((s) => (s ? { ...s, enabled } : s));
     const next = await bridge().setAdblock?.(enabled);
     if (next) setAdblock(next);
+  };
+  const blocking = detailed ? Boolean(adblock?.enabled) : Boolean(settings?.adblock);
+  const canBlock = detailed ? Boolean(adblock) : viaBrowser && Boolean(settings);
+  const blockingNote = detailed
+    ? !adblock
+      ? 'Checking…'
+      : !adblock.enabled
+        ? 'Off. Pages load exactly as the site sends them.'
+        : adblock.ready
+          ? `On, with the same lists uBlock Origin uses — on every site, video players included.${adblock.blocked > 0 ? ` ${adblock.blocked.toLocaleString()} blocked since launch.` : ''}`
+          : 'On. Fetching the filter lists — blocking starts the moment they arrive.'
+    : viaBrowser
+      ? !settings
+        ? 'Checking…'
+        : settings.adblock
+          ? 'On, with uBlock Origin — on every site, video players included.'
+          : 'Off. Pages load exactly as the site sends them.'
+      : notHere();
+  const pinned = viaBrowser ? (settings?.bookmarksBar ?? 'pinned') === 'pinned' : localPinned;
+  const setPinned = (next: boolean) => {
+    if (viaBrowser) void setBrowserSetting('bookmarksBar', next ? 'pinned' : 'hover');
+    else setBookmarksBarPinned(next);
   };
   const row = 'flex items-center justify-between gap-4 py-2.5';
   return (
@@ -1387,26 +1615,16 @@ function BrowsingSettings() {
         <div className={row}>
           <div className="min-w-0">
             <div className="text-[13px]">Block ads and trackers</div>
-            <p className="text-[12px] text-neutral-500">
-              {!isElectron()
-                ? 'Needs the Toji desktop app.'
-                : !adblock
-                  ? 'Checking…'
-                  : !adblock.enabled
-                    ? 'Off. Pages load exactly as the site sends them.'
-                    : adblock.ready
-                      ? `On, with the same lists uBlock Origin uses — on every site, video players included.${adblock.blocked > 0 ? ` ${adblock.blocked.toLocaleString()} blocked since launch.` : ''}`
-                      : 'On. Fetching the filter lists — blocking starts the moment they arrive.'}
-            </p>
+            <p className="text-[12px] text-neutral-500">{blockingNote}</p>
           </div>
-          <Switch checked={Boolean(adblock?.enabled)} disabled={!isElectron() || !adblock} onChange={(v) => void setBlocking(v)} label="Block ads and trackers" />
+          <Switch checked={blocking} disabled={!canBlock} onChange={(v) => void setBlocking(v)} label="Block ads and trackers" />
         </div>
         <div className={row}>
           <div className="min-w-0">
             <div className="text-[13px]">Always show the bookmarks bar</div>
             <p className="text-[12px] text-neutral-500">{pinned ? 'The bar sits under the address bar on every page.' : 'The bar slides in when the pointer rests under the address bar.'}</p>
           </div>
-          <Switch checked={pinned} onChange={(v) => setBookmarksBarPinned(v)} label="Always show the bookmarks bar" />
+          <Switch checked={pinned} disabled={viaBrowser && !settings} onChange={setPinned} label="Always show the bookmarks bar" />
         </div>
       </div>
     </Section>
@@ -1415,20 +1633,34 @@ function BrowsingSettings() {
 
 /** The rolling recording, and where a report goes. */
 function BugReportSettings({ onReportBug }: { onReportBug?: () => void }) {
-  const [on, setOn] = useState(replayEnabled);
+  // The rolling recording is a browser setting under the Gecko bridge and a localStorage
+  // key in the Electron app. Filing a report needs the Electron app's report sheet
+  // (onReportBug); where that is missing the row says so instead of offering a dead button.
+  const settings = useBrowserSettings();
+  const viaBrowser = hasBrowserSettings();
+  const [localOn, setLocalOn] = useState(() => (viaBrowser ? true : replayEnabled()));
   const [account, setAccount] = useState<BugReportAccount | null>(null);
+  const hasAccount = Boolean(bridge().bugReportAccount);
   useEffect(() => {
-    const sync = () => setOn(replayEnabled());
-    window.addEventListener(REPLAY_EVENT, sync);
     void bridge()
       .bugReportAccount?.()
       .then(setAccount)
       .catch(() => {});
+    if (viaBrowser) return;
+    const sync = () => setLocalOn(replayEnabled());
+    window.addEventListener(REPLAY_EVENT, sync);
     return () => window.removeEventListener(REPLAY_EVENT, sync);
-  }, []);
+  }, [viaBrowser]);
+  const on = viaBrowser ? (settings?.replay ?? true) : localOn;
+  const canRecord = viaBrowser ? Boolean(settings) : isElectron();
+  const setOn = (next: boolean) => {
+    if (viaBrowser) void setBrowserSetting('replay', next);
+    else setReplayEnabled(next);
+  };
+  const canReport = isElectron() && Boolean(onReportBug);
   const shortcut = bridge().platform === 'darwin' ? '⌥⇧I' : 'Alt+Shift+I';
-  const route = !isElectron()
-    ? 'Needs the Toji desktop app.'
+  const route = !hasAccount
+    ? ''
     : !account
       ? 'Checking your GitHub login…'
       : account.mode === 'direct'
@@ -1442,25 +1674,29 @@ function BugReportSettings({ onReportBug }: { onReportBug?: () => void }) {
           <div className="min-w-0">
             <div className="text-[13px]">Keep the last {REPLAY_SECONDS} seconds</div>
             <p className="text-[12px] text-neutral-500">
-              {!isElectron()
-                ? 'Needs the Toji desktop app.'
+              {!canRecord
+                ? viaBrowser
+                  ? 'Checking…'
+                  : notHere()
                 : on
                   ? `Each window keeps a rolling ${REPLAY_SECONDS}-second recording of itself in memory, so a report can show what just happened. It is never saved, and only sent in a report you send. Private and Tor windows are not recorded.`
                   : 'Off. Reports can still be written, with screenshots.'}
             </p>
           </div>
-          <Switch checked={on && isElectron()} disabled={!isElectron()} onChange={setReplayEnabled} label={`Keep the last ${REPLAY_SECONDS} seconds`} />
+          <Switch checked={on && canRecord} disabled={!canRecord} onChange={setOn} label={`Keep the last ${REPLAY_SECONDS} seconds`} />
         </div>
         <div className={row}>
           <div className="min-w-0">
             <div className="text-[13px]">Report a bug</div>
             <p className="text-[12px] text-neutral-500">
-              {route} Also in the Help menu, or {shortcut}.
+              {canReport ? `${route ? `${route} ` : ''}Also in the Help menu, or ${shortcut}.` : isElectron() ? 'Reporting a bug from this page isn’t available in this version yet.' : notHere()}
             </p>
           </div>
-          <button type="button" className={FIELD_BUTTON_QUIET} disabled={!isElectron() || !onReportBug} onClick={onReportBug}>
-            Report a bug…
-          </button>
+          {canReport && (
+            <button type="button" className={FIELD_BUTTON_QUIET} onClick={onReportBug}>
+              Report a bug…
+            </button>
+          )}
         </div>
       </div>
     </Section>
