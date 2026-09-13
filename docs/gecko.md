@@ -491,6 +491,18 @@ State per item: — not started · WIP · works · works differently · dropped 
   `gecko/test/phase4.ts` (new) covers Toji's pages; `tor-browser.ts` also checks that
   each container window holds exactly its one tab (an earlier run saw extra tabs appear
   after tor started).
+- More page fixes, found by new `phase4.ts` checks (now 16):
+  - **`Services.search` doesn't exist in Firefox 153** (checked in the running build: of
+    every `Services.<name>` Toji uses, it was the only one missing). The search service
+    is `SearchService` from `moz-src:///toolkit/components/search/SearchService.sys.mjs`,
+    with `SearchService.CHANGE_REASON.USER`. Settings' engine list and engine choice
+    were failing on it.
+  - **`engine.getIconURL()` is async** in 153; the settings reply carried Promises and
+    couldn't be cloned to the page. The icons are awaited first.
+  - **Plans and Welcome came up empty** when opened soon after launch: `window.toji
+    .server()` waited only 5 s for the sidecar, then the page fell back to no server.
+    It now waits up to 30 s (and starts the server if it isn't running). The sidecar
+    itself was fine — ready, `/health` 200, plans served.
 - Phases 2–4 merged to master (tag `feat-gecko-containers`). The phase 5–7 code is in
   the same layer and loads without startup errors, but none of it is verified yet.
 

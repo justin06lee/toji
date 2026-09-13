@@ -15,6 +15,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   AboutNewTab: "resource:///modules/AboutNewTab.sys.mjs",
   AddonManager: "resource://gre/modules/AddonManager.sys.mjs",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
+  // Services.search is gone in Firefox 153; the service is this module now.
+  SearchService: "moz-src:///toolkit/components/search/SearchService.sys.mjs",
   ShellService: "moz-src:///browser/components/shell/ShellService.sys.mjs",
   TojiAgentServer: "resource:///modules/toji/TojiAgentServer.sys.mjs",
   TojiAsk: "resource:///modules/toji/TojiAsk.sys.mjs",
@@ -108,12 +110,15 @@ async function readSettings() {
   let engines = [];
   let current = "";
   try {
-    await Services.search.init();
-    engines = (await Services.search.getVisibleEngines()).map(e => ({
-      name: e.name,
-      icon: e.getIconURL?.() ?? undefined,
-    }));
-    current = (await Services.search.getDefault())?.name ?? "";
+    await lazy.SearchService.init();
+    // getIconURL() is async; a pending Promise can't cross to the page.
+    engines = await Promise.all(
+      (await lazy.SearchService.getVisibleEngines()).map(async e => ({
+        name: e.name,
+        icon: (await e.getIconURL?.()) ?? undefined,
+      }))
+    );
+    current = (await lazy.SearchService.getDefault())?.name ?? "";
   } catch (e) {
     console.error("[toji:pages] search engines", e);
   }
@@ -145,9 +150,9 @@ async function writeSetting(key, value) {
       Services.prefs.setStringPref(PREF_BOOKMARKS_BAR, value === "pinned" ? "always" : "never");
       break;
     case "searchEngine": {
-      const engine = Services.search.getEngineByName(String(value));
+      const engine = lazy.SearchService.getEngineByName(String(value));
       if (engine) {
-        await Services.search.setDefault(engine, Ci.nsISearchService.CHANGE_REASON_USER);
+        await lazy.SearchService.setDefault(engine, lazy.SearchService.CHANGE_REASON.USER);
       }
       break;
     }
@@ -215,7 +220,9 @@ export const TojiPageAPI = {
   },
 
   server() {
-    return lazy.TojiAgentServer.whenReady(5000);
+    // Starts the server if it isn't up yet. A page opened right after launch
+    // (Welcome, Plans) must outwait the sidecar's start, not give up on it.
+    return lazy.TojiAgentServer.whenReady(30000);
   },
 
   /** Shift+Enter or the wand on a page: an AI answer page in this tab. */
