@@ -1,0 +1,80 @@
+{
+  "policies": {
+    "DisableTelemetry": true,
+    "DisableFirefoxStudies": true,
+    "DisablePocket": true,
+    "DisableFirefoxAccounts": true,
+    "DisableAppUpdate": true,
+    "DisableFeedbackCommands": true,
+    "DisableDefaultBrowserAgent": true,
+    "DontCheckDefaultBrowser": true,
+    "SkipTermsOfUse": true,
+    "OverrideFirstRunPage": "",
+    "OverridePostUpdatePage": "",
+    "NoDefaultBookmarks": true,
+    "UserMessaging": {
+      "WhatsNew": false,
+      "ExtensionRecommendations": false,
+      "FeatureRecommendations": false,
+      "UrlbarInterventions": false,
+      "SkipOnboarding": true,
+      "MoreFromMozilla": false,
+      "FirefoxLabs": false,
+      "Locked": true
+    },
+    "FirefoxHome": {
+      "Search": true,
+      "Weather": false,
+      "TopSites": false,
+      "SponsoredTopSites": false,
+      "Highlights": false,
+      "Pocket": false,
+      "Stories": false,
+      "SponsoredPocket": false,
+      "SponsoredStories": false,
+      "Snippets": false,
+      "Locked": true
+    },
+    "FirefoxSuggest": {
+      "WebSuggestions": false,
+      "SponsoredSuggestions": false,
+      "ImproveSuggest": false,
+      "OnlineEnabled": false,
+      "Locked": true
+    },
+    "GenerativeAI": {
+      "Enabled": false,
+      "Locked": true
+    },
+    "EncryptedMediaExtensions": {
+      "Enabled": true
+    },
+    "SearchEngines": {
+      "Default": "DuckDuckGo",
+      "Add": [
+        {
+          "Name": "Brave",
+          "URLTemplate": "https://search.brave.com/search?q={searchTerms}",
+          "Method": "GET",
+          "IconURL": "https://search.brave.com/favicon.ico",
+          "Alias": "@brave",
+          "Description": "Brave Search"
+        },
+        {
+          "Name": "Startpage",
+          "URLTemplate": "https://www.startpage.com/sp/search?query={searchTerms}",
+          "Method": "GET",
+          "IconURL": "https://www.startpage.com/favicon.ico",
+          "Alias": "@startpage",
+          "Description": "Startpage"
+        }
+      ],
+      "Remove": ["Amazon.com", "eBay", "Perplexity", "Wikipedia (en)"]
+    },
+    "SupportMenu": {
+      "Title": "Toji on GitHub",
+      "URL": "https://github.com/justin06lee/toji/issues",
+      "AccessKey": "T"
+    }
+  }
+}

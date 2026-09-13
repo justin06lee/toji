@@ -1,0 +1,75 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Toji probe</title>
+<style>
+  body { font: 14px/1.5 -apple-system, sans-serif; margin: 24px; color: #171717; }
+  pre { background: #f5f5f5; padding: 12px; border-radius: 8px; white-space: pre-wrap; }
+  button { font: inherit; padding: 6px 12px; margin-right: 8px; }
+</style>
+<h1>Toji probe</h1>
+<p>What this page can see about the browser. <code>window.__probe</code> holds the same data for automation.</p>
+<pre id="out">running…</pre>
+<p>
+  <button id="geo">Ask for location</button>
+  <button id="notify">Ask to notify</button>
+  <button id="cam">Ask for camera</button>
+</p>
+<pre id="asks"></pre>
+<script>
+(async () => {
+  const r = {};
+  r.userAgent = navigator.userAgent;
+  r.userAgentData = navigator.userAgentData ? navigator.userAgentData.brands : null;
+  r.vendor = navigator.vendor;
+  r.webdriver = navigator.webdriver;
+  r.windowChrome = typeof window.chrome === 'undefined' ? 'undefined' : JSON.stringify(Object.keys(window.chrome));
+  r.prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
+  r.permissions = {};
+  for (const name of ['geolocation', 'notifications', 'camera', 'microphone', 'persistent-storage', 'push']) {
+    try {
+      r.permissions[name] = (await navigator.permissions.query({ name })).state;
+    } catch (e) {
+      r.permissions[name] = 'unsupported: ' + e.name;
+    }
+  }
+  try {
+    r.clipboardRead = (await navigator.permissions.query({ name: 'clipboard-read' })).state;
+  } catch (e) {
+    r.clipboardRead = 'unsupported: ' + e.name;
+  }
+  r.eme = {};
+  const config = [{
+    initDataTypes: ['cenc'],
+    videoCapabilities: [{ contentType: 'video/mp4; codecs="avc1.42E01E"', robustness: '' }],
+    audioCapabilities: [{ contentType: 'audio/mp4; codecs="mp4a.40.2"', robustness: '' }]
+  }];
+  for (const ks of ['com.widevine.alpha', 'org.w3.clearkey']) {
+    try {
+      const access = await Promise.race([
+        navigator.requestMediaKeySystemAccess(ks, config),
+        new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 20000))
+      ]);
+      r.eme[ks] = 'available: ' + access.keySystem;
+    } catch (e) {
+      r.eme[ks] = 'unavailable: ' + (e.name || '') + ' ' + (e.message || '');
+    }
+  }
+  window.__probe = r;
+  document.getElementById('out').textContent = JSON.stringify(r, null, 2);
+  document.title = 'Toji probe: done';
+})();
+const asks = document.getElementById('asks');
+const note = (s) => { asks.textContent += s + '\n'; };
+document.getElementById('geo').onclick = () =>
+  navigator.geolocation.getCurrentPosition(() => note('geolocation: granted'), (e) => note('geolocation: ' + e.message));
+document.getElementById('notify').onclick = async () => note('notifications: ' + (await Notification.requestPermission()));
+document.getElementById('cam').onclick = async () => {
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ video: true });
+    s.getTracks().forEach((t) => t.stop());
+    note('camera: granted');
+  } catch (e) {
+    note('camera: ' + e.name);
+  }
+};
+</script>

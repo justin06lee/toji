@@ -11,3 +11,6 @@ coverage
 .cache
 
 .toji-data
+
+# Firefox source, objdir, sccache and test profiles (gecko/build.ts)
+gecko/.work

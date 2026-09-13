@@ -1,0 +1,5 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M60 20h96l52 52v152a12 12 0 0 1-12 12H60a12 12 0 0 1-12-12V32a12 12 0 0 1 12-12z" fill="#fafafa" stroke="#171717" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M156 20v40a12 12 0 0 0 12 12h40" stroke="#171717" stroke-width="8" stroke-linejoin="round"/>
+  <text x="128" y="188" text-anchor="middle" fill="#171717" font-family="-apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="44" font-weight="700">PDF</text>
+</svg>

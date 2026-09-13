@@ -1,0 +1,262 @@
+#!/usr/bin/env bun
+// Builds Toji's browser from Firefox ESR source.
+//
+//   bun gecko/build.ts prepare   download + verify source, apply patches, copy overlay
+//   bun gecko/build.ts build     prepare, then ./mach build
+//   bun gecko/build.ts faster    prepare, then ./mach build faster (JS/CSS/prefs only)
+//   bun gecko/build.ts package   ./mach package (stages Toji.app and a .dmg)
+//   bun gecko/build.ts install [dest]   copy the staged Toji.app to dest
+//                                (default /Applications/Toji.app) and ad-hoc sign it
+//   bun gecko/build.ts run [-- args]    run the staged app with a throwaway profile
+//   bun gecko/build.ts app       prepare + build + package (what `make build` runs)
+//   bun gecko/build.ts where     print the paths below
+//
+// Everything Firefox-sized lives in $TOJI_GECKO_WORK (default gecko/.work, which
+// git ignores): the tarball cache, the unpacked tree, the objdir and sccache.
+
+import { createHash } from 'node:crypto';
+import {
+  copyFileSync,
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs';
+import { cpus, totalmem } from 'node:os';
+import { dirname, join, relative, resolve } from 'node:path';
+
+const GECKO = resolve(import.meta.dir);
+const REPO = dirname(GECKO);
+const version = JSON.parse(readFileSync(join(GECKO, 'version.json'), 'utf8')) as {
+  version: string;
+  source: string;
+  sha256: string;
+};
+
+const WORK = resolve(process.env.TOJI_GECKO_WORK || join(GECKO, '.work'));
+const CACHE = join(WORK, 'cache');
+const SRC_PARENT = join(WORK, 'src');
+const SRC = join(SRC_PARENT, `firefox-${version.version.replace(/esr$/, '')}`);
+const OBJ = join(WORK, 'obj');
+const APPLIED = join(WORK, 'applied-patches');
+const OVERLAY = join(GECKO, 'overlay');
+const OVERLAY_LOG = join(WORK, 'overlay-files.json');
+const TARBALL = join(CACHE, `firefox-${version.version}.source.tar.xz`);
+const STAGED_APP = join(OBJ, 'dist', 'toji', 'Toji.app');
+
+function log(msg: string) {
+  console.log(`[gecko] ${msg}`);
+}
+
+function die(msg: string): never {
+  console.error(`[gecko] error: ${msg}`);
+  process.exit(1);
+}
+
+async function run(cmd: string[], opts: { cwd?: string; env?: Record<string, string> } = {}) {
+  const proc = Bun.spawn(cmd, {
+    cwd: opts.cwd,
+    env: { ...process.env, ...opts.env },
+    stdio: ['inherit', 'inherit', 'inherit']
+  });
+  const code = await proc.exited;
+  if (code !== 0) die(`${cmd.join(' ')} exited with ${code}`);
+}
+
+function sha256File(path: string): Promise<string> {
+  return new Promise((ok, fail) => {
+    const hash = createHash('sha256');
+    createReadStream(path)
+      .on('data', (chunk) => hash.update(chunk))
+      .on('end', () => ok(hash.digest('hex')))
+      .on('error', fail);
+  });
+}
+
+async function fetchSource() {
+  mkdirSync(CACHE, { recursive: true });
+  if (!existsSync(TARBALL)) {
+    log(`downloading ${version.source}`);
+    const res = await fetch(version.source);
+    if (!res.ok || !res.body) die(`download failed: HTTP ${res.status}`);
+    const part = `${TARBALL}.part`;
+    await Bun.write(part, res);
+    renameSync(part, TARBALL);
+  }
+  const sum = await sha256File(TARBALL);
+  if (sum !== version.sha256) {
+    unlinkSync(TARBALL);
+    die(`checksum mismatch for ${TARBALL} (got ${sum}); deleted it, run again to re-download`);
+  }
+}
+
+async function extractSource() {
+  const stamp = join(SRC, '.toji-source');
+  if (existsSync(stamp) && readFileSync(stamp, 'utf8').trim() === version.sha256) return;
+  if (existsSync(SRC)) die(`${SRC} exists but is not a clean ${version.version} tree; remove it first`);
+  mkdirSync(SRC_PARENT, { recursive: true });
+  log(`unpacking ${version.version} (a few minutes)`);
+  await run(['tar', '-xJf', TARBALL, '-C', SRC_PARENT]);
+  if (!existsSync(SRC)) die(`expected ${SRC} after unpacking`);
+  writeFileSync(stamp, `${version.sha256}\n`);
+  rmSync(APPLIED, { recursive: true, force: true });
+  rmSync(OVERLAY_LOG, { force: true });
+}
+
+// Patches are applied once and remembered in APPLIED, so re-running never
+// re-extracts the tree (that would touch every mtime and force a full
+// rebuild). A patch that changed or disappeared is reversed first.
+async function applyPatches() {
+  mkdirSync(APPLIED, { recursive: true });
+  const wanted = readdirSync(join(GECKO, 'patches'))
+    .filter((f) => f.endsWith('.patch'))
+    .sort();
+  const applied = readdirSync(APPLIED)
+    .filter((f) => f.endsWith('.patch'))
+    .sort();
+  const same = (f: string) =>
+    wanted.includes(f) &&
+    readFileSync(join(APPLIED, f), 'utf8') === readFileSync(join(GECKO, 'patches', f), 'utf8');
+
+  const stale = applied.filter((f) => !same(f)).reverse();
+  for (const f of stale) {
+    log(`reversing ${f}`);
+    await run(['patch', '-p1', '-R', '--silent', '-d', SRC, '-i', join(APPLIED, f)]);
+    unlinkSync(join(APPLIED, f));
+  }
+  for (const f of wanted) {
+    if (existsSync(join(APPLIED, f))) continue;
+    log(`applying ${f}`);
+    await run(['patch', '-p1', '--forward', '--silent', '--no-backup-if-mismatch', '-d', SRC, '-i', join(GECKO, 'patches', f)]);
+    copyFileSync(join(GECKO, 'patches', f), join(APPLIED, f));
+  }
+}
+
+function walk(dir: string, out: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
+    if (name === '.DS_Store') continue;
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) walk(full, out);
+    else out.push(full);
+  }
+  return out;
+}
+
+// Copies gecko/overlay/** into the tree, touching only files whose bytes
+// changed so the build system rebuilds as little as possible.
+function copyOverlay() {
+  const files = walk(OVERLAY).map((f) => relative(OVERLAY, f));
+  let changed = 0;
+  for (const rel of files) {
+    const from = join(OVERLAY, rel);
+    const to = join(SRC, rel);
+    if (existsSync(to) && readFileSync(to).equals(readFileSync(from))) continue;
+    mkdirSync(dirname(to), { recursive: true });
+    copyFileSync(from, to);
+    changed++;
+  }
+  const previous: string[] = existsSync(OVERLAY_LOG) ? JSON.parse(readFileSync(OVERLAY_LOG, 'utf8')) : [];
+  for (const rel of previous) {
+    if (files.includes(rel)) continue;
+    rmSync(join(SRC, rel), { force: true });
+    log(`removed ${rel} (no longer in the overlay)`);
+  }
+  writeFileSync(OVERLAY_LOG, JSON.stringify(files, null, 2));
+  log(`overlay: ${files.length} files, ${changed} updated`);
+}
+
+function machEnv(): Record<string, string> {
+  const memGb = totalmem() / 2 ** 30;
+  // ~1.3 GB per job keeps an 8 GB machine out of heavy swap during the Rust
+  // and link steps; bigger machines get every core.
+  const jobs = process.env.TOJI_JOBS || String(Math.max(2, Math.min(cpus().length, Math.floor(memGb / 1.3))));
+  return {
+    MOZCONFIG: join(GECKO, 'mozconfig'),
+    TOJI_OBJDIR: OBJ,
+    TOJI_SCCACHE_DIR: join(WORK, 'sccache'),
+    TOJI_JOBS: jobs,
+    MOZBUILD_STATE_PATH: process.env.MOZBUILD_STATE_PATH || join(process.env.HOME || '', '.mozbuild'),
+    MACH_BUILD_PYTHON_NATIVE_PACKAGE_SOURCE: 'system',
+    // mach trims its output to warnings and errors when it detects a coding
+    // agent, which hides configure failures; build logs should be complete.
+    CLAUDECODE: '',
+    CODEX_SANDBOX: '',
+    GEMINI_CLI: '',
+    OPENCODE: ''
+  };
+}
+
+async function prepare() {
+  await fetchSource();
+  await extractSource();
+  await applyPatches();
+  copyOverlay();
+}
+
+async function mach(...args: string[]) {
+  await run([join(SRC, 'mach'), ...args], { cwd: SRC, env: machEnv() });
+}
+
+async function install(dest: string) {
+  if (!existsSync(STAGED_APP)) die(`no staged app at ${STAGED_APP}; run \`bun gecko/build.ts package\``);
+  rmSync(dest, { recursive: true, force: true });
+  mkdirSync(dirname(dest), { recursive: true });
+  await run(['ditto', STAGED_APP, dest]);
+  // Ad-hoc signature over the whole bundle: TCC and the keychain need one to
+  // attribute permissions to Toji rather than to an anonymous binary.
+  await run(['codesign', '--force', '--deep', '--sign', '-', dest]);
+  log(`installed ${dest}`);
+}
+
+async function main() {
+  const [cmd = 'app', ...rest] = process.argv.slice(2);
+  switch (cmd) {
+    case 'prepare':
+      await prepare();
+      break;
+    case 'configure':
+      await prepare();
+      await mach('configure');
+      break;
+    case 'build':
+      await prepare();
+      await mach('build');
+      break;
+    case 'faster':
+      await prepare();
+      await mach('build', 'faster');
+      break;
+    case 'package':
+      await mach('package');
+      break;
+    case 'app':
+      await prepare();
+      await mach('build');
+      await mach('package');
+      break;
+    case 'install':
+      await install(resolve(rest[0] || '/Applications/Toji.app'));
+      break;
+    case 'run': {
+      const app = existsSync(STAGED_APP) ? STAGED_APP : join(OBJ, 'dist', 'Toji.app');
+      const profile = join(WORK, 'profiles', 'run');
+      mkdirSync(profile, { recursive: true });
+      const extra = rest[0] === '--' ? rest.slice(1) : rest;
+      await run([join(app, 'Contents', 'MacOS', 'toji'), '-no-remote', '-profile', profile, ...extra]);
+      break;
+    }
+    case 'where':
+      console.log(JSON.stringify({ WORK, SRC, OBJ, STAGED_APP, TARBALL }, null, 2));
+      break;
+    default:
+      die(`unknown command ${cmd}`);
+  }
+}
+
+await main();
