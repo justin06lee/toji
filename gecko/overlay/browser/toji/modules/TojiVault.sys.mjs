@@ -18,6 +18,7 @@ import { clearTimeout, setTimeout } from "resource://gre/modules/Timer.sys.mjs";
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
+  TojiShell: "resource:///modules/toji/TojiShell.sys.mjs",
   OSKeyStore: "resource://gre/modules/OSKeyStore.sys.mjs",
   TojiContainers: "resource:///modules/toji/TojiContainers.sys.mjs",
 });
@@ -28,8 +29,6 @@ ChromeUtils.defineLazyGetter(lazy, "VaultLib", () =>
 
 const FILE_NAME = "toji-vault.json";
 const GENERATED_TTL_MS = 15 * 60 * 1000;
-const XHTML_NS = "http://www.w3.org/1999/xhtml";
-const SVG_NS = "http://www.w3.org/2000/svg";
 const KEY_PATH =
   "M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z";
 
@@ -48,21 +47,6 @@ function originOfBrowser(browser) {
   return lazy.VaultLib.originOf(browser?.currentURI?.spec ?? "");
 }
 
-function keyIcon(doc, size = 15) {
-  const svg = doc.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("width", size);
-  svg.setAttribute("height", size);
-  svg.classList.add("toji-icon");
-  const path = doc.createElementNS(SVG_NS, "path");
-  path.setAttribute("d", KEY_PATH);
-  const dot = doc.createElementNS(SVG_NS, "circle");
-  dot.setAttribute("cx", "16.5");
-  dot.setAttribute("cy", "7.5");
-  dot.setAttribute("r", ".5");
-  svg.append(path, dot);
-  return svg;
-}
 
 class Vault {
   #entries = null;
@@ -265,9 +249,10 @@ class Vault {
     };
     this.#dropPending(browser);
     this.#pending.set(browser, pending);
-    // A password Toji generated a moment ago is stored at once.
+    // A password Toji generated a moment ago is stored at once — silently when logins
+    // save themselves, with a "saved" note otherwise (as in the Electron app).
     if (this.#generated.some(g => g.password === password && Date.now() - g.at < GENERATED_TTL_MS)) {
-      await this.commit(browser, "saved");
+      await this.commit(browser, Services.prefs.getBoolPref("toji.vault.autosave", true) ? null : "saved");
       return;
     }
     if (Services.prefs.getBoolPref("toji.vault.autosave", true)) {
@@ -329,81 +314,32 @@ class Vault {
     this.#forms.delete(browser);
   }
 
-  // --- Address-bar UI ---------------------------------------------------------
+  // --- The shell's key button and save bubble ------------------------------------
 
   initWindow(win) {
-    const doc = win.document;
-    const actions = doc.getElementById("page-action-buttons");
-    if (actions && !doc.getElementById("toji-vault-key")) {
-      const button = doc.createElementNS(XHTML_NS, "button");
-      button.id = "toji-vault-key";
-      button.type = "button";
-      button.hidden = true;
-      button.setAttribute("aria-label", "Fill a saved login");
-      button.append(keyIcon(doc));
-      button.addEventListener("mousedown", e => e.stopPropagation());
-      button.addEventListener("click", e => {
-        e.stopPropagation();
-        this.#onKeyClick(win, button);
-      });
-      const star = doc.getElementById("star-button-box");
-      actions.insertBefore(button, star ?? null);
-    }
     win.gBrowser.tabContainer.addEventListener("TabSelect", () => {
-      this.#updateKeyButton(win.gBrowser.selectedBrowser);
-      const pending = this.#pending.get(win.gBrowser.selectedBrowser);
+      const browser = win.gBrowser.selectedBrowser;
+      this.#updateKeyButton(browser);
+      const pending = this.#pending.get(browser);
       if (pending && !pending.watching) {
-        this.#showBubble(win.gBrowser.selectedBrowser, pending);
+        this.#showBubble(browser, pending);
       } else {
-        doc.getElementById("toji-vault-bubble")?.remove();
+        lazy.TojiShell.vaultPrompt(browser, null);
       }
     });
     win.gBrowser.tabContainer.addEventListener("TabClose", e => this.forget(e.target.linkedBrowser));
   }
 
+  /** The logins the key button offers on this tab's page: none without a login form on it. */
   async #updateKeyButton(browser) {
-    const win = browser?.ownerDocument?.defaultView;
-    if (!win?.gBrowser || win.gBrowser.selectedBrowser !== browser) {
-      return;
-    }
-    const button = win.document.getElementById("toji-vault-key");
-    if (!button) {
-      return;
-    }
     const form = this.#forms.get(browser);
-    const sameUrl = form?.url && form.url === browser.currentURI?.spec;
-    if (!form?.hasLogin || !sameUrl) {
-      button.hidden = true;
-      return;
-    }
-    const matches = await this.matches(browser).catch(() => []);
-    button.hidden = matches.length === 0;
-  }
-
-  async #onKeyClick(win, button) {
-    const browser = win.gBrowser.selectedBrowser;
-    const matches = await this.matches(browser).catch(() => []);
-    if (matches.length === 1) {
-      await this.fill(browser, matches[0].id);
-      return;
-    }
-    const doc = win.document;
-    doc.getElementById("toji-vault-menu")?.remove();
-    const popup = doc.createXULElement("menupopup");
-    popup.id = "toji-vault-menu";
-    for (const m of matches) {
-      const item = doc.createXULElement("menuitem");
-      item.setAttribute("label", m.username || "(no username)");
-      item.addEventListener("command", () => this.fill(browser, m.id));
-      popup.append(item);
-    }
-    popup.addEventListener("popuphidden", () => popup.remove(), { once: true });
-    doc.getElementById("mainPopupSet").append(popup);
-    popup.openPopup(button, "after_end");
+    const sameUrl = form?.url && form.url === browser?.currentURI?.spec;
+    const matches = form?.hasLogin && sameUrl ? await this.matches(browser).catch(() => []) : [];
+    lazy.TojiShell.vaultMatches(browser, matches);
   }
 
   #hideBubble(browser) {
-    browser?.ownerDocument?.defaultView?.document.getElementById("toji-vault-bubble")?.remove();
+    lazy.TojiShell.vaultPrompt(browser, null);
   }
 
   #showBubble(browser, pending) {
@@ -411,58 +347,13 @@ class Vault {
     if (!win?.gBrowser || win.gBrowser.selectedBrowser !== browser) {
       return;
     }
-    const doc = win.document;
-    doc.getElementById("toji-vault-bubble")?.remove();
-    const urlbar = doc.getElementById("urlbar");
-    if (!urlbar) {
-      return;
-    }
-    const container = pending.containerId ? lazy.TojiContainers.byId(pending.containerId) : null;
-    const el = (tag, cls, text) => {
-      const e = doc.createElementNS(XHTML_NS, tag);
-      if (cls) {
-        e.className = cls;
-      }
-      if (text != null) {
-        e.textContent = text;
-      }
-      return e;
-    };
-    const bubble = el("div");
-    bubble.id = "toji-vault-bubble";
-    bubble.setAttribute("role", "dialog");
-    const site = lazy.VaultLib.siteName(pending.origin ?? "");
-    const label = el("span", "toji-vault-label");
-    if (pending.error) {
-      label.textContent = `Couldn't save: ${pending.error}`;
-    } else if (pending.status === "saved") {
-      label.textContent = `Saved ${pending.username || "login"} for ${site}`;
-    } else {
-      label.append(
-        el("strong", "", pending.username || "Login"),
-        el("span", "toji-vault-site", ` · ${site}`)
-      );
-    }
-    const dot = el("span", "toji-vault-dot");
-    dot.style.background = container?.color ?? "transparent";
-    bubble.append(keyIcon(doc, 14), label, dot);
-    if (pending.status !== "saved") {
-      const yes = el("button", "toji-vault-yes", "✓");
-      yes.title = pending.status === "update" ? "Update" : "Save";
-      yes.addEventListener("click", () => this.commit(browser));
-      bubble.append(yes);
-    }
-    const no = el("button", "toji-vault-no", "✕");
-    no.title = pending.status === "saved" ? "Close" : "Not now";
-    no.addEventListener("click", () => this.dismiss(browser));
-    bubble.append(no);
-    const rect = urlbar.getBoundingClientRect();
-    bubble.style.top = `${rect.bottom + 9}px`;
-    bubble.style.right = `${doc.documentElement.clientWidth - rect.right}px`;
-    doc.body.append(bubble);
-    if (pending.status === "saved") {
-      setTimeout(() => bubble.remove(), 3000);
-    }
+    lazy.TojiShell.vaultPrompt(browser, {
+      origin: pending.origin,
+      username: pending.username,
+      containerId: pending.containerId,
+      status: pending.status,
+      error: pending.error,
+    });
   }
 }
 

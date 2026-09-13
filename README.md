@@ -96,9 +96,10 @@ visible to the model — so treat an agent run as showing that screen to your mo
 ## Running it
 
 Toji is moving from Electron to its own browser built on Firefox's engine (Gecko): a
-Firefox ESR fork with Mozilla's branding and services stripped out and Toji's interface on
-Firefox's own widgets. `docs/gecko.md` has the decisions, the progress of each phase and
-how to rebase onto the next ESR.
+Firefox ESR fork with Mozilla's branding and services stripped out. Firefox is only the
+engine: every window draws Toji's own interface — the same React tab strip, address bar,
+sidebar and overlays as the Electron app — in place of Firefox's. `docs/gecko.md` has the
+decisions, the progress of each phase and how to rebase onto the next ESR.
 
 Requires [bun](https://bun.sh), Xcode with the macOS SDK, and about 40 GB of free disk for
 the Firefox source and build (kept in the git-ignored `gecko/.work`).

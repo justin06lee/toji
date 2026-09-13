@@ -1,0 +1,131 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+/* The inside of Firefox's content prompts (a page's alert(), confirm() and prompt(),
+   leave-page and sign-in prompts) in Toji's look: the prompt keeps Firefox's behaviour,
+   the look is the shell's (the frame around it is styled in toji.css). A user sheet
+   (TojiFirefoxUI), limited to the prompt's own document. */
+
+@-moz-document url-prefix("chrome://global/content/commonDialog.xhtml") {
+  @font-face {
+    font-family: "Poppins";
+    font-weight: 400;
+    src: url("chrome://toji/content/fonts/poppins-latin-400-normal.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Poppins";
+    font-weight: 500;
+    src: url("chrome://toji/content/fonts/poppins-latin-500-normal.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Poppins";
+    font-weight: 600;
+    src: url("chrome://toji/content/fonts/poppins-latin-600-normal.woff2") format("woff2");
+  }
+
+  :root {
+    --toji-fg: #171717;
+    --toji-muted: #737373;
+    --toji-surface: #ffffff;
+    --toji-line: rgba(0, 0, 0, 0.1);
+    --toji-field: rgba(0, 0, 0, 0.03);
+    --toji-primary: #171717;
+    --toji-on-primary: #ffffff;
+    background: var(--toji-surface) !important;
+    color: var(--toji-fg) !important;
+    font: 13px/1.5 "Poppins", -apple-system, sans-serif !important;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --toji-fg: #fafafa;
+      --toji-muted: #a3a3a3;
+      --toji-surface: #171717;
+      --toji-line: rgba(255, 255, 255, 0.12);
+      --toji-field: rgba(255, 255, 255, 0.04);
+      --toji-primary: #ffffff;
+      --toji-on-primary: #171717;
+    }
+  }
+
+  dialog {
+    padding: 20px !important;
+    background: transparent !important;
+    font: inherit !important;
+  }
+
+  /* Firefox's info icon: the Electron app showed none. */
+  #iconContainer {
+    display: none !important;
+  }
+
+  #infoTitle {
+    margin: 0 0 6px !important;
+    font-size: 15px !important;
+    font-weight: 600 !important;
+    letter-spacing: -0.01em;
+  }
+
+  #infoBody {
+    color: var(--toji-muted);
+    font-size: 13.5px;
+  }
+
+  #loginLabel,
+  #password1Label {
+    color: var(--toji-muted);
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  input[type="text"],
+  input[type="password"] {
+    appearance: none !important;
+    height: 36px;
+    padding: 0 12px !important;
+    border: 1px solid var(--toji-line) !important;
+    border-radius: 12px !important;
+    background: var(--toji-field) !important;
+    color: inherit !important;
+    font: inherit !important;
+    outline: none !important;
+  }
+  input:focus-visible {
+    border-color: color-mix(in srgb, var(--toji-fg) 35%, transparent) !important;
+  }
+
+  /* Firefox's buttons read these tokens inside their shadow root: the default button
+     (OK, Leave page…) becomes Toji's dark pill, the others a hairline outline. This
+     is a user sheet, which loses to the dialog's own (author) styles unless important;
+     set on the dialog itself too, since its shadow root declares the tokens again. */
+  :root,
+  dialog {
+    --button-border-radius: 12px !important;
+    --button-min-height: 36px !important;
+    --button-font-weight: 500 !important;
+    --button-background-color: transparent !important;
+    --button-background-color-hover: var(--toji-field) !important;
+    --button-background-color-active: var(--toji-field) !important;
+    --button-border-color: var(--toji-line) !important;
+    --button-text-color: var(--toji-fg) !important;
+    --button-background-color-primary: var(--toji-primary) !important;
+    --button-background-color-primary-hover: color-mix(in srgb, var(--toji-primary) 85%, transparent) !important;
+    --button-background-color-primary-active: color-mix(in srgb, var(--toji-primary) 80%, transparent) !important;
+    --button-text-color-primary: var(--toji-on-primary) !important;
+    --button-text-color-primary-hover: var(--toji-on-primary) !important;
+    --button-border-color-primary: transparent !important;
+    --color-accent-primary: var(--toji-primary) !important;
+    --color-accent-primary-hover: color-mix(in srgb, var(--toji-primary) 85%, transparent) !important;
+    --color-accent-primary-active: color-mix(in srgb, var(--toji-primary) 80%, transparent) !important;
+    --focus-outline-color: color-mix(in srgb, var(--toji-fg) 35%, transparent) !important;
+  }
+
+  dialog::part(dialog-button) {
+    min-width: 0 !important;
+    height: 36px !important;
+    margin-inline-start: 8px !important;
+    padding: 0 20px !important;
+    border-radius: 12px !important;
+    font: 500 13px "Poppins", -apple-system, sans-serif !important;
+  }
+}

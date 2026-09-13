@@ -18,19 +18,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   TojiAgentServer: "resource:///modules/toji/TojiAgentServer.sys.mjs",
 });
 
-const XHTML_NS = "http://www.w3.org/1999/xhtml";
-const SVG_NS = "http://www.w3.org/2000/svg";
 // lucide WandSparkles (the wand is the one sparkle-family icon Toji keeps).
-const WAND_PATHS = [
-  "m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72",
-  "m14 7 3 3",
-  "M5 6v4",
-  "M19 14v4",
-  "M10 2v2",
-  "M7 8H3",
-  "M21 16h-4",
-  "M11 3H9",
-];
 
 function errorChannel(uri, loadInfo, message) {
   const html = `<!doctype html><meta charset="utf-8"><title>Toji</title><body style="font:15px -apple-system,sans-serif;margin:48px;color:#737373">${message}</body>`;
@@ -140,19 +128,6 @@ export function isAskChannel(channel) {
   }
 }
 
-function wand(doc) {
-  const svg = doc.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("width", "16");
-  svg.setAttribute("height", "16");
-  svg.classList.add("toji-icon");
-  for (const d of WAND_PATHS) {
-    const path = doc.createElementNS(SVG_NS, "path");
-    path.setAttribute("d", d);
-    svg.append(path);
-  }
-  return svg;
-}
 
 let registered = false;
 
@@ -206,47 +181,5 @@ export const TojiAsk = {
     }
     const url = `toji://ask?q=${encodeURIComponent(q)}${fresh ? "&fresh=1" : ""}`;
     browser.loadURI(Services.io.newURI(url), { triggeringPrincipal: system });
-  },
-
-  initWindow(win) {
-    const doc = win.document;
-    const urlbar = win.gURLBar;
-    // Shift+Enter asks the model instead of navigating.
-    urlbar?.inputField?.addEventListener(
-      "keydown",
-      e => {
-        if (e.key === "Enter" && e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          const value = urlbar.value;
-          urlbar.handleRevert?.();
-          urlbar.blur();
-          this.ask(win.gBrowser.selectedBrowser, value);
-        }
-      },
-      { capture: true }
-    );
-    const actions = doc.getElementById("page-action-buttons");
-    const go = doc.getElementById("toji-go-button");
-    if (actions && !doc.getElementById("toji-wand-button")) {
-      const button = doc.createElementNS(XHTML_NS, "button");
-      button.id = "toji-wand-button";
-      button.type = "button";
-      button.title = "Build a page with AI (Shift+Enter)";
-      button.setAttribute("aria-label", "Build a page with AI");
-      button.append(wand(doc));
-      button.addEventListener("mousedown", e => e.stopPropagation());
-      button.addEventListener("click", e => {
-        e.stopPropagation();
-        const value = urlbar.value;
-        urlbar.handleRevert?.();
-        this.ask(win.gBrowser.selectedBrowser, value);
-      });
-      actions.insertBefore(button, go ?? null);
-    }
-    // The address bar shows the question for an answer page, not the toji: URL.
-    if (Array.isArray(win.gInitialPages) === false) {
-      return;
-    }
   },
 };

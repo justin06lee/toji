@@ -130,7 +130,7 @@ const snapshot = (m: Marionette) =>
       report,
       containers: TojiContainers.list().map(c => c.id),
       theme: P.getStringPref("toji.theme", ""),
-      verticalTabs: P.getBoolPref("sidebar.verticalTabs", false),
+      layout: P.getStringPref("toji.layout", "top"),
       bookmarksBar: P.getStringPref("browser.toolbars.bookmarks.visibility", ""),
       vaultAutosave: P.getBoolPref("toji.vault.autosave", true),
       onboarded: P.getBoolPref("toji.onboarded", false),
@@ -161,13 +161,13 @@ try {
   );
   say(
     (!s.theme || snap.theme === s.theme) &&
-      (!s.layout || snap.verticalTabs === (s.layout === 'side')) &&
+      (!s.layout || snap.layout === (s.layout === 'side' ? 'side' : 'top')) &&
       (!s.bookmarksBar || snap.bookmarksBar === (s.bookmarksBar === 'pinned' ? 'always' : 'never')) &&
       (s.vaultAutosave === undefined || snap.vaultAutosave === s.vaultAutosave) &&
       (!s.onboarded || snap.onboarded === true) &&
       (!s.searchEngine || snap.engine === s.searchEngine),
     'its settings carry over',
-    JSON.stringify({ theme: snap.theme, verticalTabs: snap.verticalTabs, bookmarksBar: snap.bookmarksBar, vaultAutosave: snap.vaultAutosave, onboarded: snap.onboarded, engine: snap.engine })
+    JSON.stringify({ theme: snap.theme, layout: snap.layout, bookmarksBar: snap.bookmarksBar, vaultAutosave: snap.vaultAutosave, onboarded: snap.onboarded, engine: snap.engine })
   );
   say(snap.bookmarksFound === expected.bookmarks.length, 'its bookmarks are on the toolbar', `${snap.bookmarksFound}/${expected.bookmarks.length}`);
   say(expected.agent === undefined || snap.agent === expected.agent, "the agent server's settings moved in", `agent ${snap.agent}`);

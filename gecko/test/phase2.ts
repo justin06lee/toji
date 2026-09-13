@@ -77,7 +77,8 @@ try {
     const win = BrowserWindowTracker.getTopWindow();
     return {
       picking: win.document.documentElement.hasAttribute("toji-picking"),
-      picker: !!win.document.getElementById("toji-picker"),
+      // "Who's browsing?" is drawn by the window's shell, in its shadow root.
+      picker: (win.document.getElementById("toji-shell")?.shadowRoot?.textContent ?? "").includes("Who’s browsing?"),
       tabs: win.gBrowser.tabs.map(t => t.linkedBrowser.currentURI.spec),
     };`);
   say(picker.picking && picker.picker, 'a new window shows "Who’s browsing?"');

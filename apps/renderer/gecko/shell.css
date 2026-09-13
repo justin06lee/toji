@@ -1,0 +1,37 @@
+/* The Gecko browser's shell. It lives in a shadow root in the browser window, so its
+   styles and Firefox's never meet; :host and .toji-shell stand in for the Electron
+   renderer's html and body. Poppins is declared by the window's own stylesheet
+   (toji.css): @font-face only takes effect in a document's stylesheets. */
+@import '../src/styles.css';
+
+:host {
+  all: initial;
+}
+
+/* In the base layer, so the utilities (pointer-events-none on the agent's cursor, for
+   one) still win. */
+@layer base {
+  .toji-shell {
+    position: fixed;
+    inset: 0;
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    color: #171717; /* neutral-900 */
+    /* The shell is chrome, not a document (see styles.css). */
+    user-select: none;
+    /* The page shows through wherever the shell draws nothing; what it does draw
+       (header, sidebar, overlays) takes the pointer itself. */
+    pointer-events: none;
+  }
+  .toji-shell.dark {
+    color: #fafafa; /* neutral-50 */
+    color-scheme: dark;
+  }
+  /* Menus, sheets, the spotlight: portalled here, and all of them take the pointer. */
+  .toji-portals > * {
+    pointer-events: auto;
+  }
+}

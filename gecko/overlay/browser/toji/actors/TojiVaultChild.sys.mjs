@@ -142,6 +142,10 @@ export class TojiVaultChild extends JSWindowActorChild {
   }
 
   didDestroy() {
-    this.#observer?.disconnect();
+    // The page's window may already be gone, and its observer with it.
+    try {
+      this.#observer?.disconnect();
+    } catch {}
+    this.#observer = null;
   }
 }

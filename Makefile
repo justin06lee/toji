@@ -61,10 +61,11 @@ typecheck:
 test: ## Unit tests (Vitest)
 	@$(PM) run test
 
-check: ## Typecheck, unit tests, and the phase checks against the built app
+check: ## Typecheck, unit tests, and the phase and shell checks against the built app
 	@$(PM) run typecheck
 	@$(PM) run test
 	@$(PM) gecko/test/phase1.ts --idle 60
+	@$(PM) gecko/test/shell.ts
 
 tor-check: ## Live Tor check against a real daemon (needs: brew install tor)
 	@$(PM) run tor:check
