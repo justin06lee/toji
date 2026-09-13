@@ -1,10 +1,40 @@
 import dotenv from 'dotenv';
+import fs from 'node:fs';
 import path from 'node:path';
 
-// Load .env.local first so it takes precedence (matching Vite's resolution),
-// since dotenv does not overwrite already-set keys. Then fall back to .env.
-dotenv.config({ path: '.env.local' });
-dotenv.config({ path: '.env' });
+/**
+ * True inside the single executable `bun build --compile` produces (the sidecar the
+ * Gecko browser spawns). The build defines TOJI_COMPILED_BINARY; the $bunfs check is a
+ * backstop, since a compiled binary serves its own modules from Bun's virtual
+ * filesystem. In that mode nothing may be assumed about the working directory or the
+ * files next to the executable.
+ */
+export const isCompiled = process.env.TOJI_COMPILED_BINARY === '1' || /\/\$bunfs\/|~BUN[\\/]/.test(import.meta.url);
+
+/**
+ * .env files are optional and never located relative to the code: TOJI_ENV_FILE names
+ * one explicitly, otherwise .env.local then .env in the working directory are used if
+ * they exist (.env.local first so it wins — dotenv never overwrites a set key — which
+ * matches Vite). A missing or unreadable file is never fatal, and dotenv is kept quiet
+ * because stdout carries the TOJI_SERVER_READY handshake.
+ */
+function loadEnvFiles() {
+  const explicit = process.env.TOJI_ENV_FILE?.trim();
+  const files = explicit ? [path.resolve(explicit)] : [path.resolve('.env.local'), path.resolve('.env')];
+  for (const file of files) {
+    try {
+      if (!fs.existsSync(file)) {
+        if (explicit) console.warn(`[toji] TOJI_ENV_FILE ${file} does not exist; continuing without it.`);
+        continue;
+      }
+      const result = dotenv.config({ path: file, quiet: true });
+      if (result.error) console.warn(`[toji] could not read ${file}: ${result.error.message}`);
+    } catch (error) {
+      console.warn(`[toji] could not read ${file}:`, error instanceof Error ? error.message : error);
+    }
+  }
+}
+loadEnvFiles();
 
 function boolEnv(name: string, fallback: boolean) {
   const value = process.env[name];
@@ -17,7 +47,35 @@ function numEnv(name: string, fallback: number) {
   return Number.isFinite(value) ? value : fallback;
 }
 
-const projectRoot = process.cwd();
+function portEnv() {
+  // The sidecar has no fixed port: unset or 0 means "any free port", reported on the
+  // READY line. Run from source (dev, the Electron bundle) the default stays 8788.
+  const fallback = isCompiled ? 0 : 8788;
+  const raw = process.env.PORT?.trim();
+  if (!raw) return fallback;
+  const port = Number(raw);
+  return Number.isInteger(port) && port >= 0 && port <= 65_535 ? port : fallback;
+}
+
+function dataDirEnv() {
+  const fromEnv = process.env.TOJI_DATA_DIR?.trim();
+  if (fromEnv) return path.resolve(fromEnv);
+  if (isCompiled) {
+    // Exiting here, before any module computes a path from it, beats a stack trace or a
+    // .toji-data directory created wherever the browser happened to spawn us.
+    console.error(
+      '[toji] TOJI_DATA_DIR is not set. The compiled agent server keeps sessions, settings, caches and uploads there, ' +
+        'so the process that launches it must set TOJI_DATA_DIR to a writable directory (it is created if missing).'
+    );
+    process.exit(2);
+  }
+  return path.join(process.cwd(), '.toji-data');
+}
+
+function pidEnv(name: string) {
+  const pid = Number(process.env[name]);
+  return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+}
 
 // Toji's "model" is the embedded yagami engine (the signed-in coding-agent CLIs on
 // this machine — no keys), Cerebras, or a custom OpenAI-compatible endpoint configured
@@ -26,9 +84,12 @@ const projectRoot = process.cwd();
 const rawAgent = (process.env.TOJI_AGENT ?? 'yagami').trim().toLowerCase();
 const AGENT_CHOICES = new Set(['off', 'local', 'cerebras', 'yagami', 'toji']);
 
+const rendererDirEnv = process.env.TOJI_RENDERER_DIR?.trim();
+
 export const config = {
   appName: 'Toji',
-  port: numEnv('PORT', 8788),
+  isCompiled,
+  port: portEnv(),
   // A fresh install lands on the Toji plan: the point of it is that a new user gets
   // working inference without installing a CLI or pasting a key. Existing settings
   // files keep whatever they already say (see loadSettings).
@@ -45,7 +106,15 @@ export const config = {
   enableVisualAnalysis: boolEnv('ENABLE_VISUAL_ANALYSIS', true),
   requestTimeoutMs: numEnv('AGENT_REQUEST_TIMEOUT_MS', 18_000),
   cacheTtlHours: Math.max(1, numEnv('SOURCE_CACHE_TTL_HOURS', 72)),
-  dataDir: process.env.TOJI_DATA_DIR ?? path.join(projectRoot, '.toji-data'),
+  dataDir: dataDirEnv(),
+  // The built renderer to serve as static files, if any. Unset means none is served,
+  // except that a server run from source or the Electron bundle still finds the
+  // dist/renderer next to itself (see index.ts) — that is how the packaged desktop app
+  // loads its UI.
+  rendererDir: rendererDirEnv ? path.resolve(rendererDirEnv) : undefined,
+  // The process that spawned this server. When it disappears the server exits, so a
+  // crashed browser never leaves an orphaned sidecar holding a port.
+  parentPid: pidEnv('TOJI_PARENT_PID'),
   searchProvider: (process.env.SEARCH_PROVIDER ?? 'duckduckgo') as 'duckduckgo' | 'brave',
   braveSearchApiKey: process.env.BRAVE_SEARCH_API_KEY ?? '',
   demoModeEnabled: boolEnv('DEMO_MODE_ENABLED', true),

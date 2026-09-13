@@ -23,6 +23,7 @@
     "dev:electron": "wait-on tcp:5173 tcp:8788 && cross-env ELECTRON_START_URL=http://127.0.0.1:5173 electron apps/desktop/main.cjs",
     "build": "bun run typecheck && bun run build:server && bun run build:web",
     "build:server": "bun scripts/build-server.ts",
+    "build:server:bin": "bun scripts/build-server.ts --compile",
     "build:web": "vite build",
     "preview:web": "vite preview --host 127.0.0.1 --port 5173",
     "start": "bun run start:server",
