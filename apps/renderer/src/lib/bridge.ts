@@ -98,6 +98,31 @@ export interface VaultStatus {
 
 export type { BookmarkImportError, BrowserProfile, ImportBrowser, ImportResult, ImportedBookmark, PasswordImportError };
 
+/**
+ * What importing a browser returns. The Gecko browser files bookmarks straight into
+ * Firefox's own bookmarks, so `items` stays empty there and `count` says how many went
+ * in: null when Firefox's migrator did it and the number is unknown. Electron hands the
+ * bookmarks back in `items` and leaves `count` out.
+ */
+export type BrowserImportResult = Omit<ImportResult, 'bookmarks'> & { bookmarks: ImportResult['bookmarks'] & { count?: number | null } };
+
+/** An exported bookmarks file: items in Electron, a count under Gecko (see BrowserImportResult). */
+export interface BookmarksFileImport {
+  canceled: boolean;
+  bookmarks: ImportedBookmark[];
+  count?: number | null;
+}
+
+/** The rolling recording as the Gecko browser hands it to about:report. */
+export interface BridgeReplayClip {
+  /** video/mp4 or video/webm. */
+  type: string;
+  data: Uint8Array;
+  seconds: number;
+  /** The window at the moment the clip was taken. */
+  poster?: { type: string; data: Uint8Array };
+}
+
 /** Who files bug reports from this machine, and so which route they take (see bug-report.cjs). */
 export interface BugReportAccount {
   mode: 'direct' | 'form';
@@ -144,17 +169,84 @@ export interface PasswordsFileImport {
   error?: 'no-vault' | 'unreadable';
 }
 
+/** A Toji container (profile) as the browser stores it. See gecko/lib/containers.ts. */
+export interface BridgeContainer {
+  id: string;
+  name: string;
+  color: string;
+  avatar?: string;
+  egress: 'direct' | 'tor';
+  ephemeral: boolean;
+  builtin?: boolean;
+  userContextId?: number;
+}
+
+/**
+ * Settings the Gecko browser owns (Firefox prefs and services), read and written
+ * through the bridge. In the Electron app these lived in localStorage.
+ */
+export interface BrowserSettings {
+  theme: 'light' | 'dark';
+  /** Top tab strip or Firefox's native vertical tabs. */
+  layout: 'top' | 'side';
+  bookmarksBar: 'pinned' | 'hover';
+  /** The default search engine's name, as Firefox's search service knows it. */
+  searchEngine: string;
+  searchEngines: { name: string; icon?: string }[];
+  vaultAutosave: boolean;
+  /** Keep the last 15 seconds for bug reports. */
+  replay: boolean;
+  adblock: boolean;
+}
+
+/** Where Toji's local agent server listens, and the per-launch token it requires. */
+export interface AgentServerInfo {
+  url: string;
+  token: string;
+}
+
 export interface TojiBridge {
   platform?: string;
+
+  // --- Gecko browser (window.toji is provided by the TojiPage JSWindowActor) ---
+  /** The agent server's base URL and token; api.ts sends `Authorization: Bearer <token>`. */
+  server?: () => Promise<AgentServerInfo | null>;
+  containers?: () => Promise<BridgeContainer[]>;
+  /** Replaces the whole list; removed containers and route changes are wiped by the browser. */
+  saveContainers?: (containers: BridgeContainer[]) => Promise<BridgeContainer[]>;
+  onContainersChanged?: (callback: (containers: BridgeContainer[]) => void) => () => void;
+  /** The container of the window this page is in (null in a picker window). */
+  windowContainer?: () => Promise<string | null>;
+  settings?: () => Promise<BrowserSettings>;
+  setSetting?: <K extends keyof BrowserSettings>(key: K, value: BrowserSettings[K]) => Promise<BrowserSettings>;
+  onSettingsChanged?: (callback: (settings: BrowserSettings) => void) => () => void;
+  /** Opens a URL in a tab of this window (next to this page). */
+  openTab?: (url: string, options?: { background?: boolean }) => void;
+  /**
+   * The start page's search box hands over exactly what was typed. The browser decides
+   * whether it is an address or a search (with the default engine) and loads it in this tab.
+   */
+  navigate?: (input: string) => void;
+  /** Shift+Enter or the wand: the browser opens an AI answer page for `query` in this tab. */
+  askAI?: (query: string) => void;
+  /** Opens one of Toji's own pages: 'settings', 'welcome', 'plans' (optionally carrying a question). */
+  openPage?: (page: 'settings' | 'welcome' | 'plans', options?: { query?: string; replace?: boolean }) => void;
+  /** Firefox's add-ons manager (extensions are Firefox add-ons now). */
+  openAddons?: () => void;
+  /** Welcome finished: remember it and turn this tab into a new tab page. */
+  finishOnboarding?: () => void;
   /** Resolves once macOS has answered — true only when Toji really is the default. */
   setDefaultBrowser?: () => Promise<boolean>;
   isDefaultBrowser?: () => Promise<boolean>;
 
   // --- import from other browsers ---
   importBrowsers?: () => Promise<ImportBrowser[]>;
-  /** Bookmarks come back; passwords go straight into the vault under `containerId`. */
-  importBrowser?: (options: { browser: string; profile: string; containerId: string }) => Promise<ImportResult>;
-  importBookmarksFile?: () => Promise<{ canceled: boolean; bookmarks: ImportedBookmark[] }>;
+  /**
+   * Passwords go straight into the vault under `containerId`. Bookmarks come back in
+   * Electron; under Gecko they go into Firefox's bookmarks and only a count comes back.
+   */
+  importBrowser?: (options: { browser: string; profile: string; containerId: string }) => Promise<BrowserImportResult>;
+  importBookmarksFile?: () => Promise<BookmarksFileImport>;
   importPasswordsFile?: (containerId: string) => Promise<PasswordsFileImport>;
   /** macOS: the Full Disk Access pane, where Toji can be allowed to read Safari's data. */
   openFullDiskAccess?: () => Promise<void>;
@@ -211,10 +303,26 @@ export interface TojiBridge {
   onReportBug?: (callback: () => void) => () => void;
   /** A capture id for this window's own contents, for the rolling recording. Valid a few seconds. */
   replaySourceId?: () => Promise<string | null>;
-  /** A still of this window as it is right now. */
+  /**
+   * A still of this window as it is right now. On about:report (Gecko) it is the still the
+   * browser took when the report was opened, before the report page existed.
+   */
   captureWindow?: () => Promise<{ type: string; data: Uint8Array } | null>;
   bugReportAccount?: (options?: { refresh?: boolean }) => Promise<BugReportAccount>;
+  /**
+   * Under Gecko a form-route result means the browser has already opened GitHub's form in
+   * a new tab, with a tray that attaches the files; about:report only has to close.
+   */
   submitBugReport?: (draft: BugReportDraft) => Promise<BugReportResult>;
+  /** Gecko: open about:report for the window this page is in (Settings › Bug reports). */
+  openReport?: () => void;
+  /** Gecko: close about:report's own tab. */
+  closeReport?: () => void;
+  /**
+   * Gecko: the window's last 15 seconds, kept from before about:report opened; null when
+   * there is none. Missing when the browser keeps no recording at all.
+   */
+  replayClip?: () => Promise<BridgeReplayClip | null>;
   /** Drop a waiting report's files onto GitHub's issue form in one of this window's tabs. */
   attachBugReport?: (webContentsId: number, reportId: string) => Promise<BugReportAttach>;
   /** Start a native drag of one of a waiting report's files, to drop onto the form by hand. */

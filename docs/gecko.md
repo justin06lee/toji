@@ -169,12 +169,127 @@ contextual identities on; search suggestions off by default; SOCKS remote DNS.
    hook.
 6. `make`, then run the parity checklist below.
 
+## Design of Toji's layer (phases 2–5)
+
+Everything below lives in `gecko/overlay/browser/toji/` (built into `browser/toji`
+by patch 0001) plus pure, Vitest-tested logic in `gecko/lib/*.ts` that `build.ts`
+bundles into `resource:///modules/toji/lib/*.sys.mjs`. No C++.
+
+- **Hooks.** `Toji.manifest` registers `TojiStartup.init` on `browser-before-ui-startup`
+  and three per-window categories: `browser-window-domcontentloaded-before-tabbrowser`
+  (the only point where the first tab's container can still be chosen),
+  `browser-window-domcontentloaded` (gBrowser exists) and `browser-window-unload-begin`.
+- **Containers** (`TojiContainers`, `gecko/lib/containers.ts`). Toji's list lives in
+  `<profile>/toji-containers.json` and is mirrored onto Firefox contextual identities
+  (name, nearest Firefox colour name, an icon) — Toji draws the real hex colours and
+  avatars itself. First run adopts Firefox's Personal/Work/Shopping identities and
+  removes Banking. Loaded synchronously on first use, because the proxy filter and the
+  first window need answers before async startup work could finish.
+- **One window = one container** (`TojiWindows`). A window's container comes from
+  `window.arguments[1]` (`toji-container` in the property bag, Toji-opened windows), an
+  adopted tab, a popup's opener, `arguments[5]`, the opening window ("Open Link in New
+  Window" keeps its container; ⌘N does not), or — for a private window nobody assigned
+  (⌘⇧N) — the Private container. Otherwise the window shows the **"Who's browsing?"**
+  picker drawn in its own chrome, and loads nothing until a profile is chosen (URLs it
+  was asked to open are held and opened after). `gBrowser.addTab` is wrapped per window
+  so every tab gets the window's `userContextId`; cross-container tab drags show no-drop
+  and `adoptTab` refuses. A window opened with only a URL string gets the full argument
+  form (with a system triggering principal), or `openLinkIn` would silently load nothing.
+- **Ephemeral containers are private windows** with their `userContextId`
+  (`{privateBrowsingId:1, userContextId:N}` is supported by the platform, just not
+  exposed in Firefox's UI). That keeps their history, session and storage off disk
+  entirely; on top of that the container is wiped with
+  `Services.clearData.deleteDataFromOriginAttributesPattern({userContextId})` when its
+  last window closes and at every startup. Clear container does the same on demand and
+  reloads the container's tabs. Firefox's own container menus are hidden
+  (`privacy.userContext.ui.enabled` locked off): they contradict one window, one profile.
+- **Tor** (`TojiTor`, `TojiProxy`, `TojiTorUI`, `gecko/lib/tor.ts`). One managed tor
+  (`SocksPort auto IsolateSOCKSAuth`, `ControlPort auto` + `ControlPortWriteToFile`,
+  cookie auth, `__OwningControllerProcess` + `TAKEOWNERSHIP` so it dies with the browser)
+  or an external tor on 9050/9150 when no binary exists. A channel filter (registered
+  first, before any add-on's) keys on `loadInfo.originAttributes.userContextId`: Tor
+  containers get SOCKS5 with remote DNS and per-container credentials
+  (`toji:<container>` / `<launch nonce>:<generation>`), so tor isolates their circuits —
+  on an external tor too. Fail-closed: the filter never throws (a throwing filter keeps
+  "direct"), a Tor request waits up to 60 s while tor bootstraps, and otherwise gets a
+  SOCKS proxy on 127.0.0.1:1 with no failover. Compile-time and locked-pref guarantees
+  are listed under Build options and in `toji.cfg`. **WebRTC** is refused outright in
+  Tor containers (a `webrtcUI` peer-connection blocker; tor carries no UDP and Firefox
+  can't send ICE through a per-container SOCKS proxy); local IPs are never exposed in any
+  container. **Hold-to-Tor** (900 ms on the Go button at the end of the address bar)
+  swaps the window for a private window in a fresh in-memory Tor identity
+  (`userContextId` ≥ 1,000,000, no Firefox identity record, wiped on release); holding
+  again goes back. A **.onion** load in a direct window does the same, via a tabs
+  progress listener. The status bar under the toolbar shows bootstrap progress, or
+  "offline" with Retry, in Tor windows only.
+- **Toji's pages** (`TojiPages`, `TojiPage` actor). React builds shipped at
+  `chrome://toji/content/pages/*.html`, registered at runtime as `about:settings`,
+  `about:welcome`, `about:plans`, `about:start` (the new tab page, set through
+  `AboutNewTab.newTabURL`, which private windows honour too). They load in the parent
+  process like about:preferences; `window.toji` is a JSWindowActor whose parent refuses
+  non-system principals and whose API is an explicit allow-list (`TojiPageAPI`).
+  The contract is `apps/renderer/src/lib/bridge.ts`.
+- **Agent server** (`TojiAgentServer`). A `bun build --compile` binary in the bundle,
+  spawned with `PORT=0`, a per-launch token, `TOJI_DATA_DIR=<profile>/agent-server`,
+  `TOJI_PARENT_PID`, and the user's login-shell PATH (so the coding-agent CLIs are found);
+  it prints `TOJI_SERVER_READY {"port":N}`, is restarted with backoff, and stops at
+  shutdown.
+- **Web agent** (`TojiAgent`, `TojiAgent` actor, `gecko/lib/agent.ts`). The Electron
+  loop, ported step for step (same notes to the model, timings, retry and free-step
+  caps). Screenshots with `WindowGlobalParent.drawSnapshot` — works for background tabs —
+  scaled so the long edge is ≤ 1400 px. Input through the privileged primitives Marionette
+  and BiDi use (`window.synthesizeMouseEvent`, `windowUtils.sendWheelEvent`,
+  `nsITextInputProcessor`): trusted events that count as user activation. File upload with
+  `File.createFromFileName` + `mozSetFileArray`, only from the agent server's uploads and
+  references folders. The spotlight, the gliding cursor (with click ripple) and the
+  breathing tab mark are drawn in the window's chrome; a system-group key listener catches
+  the Option tap even while focus is in a page.
+
+- **Vault** (`TojiVault`, `TojiVault` actor, `gecko/lib/vault.ts`). Firefox's password
+  manager is locked off (it has no containers). `<profile>/toji-vault.json` holds only
+  ciphertext from `OSKeyStore.encrypt` (key in the macOS Keychain as "Toji Encrypted
+  Storage"); an undecryptable vault is never overwritten. Fills are exact-origin and
+  container-scoped, re-checked in the page (`nodePrincipal.origin`) before the password is
+  set with `setUserInput`. Captures arrive from the page's submit/click; the parent takes
+  the origin and container from the tab it knows. Autosave waits for the page's next
+  login-form report (the Electron rules); a Toji-generated password is stored at once.
+  The key button and the save bubble hang off the address bar. The agent gets
+  `matches`/`fill` only.
+- **Imports** (`TojiImport`, `gecko/lib/imports.ts`). Bookmarks go to Firefox's
+  bookmarks: Firefox's migrator where it has one (Chrome, Brave, Edge, Vivaldi, Opera,
+  Chromium, Safari), else Toji reads the Chromium `Bookmarks` file (Arc, Dia, Helium) into
+  a "From <browser>" folder. Passwords never touch Firefox's password manager (its
+  `logins.json` and backups would keep copies): Toji reads `Login Data` with
+  `MigrationUtils.getRowsFromDBWithoutLocks`, decrypts with Firefox's
+  `ChromeMacOSLoginCrypto` (the Keychain asks only if there is something to decrypt), and
+  saves into the vault under the chosen container. HTML bookmarks use
+  `BookmarkHTMLUtils.importFromFile`; CSV passwords go into the vault.
+- **uBlock Origin** is pinned in `gecko/addons.json` (AMO-signed XPI, version + SHA-256),
+  downloaded and verified by `build.ts`, shipped in `distribution/extensions` (installed
+  into every new profile) and allowed in private windows by policy. The Settings switch
+  enables or disables the add-on.
+- **Bug reports** (`TojiBugReport`, `gecko/lib/bugReport.ts`). Same two routes as the
+  Electron app (direct with a token or `gh auth token`; GitHub's form otherwise), same
+  refs/bug-reports storage, the tray over the form's tab, and attaching by a synthetic drop
+  of real `File`s onto GitHub's editor with the file input as fallback. The window still is
+  `drawSnapshot` of the chrome window's own WindowGlobal, which stitches in the page:
+  no Screen Recording permission. Help › Report a Bug… and ⌥⇧I open `about:report`.
+- **AI answer pages — decided, not built yet.** Firefox refuses to load http content into
+  parent-process pages, so the answer can't be an iframe inside a Toji page. Plan: a
+  `toji:` protocol handler registered at runtime in the parent (`Services.io
+  .registerProtocolHandler`), `DANGEROUS_TO_LOAD` so web pages can't link to it, whose
+  `newChannel` returns an HTTP channel to the agent server's stream (token included) with
+  `originalURI` = `toji://ask?q=…`. The tab is an ordinary content process in the window's
+  container, the address bar shows the question's URL, and the token never reaches history.
+  Sources get appended to the streamed page by the server. Plan gating (Toji plan without a
+  subscription → `about:plans?q=`) happens before loading.
+
 ## Phases
 
 | # | Phase | Branch | State |
 |---|---|---|---|
 | 0 | Prerequisites and decisions | `chore/gecko-prereqs` | done (tag `chore-gecko-prereqs`) |
-| 1 | Stripped, branded browser that `make` builds, installs, launches | `feat/gecko-browser` | in progress |
+| 1 | Stripped, branded browser that `make` builds, installs, launches | `feat/gecko-browser` | done (tag `feat-gecko-browser`) |
 | 2 | Containers, one window = one profile, picker, ephemeral wipe, clear | | |
 | 3 | Tor per container, kill switch, onion routing, Tor UI, `make tor-check` | | |
 | 4 | Styling and extras on native widgets; Settings, Welcome, Plans | | |
@@ -239,3 +354,67 @@ State per item: — not started · WIP · works · works differently · dropped 
 - `./mach bootstrap` for desktop Firefox succeeded.
 - Wrote `gecko/` (version pin, build script, mozconfig, three build-config patches,
   branding overlay, `toji.cfg`, `policies.json`) and started the first full build.
+- Phase 0 merged and pushed (tag `chore-gecko-prereqs`).
+
+### 2026-09-13 — phase 1 under way, phases 2–7 written ahead of the build
+
+- First full build (run 3, log `gecko/.work/logs/build-3.log`) started 02:05 with the
+  phase-1 overlay only (branding, `toji.cfg`, `policies.json`). About 60 min in it was
+  compiling `gfx/`; the machine swaps up to ~5 GB but keeps going at 6 jobs.
+- While it builds, the Toji layer for phases 2–7 was written in
+  `gecko/overlay/browser/toji/` (modules, actors, `toji.css`, `jar.mn`, `Toji.manifest`,
+  `moz.build`) and `gecko/lib/*.ts` (tested). **None of the chrome modules has run in a
+  real build yet**; they only pass `node --check`. They are deliberately still
+  uncommitted on `feat/gecko-browser` (a backup tarball is in `gecko/.work/backups/`)
+  so phase 1 can be verified and merged on the clean build first; the next commit series
+  moves them onto per-phase branches as each one verifies.
+- Merged into `feat/gecko-browser` from worktree agents:
+  - agent server as a compiled sidecar (fetch + Readability research, no Playwright;
+    `TOJI_SERVER_READY {"port":N}`; `TOJI_SERVER_TOKEN`; Host check; `TOJI_PARENT_PID`;
+    64 MB binary without the Agent SDK's platform binary);
+  - Toji's pages as a multi-page Vite build (`bun run build:pages`,
+    `vite.gecko.config.ts`, `apps/renderer/gecko/`) on the `window.toji` bridge.
+- In flight: a worktree agent porting the bug report sheet as `report.html` and adapting
+  Welcome's import to Gecko's count-based results.
+- `make tor-check`'s daemon half (`scripts/tor-live-check.ts`) passes against a real tor:
+  two containers on different circuits and different exit relays, per-container new
+  circuits, `.onion`, NEWNYM. The in-browser half is `gecko/test/tor-browser.ts`.
+
+**Phase 1 results (build 3, packaged 05:21):**
+- Full build: 3 h 14 min on the 8 GB M1 at 6 jobs (swap peaked ~6 GB); `mach package`
+  20 s. `Toji.app` 283 MB: `CFBundleName` Toji, `CFBundleIdentifier` com.ezzy.toji,
+  executable `toji`, `application.ini` Vendor/Name Toji, `RemotingName=toji-esr`.
+- The packager only ships `distribution/*` for `BUILT_BY_MOZILLA` builds, so
+  `policies.json` was missing from the first package. Patch 0003 now packages
+  `distribution/*` unconditionally (patch 0004, phase 5, adds the agent server).
+- Probe (`gecko/test/probe.html`): UA `Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15;
+  rv:153.0) Gecko/20100101 Firefox/153.0`, `navigator.userAgentData` absent,
+  `window.chrome` undefined; geolocation, notifications, camera, microphone,
+  persistent-storage and push all `prompt`; Widevine and ClearKey available (the GMP
+  service serves Widevine to a non-Mozilla build; the CDM came through Google's component
+  updater).
+- Clean-profile network, 180 s idle: Remote Settings (+ attachments CDN, content-signature
+  chain), aus5 (GMP), Google's updater (Widevine), OpenH264 — all intended. Also seen and
+  fixed: the policy-added Brave/Startpage engines fetched their favicons (now inline
+  data: icons) and Web Push opened a socket to push.services.mozilla.com (now
+  `dom.push.connection.enabled` false by default; the Electron app had no web push).
+- Firefox 153's Marionette refuses chrome-context scripts unless the browser starts with
+  `-remote-allow-system-access`; the test scripts pass it and run headless unless
+  `HEADED=1`.
+
+- Sites that broke under Electron, loaded in the built browser with screenshots: Google
+  sign-in (the identifier page, no "browser not supported" wall), Instagram Reels (video
+  playing), Zoho Mail, Netflix; and a Widevine-encrypted DASH stream plays (keys
+  negotiated, `currentTime` advancing). The geolocation request opens Firefox's own
+  prompt.
+- `gecko/test/phase1.ts` exits non-zero on any of: an unexpected host at idle, exposed
+  client hints or `window.chrome`, a pre-granted permission, no prompt, a non-Toji
+  identity, unlocked prefs, inactive policies, an unsupported-browser wall, or Widevine
+  not playing. `make check` runs it with a 60 s idle log.
+
+**Phase 1 is done** (merged to master, tag `feat-gecko-browser`).
+
+**Next:** `bun gecko/build.ts build` with the phase 2–7 layer (prepare copies it and the
+generated pages / server binary; no C++ changes, so the build should be short), then
+verify phase by phase with Marionette (chrome-context scripts) and screenshots,
+committing each phase as it verifies.

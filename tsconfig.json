@@ -17,6 +17,6 @@
     "jsx": "react-jsx",
     "types": ["node"]
   },
-  "include": ["apps/**/*.ts", "apps/**/*.tsx", "vite.config.ts", "scripts/**/*.ts"],
+  "include": ["apps/**/*.ts", "apps/**/*.tsx", "vite.config.ts", "vite.gecko.config.ts", "scripts/**/*.ts", "gecko/lib/**/*.ts"],
   "references": []
 }

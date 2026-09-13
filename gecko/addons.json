@@ -1,0 +1,8 @@
+{
+  "uBlock0@raymondhill.net": {
+    "name": "uBlock Origin",
+    "version": "1.74.0",
+    "url": "https://addons.mozilla.org/firefox/downloads/file/4981431/ublock_origin-1.74.0.xpi",
+    "sha256": "175756d74468c9ba45863f7fc333d3be670f82d5b066314e915814dd547d1652"
+  }
+}

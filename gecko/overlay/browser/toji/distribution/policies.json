@@ -56,7 +56,7 @@
           "Name": "Brave",
           "URLTemplate": "https://search.brave.com/search?q={searchTerms}",
           "Method": "GET",
-          "IconURL": "https://search.brave.com/favicon.ico",
+          "IconURL": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiI+PHJlY3Qgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiByeD0iNCIgZmlsbD0iIzE3MTcxNyIvPjx0ZXh0IHg9IjgiIHk9IjExLjUiIGZvbnQtZmFtaWx5PSJIZWx2ZXRpY2EsQXJpYWwsc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZm9udC13ZWlnaHQ9IjcwMCIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+QjwvdGV4dD48L3N2Zz4=",
           "Alias": "@brave",
           "Description": "Brave Search"
         },
@@ -64,7 +64,7 @@
           "Name": "Startpage",
           "URLTemplate": "https://www.startpage.com/sp/search?query={searchTerms}",
           "Method": "GET",
-          "IconURL": "https://www.startpage.com/favicon.ico",
+          "IconURL": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiI+PHJlY3Qgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiByeD0iNCIgZmlsbD0iIzE3MTcxNyIvPjx0ZXh0IHg9IjgiIHk9IjExLjUiIGZvbnQtZmFtaWx5PSJIZWx2ZXRpY2EsQXJpYWwsc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZm9udC13ZWlnaHQ9IjcwMCIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+UzwvdGV4dD48L3N2Zz4=",
           "Alias": "@startpage",
           "Description": "Startpage"
         }

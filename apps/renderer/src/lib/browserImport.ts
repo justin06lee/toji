@@ -46,9 +46,12 @@ export function planProfiles(profiles: BrowserProfile[], containers: Container[]
 }
 
 export interface ImportTotals {
-  bookmarks: number;
+  /** Null: the Gecko browser's migrator filed them into its bookmarks without a count. */
+  bookmarks: number | null;
   passwords: number;
   profiles: number;
+  /** The bookmarks went into the browser's own bookmarks (Gecko), not Toji's list. */
+  nativeBookmarks?: boolean;
   bookmarkError?: BookmarkImportError;
   passwordError?: PasswordImportError;
 }
@@ -64,10 +67,31 @@ export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' :
 
 const list = (parts: string[]) => (parts.length <= 1 ? parts.join('') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`);
 
+/**
+ * Under Gecko: the running count of bookmarks filed into the browser's bookmarks, adding
+ * one profile's result. A profile imported without a count (Firefox's migrator did it)
+ * makes the total unknown (null) from then on; one that failed adds nothing.
+ */
+export function addBookmarkCount(total: number | null, bookmarks: { count?: number | null; error?: string }): number | null {
+  if (typeof bookmarks.count === 'number') return total === null ? null : total + Math.max(0, bookmarks.count);
+  return bookmarks.error ? total : null;
+}
+
+/** Under Gecko: the line after an exported bookmarks file went into the browser's bookmarks. */
+export function describeBookmarksFile(count: number | null): ImportMessage {
+  if (count === null) return { text: 'Imported your bookmarks.', tone: 'ok' };
+  if (count <= 0) return { text: 'No bookmarks found in that file.', tone: 'warn' };
+  return { text: `Imported ${plural(count, 'bookmark')} into your bookmarks.`, tone: 'ok' };
+}
+
 /** What the row under the import list says once a browser has been imported. */
 export function describeImport(browser: string, totals: ImportTotals): ImportMessage {
   const parts = [
-    totals.bookmarks ? plural(totals.bookmarks, 'bookmark') : '',
+    totals.bookmarks === null
+      ? 'your bookmarks'
+      : totals.bookmarks
+        ? `${plural(totals.bookmarks, 'bookmark')}${totals.nativeBookmarks ? ' into your bookmarks' : ''}`
+        : '',
     totals.passwords ? plural(totals.passwords, 'password') : '',
     totals.profiles ? plural(totals.profiles, 'profile') : ''
   ].filter(Boolean);

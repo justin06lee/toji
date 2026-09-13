@@ -11,8 +11,9 @@
 
 ---
 
-Toji is a Chromium-based browser built around one idea: the sites you visit should not be
-able to join up who you are. Each window uses a **profile** (internally, a container) — a
+Toji is a browser built around one idea: the sites you visit should not be able to join up
+who you are. (It is moving from Electron to its own Firefox-engine browser; see
+[Running it](#running-it).) Each window uses a **profile** (internally, a container) — a
 named identity with its own cookies, storage, cache and network route. Signing into a site
 as Work leaves Personal signed out, and a tracker embedded in both sees two unrelated
 browsers.
@@ -94,22 +95,30 @@ visible to the model — so treat an agent run as showing that screen to your mo
 
 ## Running it
 
-Requires [bun](https://bun.sh) and Node 18+.
+Toji is moving from Electron to its own browser built on Firefox's engine (Gecko): a
+Firefox ESR fork with Mozilla's branding and services stripped out and Toji's interface on
+Firefox's own widgets. `docs/gecko.md` has the decisions, the progress of each phase and
+how to rebase onto the next ESR.
+
+Requires [bun](https://bun.sh), Xcode with the macOS SDK, and about 40 GB of free disk for
+the Firefox source and build (kept in the git-ignored `gecko/.work`).
 
 ```bash
-make            # install, build, install to /Applications, launch
-make dev        # run from source with hot reload
-make update     # stop, rebuild, reinstall, relaunch
-make check      # typecheck + smoke + build + e2e
-make tor-check  # start a real Tor and verify circuits, .onion and NEWNYM
-make linux      # build the Linux packages (AppImage + deb, x64 and arm64)
+make            # build Toji's browser from Firefox ESR source, install to /Applications, launch
+make update     # stop, rebuild, reinstall (resetting the old bundle's macOS permissions), relaunch
+make faster     # rebuild only Toji's JS/CSS/prefs into the objdir
+make dev        # that, then run the unpackaged build with a scratch profile
+make check      # typecheck, unit tests, and the built browser's phase checks
+make tor-check  # start a real Tor and prove two containers exit from different relays
+make test       # unit tests (Vitest)
 ```
 
-`make` and `make update` install to `/Applications`, so they are macOS-only; `make linux`
-builds the Linux artifacts instead. Only macOS is built and tested regularly — the Linux
-targets exist and the app avoids macOS-only chrome there (the window keeps its native title
-bar rather than Toji's drag notch, which needs APIs Wayland doesn't offer), but arm64 Linux
-has not been run end to end.
+The first build is long (about three hours on an 8 GB M1); later ones reuse the objdir and
+sccache. `gecko/build.ts` downloads and verifies the pinned source release, applies
+`gecko/patches`, copies `gecko/overlay` into the tree and drives `./mach`.
+
+The Electron app still builds while the migration finishes: `make electron`,
+`make electron-dev`, `make electron-install`.
 
 `make tor-check` is the one that proves the isolation claim rather than asserting it: it
 boots an actual Tor, sends traffic for two containers through their assigned SocksPorts, and

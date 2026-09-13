@@ -1,9 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
-import { chromium, type Browser, type BrowserContext, type Frame, type Page, type Request, type Route } from 'playwright';
 import { config } from '../config.js';
-import type { LinkCandidate, ResearchMode, ResearchOptions, ResearchPlan, ResearchSessionState, SearchResult, TabAction, TabState } from '../types.js';
+import type { ResearchMode, ResearchOptions, ResearchPlan, ResearchSessionState, SearchResult, TabAction, TabState } from '../types.js';
 import { broadcast, logAgent } from '../lib/events.js';
 import { compactText, fingerprintQuery, normalizeWhitespace, safeHostname } from '../lib/text.js';
 import { countSessions, loadSessions, removeSessionSnapshots, saveSession } from '../lib/storage.js';
@@ -11,6 +8,7 @@ import { getCachedSource, putCachedSource } from '../lib/sourceCache.js';
 import { predictIntent } from './predictionAgent.js';
 import { buildResearchPlan, heuristicPlan } from './plannerAgent.js';
 import { gatherSearchCandidates } from './search.js';
+import { extractPage, fetchHtml, NotHtmlError } from './readPage.js';
 import { summarizeSource, synthesizeAnswer } from './synthesisAgent.js';
 
 const AGENT_NAMES = ['Atlas', 'Nova', 'Kepler', 'Vega', 'Lyra', 'Orion', 'Mira', 'Sol'];
@@ -30,67 +28,6 @@ function finalizeMetrics(session: ResearchSessionState) {
   session.metrics.completedAt = now();
   if (session.metrics.startedAt) {
     session.metrics.elapsedMs = Date.parse(session.metrics.completedAt) - Date.parse(session.metrics.startedAt);
-  }
-}
-
-/** True for IPv4 addresses that must never be reachable by the headless browser (loopback, link-local, RFC1918, CGNAT, multicast/reserved). Unknown shapes are treated as unsafe. */
-function isPrivateIPv4(ip: string): boolean {
-  const parts = ip.split('.').map((part) => Number(part));
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
-  const [a, b] = parts;
-  if (a === 0) return true; // "this" network
-  if (a === 10) return true; // RFC1918
-  if (a === 127) return true; // loopback
-  if (a === 169 && b === 254) return true; // link-local incl. cloud metadata 169.254.169.254
-  if (a === 172 && b >= 16 && b <= 31) return true; // RFC1918
-  if (a === 192 && b === 168) return true; // RFC1918
-  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT (RFC6598)
-  if (a >= 224) return true; // multicast / reserved
-  return false;
-}
-
-/** True for IPv6 addresses that must never be reachable (loopback, unspecified, ULA, link-local, and IPv4-mapped private addresses). */
-function isPrivateIPv6(ip: string): boolean {
-  const addr = ip.toLowerCase().replace(/^\[|\]$/g, '').replace(/%.*$/, '');
-  if (addr === '::1' || addr === '::') return true; // loopback / unspecified
-  if (addr.startsWith('fe80') || addr.startsWith('fc') || addr.startsWith('fd')) return true; // link-local / ULA
-  const mapped = addr.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
-  if (mapped) return isPrivateIPv4(mapped[1]);
-  return false;
-}
-
-function isPrivateAddress(ip: string): boolean {
-  return isIP(ip) === 6 ? isPrivateIPv6(ip) : isPrivateIPv4(ip);
-}
-
-/**
- * SSRF guard: reject any URL that is not http(s) or that resolves to a loopback,
- * link-local, or private (RFC1918/ULA/CGNAT) address. Hostnames are resolved via
- * DNS so that a public name that points at an internal IP is still blocked.
- */
-async function assertSafeUrl(rawUrl: string): Promise<void> {
-  let parsed: URL;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    throw new Error(`Blocked navigation to invalid URL: ${rawUrl}`);
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error(`Blocked navigation to non-http(s) URL (${parsed.protocol})`);
-  }
-  const host = parsed.hostname.replace(/^\[|\]$/g, '');
-  let addresses: string[];
-  if (isIP(host)) {
-    addresses = [host];
-  } else {
-    const resolved = await lookup(host, { all: true });
-    addresses = resolved.map((entry) => entry.address);
-    if (addresses.length === 0) throw new Error(`Blocked navigation to unresolvable host: ${host}`);
-  }
-  for (const address of addresses) {
-    if (isPrivateAddress(address)) {
-      throw new Error(`Blocked navigation to private or internal host: ${host}`);
-    }
   }
 }
 
@@ -163,68 +100,9 @@ function maxTabsFor(session: ResearchSessionState) {
   return Math.max(1, Math.min(runProfileCap, depthCap));
 }
 
-async function captureScreenshot(page: Page): Promise<string | undefined> {
-  try {
-    const buffer = await page.screenshot({ type: 'jpeg', quality: 58, fullPage: false, timeout: 6_000 });
-    return `data:image/jpeg;base64,${buffer.toString('base64')}`;
-  } catch {
-    return undefined;
-  }
-}
-
-async function dismissOrExpandSafeControls(page: Page) {
-  const labels = [/accept/i, /agree/i, /reject/i, /show more/i, /read more/i, /expand/i];
-  for (const label of labels) {
-    const button = page.getByRole('button', { name: label }).first();
-    try {
-      await button.click({ timeout: 900 });
-      return `Clicked “${label.source.replace(/\\/g, '')}” control`;
-    } catch {
-      // Keep trying safe controls.
-    }
-  }
-  try {
-    await page.locator('summary').first().click({ timeout: 900 });
-    return 'Expanded a summary/details control';
-  } catch {
-    return undefined;
-  }
-}
-
-async function extractPage(page: Page): Promise<{ title: string; url: string; text: string; headings: string[]; links: LinkCandidate[] }> {
-  return page.evaluate(() => {
-    const bodyClone = document.body?.cloneNode(true) as HTMLElement | undefined;
-    bodyClone?.querySelectorAll('script, style, noscript, svg, canvas, iframe, nav, footer, aside, form').forEach((node) => node.remove());
-    const headings = Array.from(document.querySelectorAll('h1, h2, h3'))
-      .map((node) => (node.textContent ?? '').replace(/\s+/g, ' ').trim())
-      .filter(Boolean)
-      .slice(0, 18);
-    const links = Array.from(document.querySelectorAll('a[href]'))
-      .map((node) => ({
-        text: (node.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 90),
-        url: (node as HTMLAnchorElement).href
-      }))
-      .filter((link) => link.text && link.url.startsWith('http'))
-      .slice(0, 30);
-    const metaDescription = document.querySelector('meta[name="description"]')?.getAttribute('content') ?? '';
-    const text = [metaDescription, bodyClone?.innerText ?? document.body?.innerText ?? '']
-      .join('\n')
-      .replace(/\s+/g, ' ')
-      .trim();
-    return {
-      title: document.title || location.hostname,
-      url: location.href,
-      headings,
-      links,
-      text
-    };
-  });
-}
-
 export class ResearchOrchestrator {
   private sessions = new Map<string, ResearchSessionState>();
   private abortControllers = new Map<string, AbortController>();
-  private browsers = new Map<string, Browser>();
   private saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private static readonly SAVE_DEBOUNCE_MS = 400;
 
@@ -258,9 +136,8 @@ export class ResearchOrchestrator {
     }
 
     if (isActive) {
+      // Aborting the controller cancels every in-flight source fetch for this session.
       this.abortControllers.get(id)?.abort();
-      const browser = this.browsers.get(id);
-      if (browser) await browser.close().catch(() => undefined);
       session.status = 'cancelled';
       finalizeMetrics(session);
       logAgent(session.id, 'Session cancelled.', 'warn');
@@ -268,15 +145,14 @@ export class ResearchOrchestrator {
     this.cancelPendingSave(id);
     this.sessions.delete(id);
     this.abortControllers.delete(id);
-    this.browsers.delete(id);
     await removeSessionSnapshots([id]);
     return { removed: true, wasActive: isActive, fromMemory: true };
   }
 
   /**
-   * Keep the in-memory maps bounded. Without this the sessions / abortControllers /
-   * browsers maps grow for the lifetime of the process. We only ever evict *inactive*
-   * sessions (running ones own a browser + abort controller), oldest first.
+   * Keep the in-memory maps bounded. Without this the sessions / abortControllers maps
+   * grow for the lifetime of the process. We only ever evict *inactive* sessions
+   * (running ones own an abort controller), oldest first.
    */
   private evictStaleSessions() {
     const maxInMemory = Math.max(config.sessionHistoryLimit * 3, 24);
@@ -292,7 +168,6 @@ export class ResearchOrchestrator {
       this.cancelPendingSave(session.id);
       this.sessions.delete(session.id);
       this.abortControllers.delete(session.id);
-      this.browsers.delete(session.id);
       overflow -= 1;
     }
   }
@@ -367,7 +242,6 @@ export class ResearchOrchestrator {
       this.cancelPendingSave(session.id);
       this.sessions.delete(session.id);
       this.abortControllers.delete(session.id);
-      this.browsers.delete(session.id);
       removed.push(session.id);
     }
 
@@ -380,9 +254,6 @@ export class ResearchOrchestrator {
     if (!session) return undefined;
     this.abortControllers.get(id)?.abort();
     this.abortControllers.delete(id);
-    const browser = this.browsers.get(id);
-    if (browser) await browser.close().catch(() => undefined);
-    this.browsers.delete(id);
     session.status = 'cancelled';
     finalizeMetrics(session);
     this.emit(session);
@@ -493,37 +364,24 @@ export class ResearchOrchestrator {
     session.metrics.searchResults = searchResults.length;
     markStep(session.researchPlan, 'search', 'complete');
     session.status = 'ranking';
-    logAgent(session.id, `Ranked ${searchResults.length} candidate source${searchResults.length === 1 ? '' : 's'} and selected ${Math.min(searchResults.length, maxTabs)} for visible browsing.`);
+    logAgent(session.id, `Ranked ${searchResults.length} candidate source${searchResults.length === 1 ? '' : 's'} and selected ${Math.min(searchResults.length, maxTabs)} to read.`);
     this.emit(session);
     markStep(session.researchPlan, 'browse', 'running');
     session.status = 'running';
     this.emit(session);
 
-    const browser = await chromium.launch({ headless: config.agentBrowserHeadless });
-    this.browsers.set(session.id, browser);
-    let context: BrowserContext | undefined;
-
-    try {
-      const activeContext = await browser.newContext({
-        viewport: { width: 1365, height: 768 },
-        userAgent: config.userAgent
-      });
-      context = activeContext;
-      const queue = searchResults.slice(0, maxTabs);
-      const workers = Array.from({ length: Math.min(config.maxConcurrentTabs, queue.length) }, async () => {
-        while (queue.length > 0) {
-          const result = queue.shift();
-          if (!result) return;
-          this.assertNotCancelled(session, controller);
-          await this.runSourceAgent(session, activeContext, result, controller);
-        }
-      });
-      await Promise.allSettled(workers);
-    } finally {
-      if (context) await context.close().catch(() => undefined);
-      await browser.close().catch(() => undefined);
-      this.browsers.delete(session.id);
-    }
+    // Each "tab" is a source being read over plain HTTP; MAX_CONCURRENT_TABS bounds how
+    // many are in flight at once.
+    const queue = searchResults.slice(0, maxTabs);
+    const workers = Array.from({ length: Math.min(config.maxConcurrentTabs, queue.length) }, async () => {
+      while (queue.length > 0) {
+        const result = queue.shift();
+        if (!result) return;
+        this.assertNotCancelled(session, controller);
+        await this.runSourceAgent(session, result, controller);
+      }
+    });
+    await Promise.allSettled(workers);
 
     this.assertNotCancelled(session, controller);
     markStep(session.researchPlan, 'browse', 'complete');
@@ -540,7 +398,7 @@ export class ResearchOrchestrator {
     logAgent(session.id, 'Research complete.');
   }
 
-  private async runSourceAgent(session: ResearchSessionState, context: BrowserContext, result: SearchResult, controller: AbortController) {
+  private async runSourceAgent(session: ResearchSessionState, result: SearchResult, controller: AbortController) {
     const tab: TabState = {
       id: randomUUID(),
       agentName: AGENT_NAMES[session.tabs.length % AGENT_NAMES.length],
@@ -578,42 +436,6 @@ export class ResearchOrchestrator {
       return;
     }
 
-    const page = await context.newPage();
-    page.setDefaultTimeout(config.requestTimeoutMs);
-    const onFrameNavigated = (frame: Frame) => {
-      if (frame === page.mainFrame()) {
-        tab.url = frame.url();
-        tab.domain = safeHostname(frame.url());
-        tab.actions.push(action('navigate', 'Navigated', frame.url()));
-        this.emit(session);
-      }
-    };
-    page.on('framenavigated', onFrameNavigated);
-
-    // page.goto transparently follows 30x redirects at the network layer, so a public
-    // source can bounce the browser into an internal service before the post-goto
-    // re-check below ever sees the landed URL. Intercept every navigation (document)
-    // request and re-run the SSRF guard on each hop — including redirect targets — so an
-    // internal hop is aborted before its request is issued. This is best-effort: the DNS
-    // lookup inside assertSafeUrl is separate from the browser's own resolution, so a
-    // DNS-rebinding attacker who flips the record between the two windows can still slip
-    // through. The complete fix is to route the context through a proxy that enforces
-    // isPrivateAddress on the actual connect target for every hop; this interception
-    // closes the far more practical redirect-based SSRF window without breaking TLS/SNI.
-    const guardNavigation = async (route: Route, request: Request) => {
-      if (request.resourceType() !== 'document') {
-        await route.continue();
-        return;
-      }
-      try {
-        await assertSafeUrl(request.url());
-        await route.continue();
-      } catch {
-        await route.abort('blockedbyclient');
-      }
-    };
-    await page.route('**/*', guardNavigation);
-
     try {
       this.assertNotCancelled(session, controller);
       tab.status = 'navigating';
@@ -621,41 +443,30 @@ export class ResearchOrchestrator {
       tab.actions.push(action('navigate', 'Opening source', result.url));
       this.emit(session);
 
-      await assertSafeUrl(result.url);
-      await page.goto(result.url, { waitUntil: 'domcontentloaded', timeout: config.requestTimeoutMs });
-      // Redirect hops are already vetted by guardNavigation above; re-validate the landed
-      // URL as a best-effort backstop (see note there on the residual rebinding window).
-      await assertSafeUrl(page.url());
-      tab.title = (await page.title().catch(() => result.title)) || result.title;
-      tab.url = page.url();
-      tab.domain = safeHostname(tab.url);
-      tab.status = 'reading';
-      tab.progress = 0.32;
-      if (session.options.visualSnapshots) {
-        tab.screenshot = await captureScreenshot(page);
-        if (tab.screenshot) session.metrics.screenshotsCaptured += 1;
-        tab.actions.push(action('screenshot', 'Captured above-the-fold view'));
-      } else {
-        tab.actions.push(action('snapshot', 'Visual snapshots disabled in run profile'));
-      }
-      this.emit(session);
-
+      // fetchHtml follows redirects itself and runs the SSRF guard on every hop before
+      // requesting it, so a public source cannot bounce the read into an internal service.
+      const fetched = await fetchHtml(result.url, {
+        signal: controller.signal,
+        timeoutMs: config.requestTimeoutMs,
+        userAgent: config.userAgent,
+        onRedirect: (_from, to) => {
+          tab.url = to;
+          tab.domain = safeHostname(to);
+          tab.actions.push(action('navigate', 'Followed redirect', to));
+          this.emit(session);
+        }
+      });
       this.assertNotCancelled(session, controller);
-      tab.status = 'interacting';
-      const clickDetail = await dismissOrExpandSafeControls(page);
-      if (clickDetail) tab.actions.push(action('click', clickDetail));
-      else tab.actions.push(action('click', 'Focused the page surface without changing route'));
-      await page.mouse.wheel(0, 820).catch(() => undefined);
-      await page.waitForTimeout(520).catch(() => undefined);
-      if (session.options.visualSnapshots) {
-        tab.screenshot = await captureScreenshot(page);
-        if (tab.screenshot) session.metrics.screenshotsCaptured += 1;
-      }
-      tab.actions.push(action('scroll', 'Scrolled for more evidence'));
-      tab.progress = 0.52;
+      tab.url = fetched.url;
+      tab.domain = safeHostname(fetched.url);
+      tab.status = 'reading';
+      tab.progress = 0.4;
+      tab.actions.push(action('read', 'Fetched the page', `${Math.max(1, Math.round(fetched.bytes / 1024)).toLocaleString()} KB of HTML${fetched.truncated ? ' (truncated)' : ''}`));
       this.emit(session);
 
-      const extracted = await extractPage(page);
+      const extracted = extractPage(fetched.html, fetched.url);
+      tab.title = extracted.title || result.title;
+      if (!extracted.title) extracted.title = new URL(fetched.url).hostname;
       extracted.text = compactText(extracted.text, session.depth === 'deep' ? 22_000 : 14_000);
       tab.evidenceCount = Math.max(1, extracted.headings.length + Math.min(4, extracted.links.length));
       tab.readableChars = extracted.text.length;
@@ -666,7 +477,9 @@ export class ResearchOrchestrator {
       session.metrics.pagesRead += 1;
       this.emit(session);
 
-      const note = await summarizeSource(session.query, extracted, result, tab.id, session.options.includeVisualAnalysis ? tab.screenshot : undefined);
+      // Sources are read as text, with no renderer behind them, so there is no
+      // screenshot to hand the model; the note comes from the page text alone.
+      const note = await summarizeSource(session.query, extracted, result, tab.id);
       session.sources.push(note);
       await putCachedSource(session.queryFingerprint, result.url, note).catch(() => undefined);
       tab.summary = note.summary;
@@ -677,6 +490,16 @@ export class ResearchOrchestrator {
       tab.actions.push(action('summarize', 'Created source note', note.summary));
       this.emit(session);
     } catch (error) {
+      if (error instanceof NotHtmlError && !controller.signal.aborted) {
+        // A PDF, feed or download is not a failed run, just not something this reader
+        // handles: the tab says so and the session carries on without that source.
+        tab.status = 'complete';
+        tab.progress = 1;
+        tab.summary = `Skipped: ${error.message}.`;
+        tab.actions.push(action('read', 'Skipped a source that is not a web page', error.contentType || undefined));
+        this.emit(session);
+        return;
+      }
       if (controller.signal.aborted) {
         tab.status = 'error';
         tab.error = 'Cancelled before this tab finished.';
@@ -686,16 +509,12 @@ export class ResearchOrchestrator {
       }
       tab.actions.push(action('error', 'Tab agent stopped', tab.error));
       this.emit(session);
-    } finally {
-      page.off('framenavigated', onFrameNavigated);
-      await page.unroute('**/*', guardNavigation).catch(() => undefined);
-      await page.close().catch(() => undefined);
     }
   }
   private async runDemo(session: ResearchSessionState, controller: AbortController) {
     const steps = [
       { title: 'Cerebras inference docs', url: 'https://inference-docs.cerebras.ai', summary: 'Documents low-latency chat completions and multimodal image inputs for Gemma workflows.' },
-      { title: 'Playwright tab workspace', url: 'https://playwright.dev/docs/api/class-page', summary: 'A Playwright Page maps cleanly to a visible browser tab that Toji can navigate, scroll, screenshot, and summarize.' },
+      { title: 'Mozilla Readability', url: 'https://github.com/mozilla/readability', summary: 'Readability pulls the main article out of a fetched page, so each Toji source agent reads a page without rendering it.' },
       { title: 'Toji synthesis canvas', url: 'https://toji.local/demo', summary: 'The synthesis agent turns source notes into visual blocks, findings, and citations.' }
     ];
 
