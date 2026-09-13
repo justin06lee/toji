@@ -42,7 +42,6 @@ export const config = {
   maxConcurrentTabs: Math.max(1, numEnv('MAX_CONCURRENT_TABS', 3)),
   maxSearchQueries: Math.max(1, numEnv('MAX_SEARCH_QUERIES', 4)),
   sessionHistoryLimit: Math.max(1, numEnv('SESSION_HISTORY_LIMIT', 24)),
-  agentBrowserHeadless: boolEnv('AGENT_BROWSER_HEADLESS', true),
   enableVisualAnalysis: boolEnv('ENABLE_VISUAL_ANALYSIS', true),
   requestTimeoutMs: numEnv('AGENT_REQUEST_TIMEOUT_MS', 18_000),
   cacheTtlHours: Math.max(1, numEnv('SOURCE_CACHE_TTL_HOURS', 72)),

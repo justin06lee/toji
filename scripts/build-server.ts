@@ -7,18 +7,19 @@
 // signed-in `claude` from PATH. Bundling inlines everything the server needs into a
 // single ESM file, so only the packages below stay real packages on disk:
 //
-//   playwright                     launches its browser driver from files in the package
 //   @anthropic-ai/claude-agent-sdk yagami probes its version with require.resolve, so it
 //                                  must exist as a package — its platform binaries do not
 //                                  (electron-builder excludes them; see package.json)
 //   bufferutil / utf-8-validate    ws's optional native accelerators, deliberately absent
+//   canvas                         linkedom's optional peer, tried in a try/catch and
+//                                  shimmed when absent (research never draws)
 //
-// Everything else (express, ws, zod, dotenv, yagami, the ACP SDK, hono) is a build-time
-// input and lives in devDependencies.
+// Everything else (express, ws, zod, dotenv, yagami, the ACP SDK, hono, Readability,
+// linkedom) is a build-time input and lives in devDependencies.
 import { build } from 'esbuild';
 import { rm, stat } from 'node:fs/promises';
 
-const EXTERNAL = ['playwright', '@anthropic-ai/claude-agent-sdk', 'bufferutil', 'utf-8-validate'];
+const EXTERNAL = ['@anthropic-ai/claude-agent-sdk', 'bufferutil', 'utf-8-validate', 'canvas'];
 
 await rm('dist/server', { recursive: true, force: true });
 

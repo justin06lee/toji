@@ -28,7 +28,6 @@
     "start": "bun run start:server",
     "start:server": "tsx apps/agent-server/src/index.ts",
     "start:desktop": "electron apps/desktop/main.cjs",
-    "setup:browsers": "playwright install chromium",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
@@ -125,12 +124,12 @@
     "@anthropic-ai/claude-agent-sdk": "^0.3.243",
     "@ghostery/adblocker-electron": "2.18.2",
     "@justin06lee/byakugan": "^0.2.1",
-    "electron-chrome-web-store": "0.13.0",
-    "playwright": "1.61.1"
+    "electron-chrome-web-store": "0.13.0"
   },
   "devDependencies": {
     "@fontsource/poppins": "^5.2.7",
     "@justin06lee/yagami": "0.8.2",
+    "@mozilla/readability": "^0.6.0",
     "@tailwindcss/vite": "^4.3.1",
     "@types/cors": "2.8.19",
     "@types/express": "5.0.6",
@@ -148,6 +147,7 @@
     "esbuild": "^0.28.1",
     "express": "5.2.1",
     "jsdom": "^30.0.1",
+    "linkedom": "^0.18.13",
     "lucide-react": "1.21.0",
     "mediabunny": "^1.56.1",
     "motion": "^12.42.0",
