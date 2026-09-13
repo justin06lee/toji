@@ -12,6 +12,7 @@ const caps = (over: Partial<ModelCatalog['providers'][number]['capabilities']> =
   thinking: false,
   effort: false,
   streaming: 'tokens' as const,
+  serverTools: false,
   ...over
 });
 
