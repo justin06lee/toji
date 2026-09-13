@@ -144,8 +144,65 @@ export interface PasswordsFileImport {
   error?: 'no-vault' | 'unreadable';
 }
 
+/** A Toji container (profile) as the browser stores it. See gecko/lib/containers.ts. */
+export interface BridgeContainer {
+  id: string;
+  name: string;
+  color: string;
+  avatar?: string;
+  egress: 'direct' | 'tor';
+  ephemeral: boolean;
+  builtin?: boolean;
+  userContextId?: number;
+}
+
+/**
+ * Settings the Gecko browser owns (Firefox prefs and services), read and written
+ * through the bridge. In the Electron app these lived in localStorage.
+ */
+export interface BrowserSettings {
+  theme: 'light' | 'dark';
+  /** Top tab strip or Firefox's native vertical tabs. */
+  layout: 'top' | 'side';
+  bookmarksBar: 'pinned' | 'hover';
+  /** The default search engine's name, as Firefox's search service knows it. */
+  searchEngine: string;
+  searchEngines: { name: string; icon?: string }[];
+  vaultAutosave: boolean;
+  /** Keep the last 15 seconds for bug reports. */
+  replay: boolean;
+  adblock: boolean;
+}
+
+/** Where Toji's local agent server listens, and the per-launch token it requires. */
+export interface AgentServerInfo {
+  url: string;
+  token: string;
+}
+
 export interface TojiBridge {
   platform?: string;
+
+  // --- Gecko browser (window.toji is provided by the TojiPage JSWindowActor) ---
+  /** The agent server's base URL and token; api.ts sends `Authorization: Bearer <token>`. */
+  server?: () => Promise<AgentServerInfo | null>;
+  containers?: () => Promise<BridgeContainer[]>;
+  /** Replaces the whole list; removed containers and route changes are wiped by the browser. */
+  saveContainers?: (containers: BridgeContainer[]) => Promise<BridgeContainer[]>;
+  onContainersChanged?: (callback: (containers: BridgeContainer[]) => void) => () => void;
+  /** The container of the window this page is in (null in a picker window). */
+  windowContainer?: () => Promise<string | null>;
+  settings?: () => Promise<BrowserSettings>;
+  setSetting?: <K extends keyof BrowserSettings>(key: K, value: BrowserSettings[K]) => Promise<BrowserSettings>;
+  onSettingsChanged?: (callback: (settings: BrowserSettings) => void) => () => void;
+  /** Opens a URL in a tab of this window (next to this page). */
+  openTab?: (url: string, options?: { background?: boolean }) => void;
+  /** Opens one of Toji's own pages: 'settings', 'welcome', 'plans' (optionally carrying a question). */
+  openPage?: (page: 'settings' | 'welcome' | 'plans', options?: { query?: string; replace?: boolean }) => void;
+  /** Firefox's add-ons manager (extensions are Firefox add-ons now). */
+  openAddons?: () => void;
+  /** Welcome finished: remember it and turn this tab into a new tab page. */
+  finishOnboarding?: () => void;
   /** Resolves once macOS has answered — true only when Toji really is the default. */
   setDefaultBrowser?: () => Promise<boolean>;
   isDefaultBrowser?: () => Promise<boolean>;
