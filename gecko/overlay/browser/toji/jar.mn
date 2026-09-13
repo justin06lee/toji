@@ -5,6 +5,7 @@
 browser.jar:
 % content toji %content/toji/ contentaccessible=no
   content/toji/toji.css                  (content/toji.css)
+  content/toji/ask-process.js            (content/ask-process.js)
   content/toji/fonts/                    (content/fonts/*)
   content/toji/profiles/                 (content/profiles/*.svg)
 # Toji's pages, built by `bun run build:pages` (gecko/build.ts).

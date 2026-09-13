@@ -56,11 +56,30 @@ export class Marionette {
     });
   }
 
-  send(name: string, params: Record<string, unknown> = {}): Promise<any> {
+  /**
+   * Sends a command. Every command gets a deadline, so a check that would hang
+   * (a reply that never comes) fails instead, naming the command.
+   */
+  send(name: string, params: Record<string, unknown> = {}, timeoutMs = 120000): Promise<any> {
     const id = this.nextId++;
     const payload = JSON.stringify([0, id, name, params]);
     this.socket.write(`${Buffer.byteLength(payload)}:${payload}`);
-    return new Promise((ok, fail) => this.pending.set(id, { ok, fail }));
+    return new Promise((ok, fail) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        fail(new Error(`${name}: no reply within ${Math.round(timeoutMs / 1000)} s`));
+      }, timeoutMs);
+      this.pending.set(id, {
+        ok: (v) => {
+          clearTimeout(timer);
+          ok(v);
+        },
+        fail: (e) => {
+          clearTimeout(timer);
+          fail(e);
+        }
+      });
+    });
   }
 
   async session() {
@@ -86,7 +105,8 @@ export class Marionette {
     // An arrow function keeps the outer `arguments`, so the body reads them as usual.
     const wrapped = `const __done = arguments[arguments.length - 1];
       (async () => {\n${script}\n})().catch((e) => __done({ __tojiError: String(e) + (e && e.stack ? "\\n" + e.stack : "") }));`;
-    const r = await this.send('WebDriver:ExecuteAsyncScript', { script: wrapped, args });
+    // The script's own timeout rules; the command deadline only catches a lost reply.
+    const r = await this.send('WebDriver:ExecuteAsyncScript', { script: wrapped, args }, timeoutMs + 30000);
     const value = r?.value;
     if (value && typeof value === 'object' && '__tojiError' in value) throw new Error(`script error: ${value.__tojiError}`);
     return value as T;
