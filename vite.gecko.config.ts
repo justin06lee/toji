@@ -1,6 +1,6 @@
-// Toji's own pages for the Gecko browser: about:settings, about:welcome, about:plans and
-// about:start. The browser copies the output directory verbatim into
-// chrome://toji/content/pages/, so it must hold exactly the four HTML files and assets/,
+// Toji's own pages for the Gecko browser: about:settings, about:welcome, about:plans,
+// about:start and about:report. The browser copies the output directory verbatim into
+// chrome://toji/content/pages/, so it must hold exactly the five HTML files and assets/,
 // with relative URLs only and nothing fetched from the network.
 //
 //   bun run build:pages                 → dist/gecko-pages/
@@ -14,7 +14,7 @@ import tailwindcss from '@tailwindcss/vite';
 
 const repo = dirname(fileURLToPath(import.meta.url));
 const root = resolve(repo, 'apps/renderer');
-const PAGES = ['settings', 'welcome', 'plans', 'start'] as const;
+const PAGES = ['settings', 'welcome', 'plans', 'start', 'report'] as const;
 const SHARED_ASSETS = resolve(root, 'src/lib/publicAsset.ts');
 const BUNDLED_ASSETS = resolve(root, 'gecko/publicAsset.ts');
 

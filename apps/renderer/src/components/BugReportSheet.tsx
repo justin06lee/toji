@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { bridge, type BugReportAccount, type BugReportDraft, type BugReportFile, type BugReportResult } from '../lib/bridge';
-import { draftProblem, formatBytes, imageProblem, MAX_IMAGES, REPLAY_SECONDS } from '../lib/bugReport';
+import { draftProblem, formatBytes, imageProblem, MAX_IMAGES, REPLAY_SECONDS, routeLine } from '../lib/bugReport';
 import { FIELD, FIELD_BUTTON, FIELD_BUTTON_QUIET, FIELD_TEXTAREA } from '../lib/fieldStyles';
 import { hostOf } from '../lib/nav';
 import type { ReplayClip } from '../lib/replayRecorder';
@@ -466,14 +466,6 @@ function useObjectUrl(blob: Blob | null): string | null {
     return () => URL.revokeObjectURL(next);
   }, [blob]);
   return url;
-}
-
-/** Where the report will go, said before it goes. */
-function routeLine(account: BugReportAccount | null): string {
-  if (!account) return 'Checking your GitHub login…';
-  if (account.mode === 'direct') return `Files to ${account.repo} as @${account.login}. Reports are public.`;
-  const why = account.reason === 'no-access' && account.login ? ` @${account.login} can’t file there directly, so` : '';
-  return `${why ? `${why.trim()} it` : 'It'} finishes on GitHub’s issue form, in a new tab. Reports are public.`;
 }
 
 function RecordingPreview({ state, unavailable, onOpenSettings }: { state: ClipState; unavailable: BugReportRequest['unavailable']; onOpenSettings: () => void }) {

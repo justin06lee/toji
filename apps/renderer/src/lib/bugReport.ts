@@ -2,6 +2,8 @@
 // attached, and how GitHub's pages relate to a report in progress. Filing happens in the
 // main process (apps/desktop/bug-report.cjs), which is where the GitHub login lives.
 
+import type { BugReportAccount } from './bridge';
+
 /** How much the rolling recording keeps. */
 export const REPLAY_SECONDS = 15;
 
@@ -72,4 +74,12 @@ export function issuePageState(url: string | null | undefined, formUrl: string):
   if (path === `${repo}/issues/new`) return { state: 'form' };
   const filed = new RegExp(`^${repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/issues/(\\d+)$`).exec(path);
   return filed ? { state: 'filed', number: Number(filed[1]) } : { state: 'elsewhere' };
+}
+
+/** Where the report will go, said before it goes (the sheet's and about:report's footer). */
+export function routeLine(account: BugReportAccount | null): string {
+  if (!account) return 'Checking your GitHub login…';
+  if (account.mode === 'direct') return `Files to ${account.repo} as @${account.login}. Reports are public.`;
+  const why = account.reason === 'no-access' && account.login ? ` @${account.login} can’t file there directly, so` : '';
+  return `${why ? `${why.trim()} it` : 'It'} finishes on GitHub’s issue form, in a new tab. Reports are public.`;
 }
