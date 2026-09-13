@@ -98,6 +98,31 @@ export interface VaultStatus {
 
 export type { BookmarkImportError, BrowserProfile, ImportBrowser, ImportResult, ImportedBookmark, PasswordImportError };
 
+/**
+ * What importing a browser returns. The Gecko browser files bookmarks straight into
+ * Firefox's own bookmarks, so `items` stays empty there and `count` says how many went
+ * in: null when Firefox's migrator did it and the number is unknown. Electron hands the
+ * bookmarks back in `items` and leaves `count` out.
+ */
+export type BrowserImportResult = Omit<ImportResult, 'bookmarks'> & { bookmarks: ImportResult['bookmarks'] & { count?: number | null } };
+
+/** An exported bookmarks file: items in Electron, a count under Gecko (see BrowserImportResult). */
+export interface BookmarksFileImport {
+  canceled: boolean;
+  bookmarks: ImportedBookmark[];
+  count?: number | null;
+}
+
+/** The rolling recording as the Gecko browser hands it to about:report. */
+export interface BridgeReplayClip {
+  /** video/mp4 or video/webm. */
+  type: string;
+  data: Uint8Array;
+  seconds: number;
+  /** The window at the moment the clip was taken. */
+  poster?: { type: string; data: Uint8Array };
+}
+
 /** Who files bug reports from this machine, and so which route they take (see bug-report.cjs). */
 export interface BugReportAccount {
   mode: 'direct' | 'form';
@@ -216,9 +241,12 @@ export interface TojiBridge {
 
   // --- import from other browsers ---
   importBrowsers?: () => Promise<ImportBrowser[]>;
-  /** Bookmarks come back; passwords go straight into the vault under `containerId`. */
-  importBrowser?: (options: { browser: string; profile: string; containerId: string }) => Promise<ImportResult>;
-  importBookmarksFile?: () => Promise<{ canceled: boolean; bookmarks: ImportedBookmark[] }>;
+  /**
+   * Passwords go straight into the vault under `containerId`. Bookmarks come back in
+   * Electron; under Gecko they go into Firefox's bookmarks and only a count comes back.
+   */
+  importBrowser?: (options: { browser: string; profile: string; containerId: string }) => Promise<BrowserImportResult>;
+  importBookmarksFile?: () => Promise<BookmarksFileImport>;
   importPasswordsFile?: (containerId: string) => Promise<PasswordsFileImport>;
   /** macOS: the Full Disk Access pane, where Toji can be allowed to read Safari's data. */
   openFullDiskAccess?: () => Promise<void>;
@@ -275,10 +303,26 @@ export interface TojiBridge {
   onReportBug?: (callback: () => void) => () => void;
   /** A capture id for this window's own contents, for the rolling recording. Valid a few seconds. */
   replaySourceId?: () => Promise<string | null>;
-  /** A still of this window as it is right now. */
+  /**
+   * A still of this window as it is right now. On about:report (Gecko) it is the still the
+   * browser took when the report was opened, before the report page existed.
+   */
   captureWindow?: () => Promise<{ type: string; data: Uint8Array } | null>;
   bugReportAccount?: (options?: { refresh?: boolean }) => Promise<BugReportAccount>;
+  /**
+   * Under Gecko a form-route result means the browser has already opened GitHub's form in
+   * a new tab, with a tray that attaches the files; about:report only has to close.
+   */
   submitBugReport?: (draft: BugReportDraft) => Promise<BugReportResult>;
+  /** Gecko: open about:report for the window this page is in (Settings › Bug reports). */
+  openReport?: () => void;
+  /** Gecko: close about:report's own tab. */
+  closeReport?: () => void;
+  /**
+   * Gecko: the window's last 15 seconds, kept from before about:report opened; null when
+   * there is none. Missing when the browser keeps no recording at all.
+   */
+  replayClip?: () => Promise<BridgeReplayClip | null>;
   /** Drop a waiting report's files onto GitHub's issue form in one of this window's tabs. */
   attachBugReport?: (webContentsId: number, reportId: string) => Promise<BugReportAttach>;
   /** Start a native drag of one of a waiting report's files, to drop onto the form by hand. */

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { draftProblem, formatBytes, imageProblem, issuePageState, MAX_IMAGE_BYTES } from './bugReport';
+import { draftProblem, formatBytes, imageProblem, issuePageState, MAX_IMAGE_BYTES, routeLine } from './bugReport';
 
 describe('imageProblem', () => {
   test('takes the image types GitHub shows inline, up to its size limit', () => {
@@ -42,5 +42,14 @@ describe('issuePageState', () => {
     expect(issuePageState('https://github.com/someone/else/issues/3', form)).toEqual({ state: 'elsewhere' });
     expect(issuePageState('https://evil.test/justin06lee/toji/issues/new', form)).toEqual({ state: 'elsewhere' });
     expect(issuePageState(null, form)).toEqual({ state: 'elsewhere' });
+  });
+});
+
+describe('routeLine', () => {
+  test('says where the report goes before it goes', () => {
+    expect(routeLine(null)).toMatch(/Checking/);
+    expect(routeLine({ mode: 'direct', repo: 'justin06lee/toji', login: 'ada' })).toBe('Files to justin06lee/toji as @ada. Reports are public.');
+    expect(routeLine({ mode: 'form', repo: 'justin06lee/toji', reason: 'no-login' })).toBe('It finishes on GitHub’s issue form, in a new tab. Reports are public.');
+    expect(routeLine({ mode: 'form', repo: 'justin06lee/toji', login: 'ada', reason: 'no-access' })).toBe('@ada can’t file there directly, so it finishes on GitHub’s issue form, in a new tab. Reports are public.');
   });
 });

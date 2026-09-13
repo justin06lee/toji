@@ -29,7 +29,7 @@ import { hasBrowserSettings, setBrowserSetting, useBrowserSettings } from '../li
 import { publicAsset } from '../lib/publicAsset';
 import { BOOKMARKS_BAR_EVENT, bookmarksBarPinned, setBookmarksBarPinned } from './BookmarksBar';
 import { PROFILE_AVATARS, newContainer, type Container, type Egress } from '../lib/containers';
-import { describeBrowser, describeImport, describePasswordsFile, planProfiles, plural, type ImportMessage, type ImportTotals } from '../lib/browserImport';
+import { addBookmarkCount, describeBookmarksFile, describeBrowser, describeImport, describePasswordsFile, planProfiles, plural, type ImportMessage, type ImportTotals } from '../lib/browserImport';
 import { VaultUnavailable } from './VaultBar';
 import { ProfileAvatar } from './ProfileAvatar';
 import { SEARCH_ENGINES, type SearchEngineId } from '../lib/nav';
@@ -173,10 +173,14 @@ export function WelcomeView({
     }
   };
 
+  // The Gecko browser files imported bookmarks into Firefox's own bookmarks and answers
+  // with a count; the Electron app hands them back to be kept by the agent server.
+  const nativeBookmarks = hasBrowserSettings();
+
   /**
-   * Everything a browser has: bookmarks into the store, passwords into the vault (in the
-   * main process — they never come through here), and with several profiles, a Toji
-   * profile for each.
+   * Everything a browser has: bookmarks into the store (or, under Gecko, the browser's
+   * bookmarks), passwords into the vault (in the browser — they never come through here),
+   * and with several profiles, a Toji profile for each.
    */
   const doImport = async (browser: ImportBrowser) => {
     setImporting(browser.id);
@@ -184,16 +188,20 @@ export function WelcomeView({
     try {
       const plan = planProfiles(browser.profiles, containersRef.current, containerId);
       if (plan.created > 0) onContainersChange(plan.containers);
-      const totals: ImportTotals = { bookmarks: 0, passwords: 0, profiles: plan.created };
+      const totals: ImportTotals = { bookmarks: 0, passwords: 0, profiles: plan.created, ...(nativeBookmarks ? { nativeBookmarks: true } : {}) };
       for (const target of plan.targets) {
         const result = await bridge().importBrowser?.({ browser: browser.id, profile: target.profile.dir, containerId: target.containerId });
         if (!result) throw new Error('import is only available in the Toji app');
-        const items = target.prefixFolders
-          ? result.bookmarks.items.map((b) => ({ ...b, folder: b.folder ? `${target.profile.name} / ${b.folder}` : target.profile.name }))
-          : result.bookmarks.items;
-        if (items.length) {
-          totals.bookmarks += (await addBookmarks(items)).added;
-          setImports((n) => n + 1);
+        if (nativeBookmarks) {
+          totals.bookmarks = addBookmarkCount(totals.bookmarks, result.bookmarks);
+        } else {
+          const items = target.prefixFolders
+            ? result.bookmarks.items.map((b) => ({ ...b, folder: b.folder ? `${target.profile.name} / ${b.folder}` : target.profile.name }))
+            : result.bookmarks.items;
+          if (items.length) {
+            totals.bookmarks = (totals.bookmarks ?? 0) + (await addBookmarks(items)).added;
+            setImports((n) => n + 1);
+          }
         }
         totals.passwords += result.passwords.added;
         totals.bookmarkError ??= result.bookmarks.error;
@@ -213,6 +221,10 @@ export function WelcomeView({
     try {
       const picked = await bridge().importBookmarksFile?.();
       if (!picked || picked.canceled) return;
+      if (nativeBookmarks) {
+        setImportMsg(describeBookmarksFile(picked.count ?? null));
+        return;
+      }
       const added = picked.bookmarks.length ? (await addBookmarks(picked.bookmarks)).added : 0;
       if (added) setImports((n) => n + 1);
       setImportMsg(picked.bookmarks.length ? { text: `Imported ${plural(added, 'bookmark')} from the file.`, tone: 'ok' } : { text: 'No bookmarks found in that file.', tone: 'warn' });
@@ -397,7 +409,8 @@ export function WelcomeView({
           )}
         </div>
         )}
-        <BookmarksList onOpenUrl={onOpenUrl} refreshKey={imports} />
+        {/* Under Gecko imported bookmarks live in the browser's own bookmarks, not this list. */}
+        {!nativeBookmarks && <BookmarksList onOpenUrl={onOpenUrl} refreshKey={imports} />}
       </Section>
 
       <div className="mt-10 flex justify-center">
@@ -1634,10 +1647,16 @@ function BrowsingSettings() {
 /** The rolling recording, and where a report goes. */
 function BugReportSettings({ onReportBug }: { onReportBug?: () => void }) {
   // The rolling recording is a browser setting under the Gecko bridge and a localStorage
-  // key in the Electron app. Filing a report needs the Electron app's report sheet
-  // (onReportBug); where that is missing the row says so instead of offering a dead button.
+  // key in the Electron app. Filing a report opens the Electron app's report sheet
+  // (onReportBug), or under Gecko the browser's about:report page (openReport); where
+  // neither is there the row says so instead of offering a dead button.
   const settings = useBrowserSettings();
   const viaBrowser = hasBrowserSettings();
+  const toji = bridge();
+  const geckoReport = viaBrowser && Boolean(toji.submitBugReport);
+  // Under Gecko the switch only means something when the browser keeps a recording to
+  // hand to the report page (replayClip); the Electron app records in this renderer.
+  const showReplay = !viaBrowser || Boolean(toji.replayClip);
   const [localOn, setLocalOn] = useState(() => (viaBrowser ? true : replayEnabled()));
   const [account, setAccount] = useState<BugReportAccount | null>(null);
   const hasAccount = Boolean(bridge().bugReportAccount);
@@ -1657,7 +1676,8 @@ function BugReportSettings({ onReportBug }: { onReportBug?: () => void }) {
     if (viaBrowser) void setBrowserSetting('replay', next);
     else setReplayEnabled(next);
   };
-  const canReport = isElectron() && Boolean(onReportBug);
+  const canReport = geckoReport ? Boolean(toji.openReport) : isElectron() && Boolean(onReportBug);
+  const report = geckoReport ? () => toji.openReport?.() : onReportBug;
   const shortcut = bridge().platform === 'darwin' ? '⌥⇧I' : 'Alt+Shift+I';
   const route = !hasAccount
     ? ''
@@ -1670,6 +1690,7 @@ function BugReportSettings({ onReportBug }: { onReportBug?: () => void }) {
   return (
     <Section icon={<Bug size={16} />} title="Bug reports">
       <div className="divide-y divide-black/[0.06] rounded-xl border border-black/10 px-3 dark:divide-white/[0.08] dark:border-white/10">
+        {showReplay && (
         <div className={row}>
           <div className="min-w-0">
             <div className="text-[13px]">Keep the last {REPLAY_SECONDS} seconds</div>
@@ -1685,15 +1706,22 @@ function BugReportSettings({ onReportBug }: { onReportBug?: () => void }) {
           </div>
           <Switch checked={on && canRecord} disabled={!canRecord} onChange={setOn} label={`Keep the last ${REPLAY_SECONDS} seconds`} />
         </div>
+        )}
         <div className={row}>
           <div className="min-w-0">
             <div className="text-[13px]">Report a bug</div>
             <p className="text-[12px] text-neutral-500">
-              {canReport ? `${route ? `${route} ` : ''}Also in the Help menu, or ${shortcut}.` : isElectron() ? 'Reporting a bug from this page isn’t available in this version yet.' : notHere()}
+              {!canReport
+                ? isElectron()
+                  ? 'Reporting a bug from this page isn’t available in this version yet.'
+                  : notHere()
+                : geckoReport
+                  ? route || 'Opens a page to write the report, with images of what you saw.'
+                  : `${route ? `${route} ` : ''}Also in the Help menu, or ${shortcut}.`}
             </p>
           </div>
           {canReport && (
-            <button type="button" className={FIELD_BUTTON_QUIET} onClick={onReportBug}>
+            <button type="button" className={FIELD_BUTTON_QUIET} onClick={report}>
               Report a bug…
             </button>
           )}
