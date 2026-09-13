@@ -25,6 +25,7 @@ import { addFact, listFacts, removeFact, readPinned, writePinned, PINNED_CAPS } 
 import { listBookmarks, addBookmarks, removeBookmark } from './lib/bookmarks.js';
 import { addReference, listReferences, removeReference } from './lib/references.js';
 import { librarianDigest, pinnedDigest } from './agents/librarianAgent.js';
+import { apiAuth, hostGuard, upgradeRefusal, type SecurityOptions } from './lib/security.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import type { UserSettings } from './types.js';
@@ -400,6 +401,9 @@ routes.get('/api/page/stream', expensiveRateLimit, async (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Accel-Buffering', 'no');
+  // This page may be loaded with ?token= in its URL; it must never hand that URL to the
+  // image hosts it pulls from.
+  res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader(
     'Content-Security-Policy',
     "default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; font-src https: data: https://fonts.gstatic.com; base-uri 'none'; form-action 'none'"
@@ -614,9 +618,21 @@ export interface AppOptions {
   rendererDir?: string;
 }
 
-export function createApp(options: AppOptions = {}) {
+export function createApp(options: AppOptions, security: SecurityOptions) {
   const app = express();
+  // First, ahead of CORS preflights and everything else: a request that does not
+  // address this server by a loopback name (a DNS-rebinding page) gets nothing.
+  app.use(hostGuard(security));
   app.use(corsMiddleware);
+  // With a token configured, /health stays open to anything on loopback but says only
+  // that the server is up; the full status needs the token, at /api/status.
+  if (security.token) {
+    app.get('/health', (_req, res) => {
+      res.json({ ok: true, app: `${config.appName} agent server` });
+    });
+  }
+  // Checked before bodies are parsed, so an unauthenticated upload is never read.
+  app.use(apiAuth(security));
   // Limit is generous because the web agent's vision step posts a JPEG screenshot
   // (a base64 data URI) alongside the page's elements.
   app.use(express.json({ limit: '12mb' }));
@@ -654,6 +670,8 @@ export interface StartOptions extends AppOptions {
   port: number;
   /** Always loopback in production; exposed for completeness, not configuration. */
   host?: string;
+  /** TOJI_SERVER_TOKEN: when set, /api/* and the /ws upgrade require it (lib/security.ts). */
+  token?: string;
 }
 
 export interface RunningServer {
@@ -664,7 +682,10 @@ export interface RunningServer {
 }
 
 export async function startServer(options: StartOptions): Promise<RunningServer> {
-  const server = http.createServer(createApp(options));
+  // The Host guard needs the bound port, which exists only once listen() completes.
+  let boundPort = 0;
+  const security: SecurityOptions = { token: options.token, port: () => boundPort };
+  const server = http.createServer(createApp(options, security));
 
   // The event stream is wired by hand rather than with ws's { server, path } option:
   // under Bun that route answers a refused handshake with a malformed status line, and
@@ -676,6 +697,8 @@ export async function startServer(options: StartOptions): Promise<RunningServer>
   });
   server.on('upgrade', (req, socket, head) => {
     socket.on('error', () => undefined);
+    const refusal = upgradeRefusal(req, security);
+    if (refusal) return rejectUpgrade(socket, refusal.status, refusal.reason);
     const pathname = (req.url ?? '/').split('?')[0];
     if (pathname !== '/ws') return rejectUpgrade(socket, 400, 'Bad Request');
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
@@ -695,11 +718,11 @@ export async function startServer(options: StartOptions): Promise<RunningServer>
     server.listen(options.port, options.host ?? '127.0.0.1');
   });
   const address = server.address();
-  const port = typeof address === 'object' && address ? address.port : options.port;
+  boundPort = typeof address === 'object' && address ? address.port : options.port;
 
   return {
     server,
-    port,
+    port: boundPort,
     close: () =>
       new Promise<void>((resolve) => {
         for (const client of wss.clients) client.terminate();

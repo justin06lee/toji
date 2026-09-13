@@ -86,6 +86,11 @@ const AGENT_CHOICES = new Set(['off', 'local', 'cerebras', 'yagami', 'toji']);
 
 const rendererDirEnv = process.env.TOJI_RENDERER_DIR?.trim();
 
+// Read once, then taken out of the environment: the CLIs yagami spawns (and whatever
+// they run) inherit process.env, and none of them has any business with this secret.
+const serverToken = process.env.TOJI_SERVER_TOKEN?.trim() || undefined;
+delete process.env.TOJI_SERVER_TOKEN;
+
 export const config = {
   appName: 'Toji',
   isCompiled,
@@ -115,6 +120,9 @@ export const config = {
   // The process that spawned this server. When it disappears the server exits, so a
   // crashed browser never leaves an orphaned sidecar holding a port.
   parentPid: pidEnv('TOJI_PARENT_PID'),
+  // When set, /api/* and the /ws upgrade require `Authorization: Bearer <token>`
+  // (GET /api/page/stream may pass ?token= instead). See lib/security.ts.
+  serverToken,
   searchProvider: (process.env.SEARCH_PROVIDER ?? 'duckduckgo') as 'duckduckgo' | 'brave',
   braveSearchApiKey: process.env.BRAVE_SEARCH_API_KEY ?? '',
   demoModeEnabled: boolEnv('DEMO_MODE_ENABLED', true),

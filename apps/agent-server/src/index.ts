@@ -20,6 +20,8 @@ import { startServer } from './server.js';
 //   TOJI_PARENT_PID    exit once this process is gone (polled every 2 s)
 //   TOJI_RENDERER_DIR  a built renderer to serve as static files (optional)
 //   TOJI_ENV_FILE      a .env file to load instead of ./.env.local and ./.env (optional)
+//   TOJI_SERVER_TOKEN  when set, /api/* and /ws require "Authorization: Bearer <token>";
+//                      GET /api/page/stream also takes ?token= (see lib/security.ts)
 
 // Fail loudly if the port is taken. Otherwise Toji silently never binds and the
 // renderer (dev + packaged) ends up talking to whatever else is on this port —
@@ -96,7 +98,7 @@ try {
 // only be routed to its owning provider once the catalog knows who owns it.
 warmCatalog();
 
-const running = await startServer({ port: config.port, rendererDir: rendererDir() }).catch((error: unknown) => {
+const running = await startServer({ port: config.port, rendererDir: rendererDir(), token: config.serverToken }).catch((error: unknown) => {
   if (isAddrInUse(error)) reportPortConflict();
   throw error;
 });
@@ -110,3 +112,4 @@ running.server.on('error', (err: NodeJS.ErrnoException) => {
 process.stdout.write(`TOJI_SERVER_READY ${JSON.stringify({ port: running.port })}\n`);
 console.error(`[toji] agent server running at http://127.0.0.1:${running.port}`);
 console.error(`[toji] inference mode: ${agentAvailable() ? liveModelName() : 'demo fallback (no agent)'}`);
+console.error(`[toji] API auth: ${config.serverToken ? 'bearer token required' : 'off (no TOJI_SERVER_TOKEN)'}`);
