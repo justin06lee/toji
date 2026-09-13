@@ -293,7 +293,7 @@ bundles into `resource:///modules/toji/lib/*.sys.mjs`. No C++.
 | 2 | Containers, one window = one profile, picker, ephemeral wipe, clear | `feat/gecko-containers` | done (`gecko/test/phase2.ts`; tag `feat-gecko-containers`) |
 | 3 | Tor per container, kill switch, onion routing, Tor UI, `make tor-check` | `feat/gecko-containers` | done in the browser (`gecko/test/tor-browser.ts`; tag `feat-gecko-containers`); Tor UI not yet checked |
 | 4 | Styling and extras on native widgets; Settings, Welcome, Plans | `feat/gecko-containers` | pages done (`gecko/test/phase4.ts`; tag `feat-gecko-containers`); toolbar styling and extras not yet checked |
-| 5 | Agent server as compiled sidecar; AI pages; web agent; spotlight | | |
+| 5 | Agent server as compiled sidecar; AI pages; web agent; spotlight | `feat/gecko-agent` | done (`gecko/test/phase5.ts`, `--live` for the model-backed checks; tag `feat-gecko-agent`) |
 | 6 | Passwords, imports, uBlock Origin | | |
 | 7 | Bug reports, shortcuts, default browser, links from other apps | | |
 | 8 | Data migration, retire Electron | | |
@@ -307,9 +307,9 @@ State per item: — not started · WIP · works · works differently · dropped 
 | Profiles | Personal, Work, Shopping, Private, Onion, custom; colours, avatars, ephemeral wipe, clear | WIP — picker, one window = one container (⌘T included), Private window, isolation, wipe on close and Clear verified; custom containers, colours and avatars not yet checked |
 | Tor | managed/external tor, bootstrap UI, fail-closed, per-container circuits, NEWNYM, .onion auto-route, hold-to-Tor | WIP — managed tor, fail-closed (tor off and tor failed), per-container circuits with different exits and .onion verified; external tor, bootstrap UI, NEWNYM, .onion auto-route from a direct window and hold-to-Tor not yet checked |
 | Passwords | encrypted, container-scoped, exact-origin fill, save bubble, autosave, generator, CSV + browser import, agent-safe | — |
-| Agent | screenshot loop, spotlight, Option tap, cursor, tab marks, step limit, dropped files, reference docs, memory/librarian, research sub-agent | — |
+| Agent | screenshot loop, spotlight, Option tap, cursor, tab marks, step limit, dropped files, reference docs, memory/librarian, research sub-agent | WIP — a run presses a button on a page end to end (screenshot, model through the agent server, synthesized input), with the spotlight and cursor; dropped files, reference docs, memory/librarian, research sub-agent, Option tap and step limit not yet checked |
 | Agent backends | yagami CLIs, Cerebras, OpenAI-compatible, Toji plan (billing not wired) | — |
-| AI answer pages | Shift+Enter / wand, streamed with sources, cached, follows theme | — |
+| AI answer pages | Shift+Enter / wand, streamed with sources, cached, follows theme | WIP — a question streams back with its sources under `toji://ask?q=…`, token kept in the parent (`phase5.ts --live`); Shift+Enter, the wand, caching and theme not yet checked |
 | Omnibox | engine choice, long-URL fade, star, vault fill, Go/Tor button | — |
 | Bookmarks | ⌘D, pinned or hover bar, imports | — |
 | Tabs | top/side, groups with colours, drag reorder, long-press new-tab menu, background tabs, audio/mute, agent indicator, open/close animation | — |
@@ -491,9 +491,85 @@ State per item: — not started · WIP · works · works differently · dropped 
   `gecko/test/phase4.ts` (new) covers Toji's pages; `tor-browser.ts` also checks that
   each container window holds exactly its one tab (an earlier run saw extra tabs appear
   after tor started).
+- More page fixes, found by new `phase4.ts` checks (now 16):
+  - **`Services.search` doesn't exist in Firefox 153** (checked in the running build: of
+    every `Services.<name>` Toji uses, it was the only one missing). The search service
+    is `SearchService` from `moz-src:///toolkit/components/search/SearchService.sys.mjs`,
+    with `SearchService.CHANGE_REASON.USER`. Settings' engine list and engine choice
+    were failing on it.
+  - **`engine.getIconURL()` is async** in 153; the settings reply carried Promises and
+    couldn't be cloned to the page. The icons are awaited first.
+  - **Plans and Welcome came up empty** when opened soon after launch: `window.toji
+    .server()` waited only 5 s for the sidecar, then the page fell back to no server.
+    It now waits up to 30 s (and starts the server if it isn't running). The sidecar
+    itself was fine — ready, `/health` 200, plans served.
 - Phases 2–4 merged to master (tag `feat-gecko-containers`). The phase 5–7 code is in
   the same layer and loads without startup errors, but none of it is verified yet.
 
-**Next:** phase 5 — the agent server sidecar (it should also fill Plans' tiers), AI
-answer pages, the web agent and its spotlight; then the vault, imports and uBlock
-Origin (6), and bug reports, shortcuts, default browser and links from other apps (7).
+### 2026-09-13 — phase 5 under way
+
+- The agent server sidecar works in the built browser: ready within the page wait,
+  `/health` 200, `/api/*` answers 401 without this launch's token, `/api/agents` finds
+  Claude Code, Codex, OpenCode and Gemini on this machine. It exits within its 2 s
+  parent check after the browser quits.
+- **toji: pages never loaded.** A runtime-registered protocol handler
+  (`Services.io.registerProtocolHandler`) exists only in the process that registered it
+  — nothing passes it to content processes. A content process that doesn't know
+  `toji:` gives it the unknown-scheme flags, which include `URI_DOES_NOT_RETURN_DATA`,
+  so `nsContentUtils::IsExternalProtocol` says "another app's protocol" and the tab's
+  docshell sets the navigation up as an external hand-off. The load started and then
+  stalled with no error, no console message and no dialog; the tab stayed
+  `about:blank`. (Parent-initiated loads go through the content docshell too, so
+  loading from chrome didn't help.)
+  Fix, in two parts: `TojiAsk.init` loads a process script
+  (`chrome://toji/content/ask-process.js`, via `Services.ppmm.loadProcessScript`) into
+  every content process, present and future, which registers `toji:` there with the
+  same flags. And that content-side handler has to build channels: with the document
+  channel, the parent opens the real channel (`AskProtocol`), then the tab's process
+  makes a matching *child* channel for the same address and attaches it to the
+  parent's — for the error pages and for the agent server's HTTP stream alike (probed:
+  both asked the content handler for a top-level document channel). `channelFor()`
+  builds both sides; the content side gets the server's address through
+  `Services.ppmm.sharedData` (set and flushed by the parent just before), never the
+  token — its child sends no request of its own, and one that did would get a 401.
+- **Phase 5's no-model checks pass** — `gecko/test/phase5.ts`, all 7: the server
+  starts and answers `/health`, refuses the API without the token, `/api/agents`
+  answers; `toji://nothing` shows Toji's error page under its own address;
+  `toji://ask?q=` (an empty question — the server answers with its blank page, no
+  model call) reaches the agent server and keeps its `toji://ask` address; a web page
+  can't navigate to `toji:`; the agent spotlight opens.
+- Test harness: every Marionette command now has a deadline (2 min, or an async
+  script's own timeout plus 30 s), so a hang fails the check and names the command.
+  `gecko/test/phase5.ts` (new) covers the server, `toji:`, and the spotlight; the live
+  answer page runs only with `--live`, since it sends a question to the configured
+  model. The default agent choice is still "toji" (the Toji plan, billing not wired),
+  which sends answers to about:plans; a live check needs a CLI backend chosen.
+
+- **Live answer page verified** (`phase5.ts --live`, a throwaway profile switched to
+  the coding CLIs through `PATCH /api/settings`): the question streams back ("The
+  capital of France is Paris…") under `toji://ask?q=…`, no token in the address.
+- **The web agent's clicks never reached the page.** The run log showed nothing wrong;
+  the page's own event log showed not a single mouse event. Two defects:
+  - **`ownerGlobal` is gone in Firefox 153** — `Node.webidl` has
+    `[ChromeOnly] documentGlobal` instead, and Firefox's own code uses that. Toji read
+    `ownerGlobal` in 13 places, all `undefined`: the agent's cursor (every click threw
+    before its press), the spotlight's live log (`_render` skips a missing window, so it
+    silently never updated), the vault's save bubble and key button, the vault's
+    visibility check in pages, a startup handler, and an opener fallback. All now use the
+    standard `ownerDocument.defaultView`.
+  - **The loop swallowed action errors** (`catch {}`, "the next screenshot shows what
+    happened"), so the model was told a click happened and kept retrying. A failed action
+    now goes to the run log and the model's history, and its stack to the console.
+  The actor's own input was fine throughout: a direct press/release clicked, and Enter
+  and Space activate a focused button.
+
+- **Agent run verified** (`phase5.ts --live`): goal "Click the button labeled 'Press
+  me'" on a local page; the page logged `mousedown`, `mouseup` and `click` on the
+  button and its title turned "Pressed". Phases 2 and 4 rechecked after the
+  `ownerGlobal` change: all pass.
+- Phase 5 merged to master (tag `feat-gecko-agent`).
+
+**Next:** phase 6 — the vault, imports (bookmarks and passwords from files; importing
+Chrome's passwords reads the user's real data and brings up a Keychain prompt, so it
+waits for the user's go-ahead) and uBlock Origin; then bug reports, shortcuts, default
+browser and links from other apps (7).

@@ -125,6 +125,21 @@ try {
     done({ before: before.map(c => c.id), after: after.map(c => c.id) });`);
   say(['personal', 'work', 'shopping', 'private', 'onion'].every((id) => trip.before.includes(id)), 'containers() lists the built-ins', trip.before.join(', '));
   say(trip.after.join(',') === trip.before.join(','), 'saveContainers(containers()) keeps the same list', trip.after.join(', '));
+  const settings = await m.execAsync<{ engines: string[]; current: string }>(`
+    const done = arguments[0];
+    const s = await window.toji.settings();
+    done({ engines: s.searchEngines.map(e => e.name), current: s.searchEngine });`);
+  say(settings.engines.length > 0 && settings.current === 'DuckDuckGo', 'settings() lists the search engines, DuckDuckGo first', `${settings.current} of ${settings.engines.join(', ')}`);
+
+  // Plans' tiers come from the agent server; the page must wait for it.
+  await m.navigate('about:plans');
+  let plansText = '';
+  for (let i = 0; i < 60 && !/\bPro\b/.test(plansText); i++) {
+    await Bun.sleep(500);
+    plansText = await m.exec<string>('return document.body ? document.body.innerText : ""');
+  }
+  say(/\bPro\b/.test(plansText) && /\bMax\b/.test(plansText), 'about:plans shows the plan tiers from the agent server');
+  await shot('plans-tiers');
 
   // 3. New tabs open the start page.
   await m.context('chrome');

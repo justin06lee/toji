@@ -290,7 +290,7 @@ function wrapTabbrowser(win) {
       const effect = getDropEffect.call(this, event);
       if (effect === "move" || effect === "copy") {
         const source = event.dataTransfer.mozGetDataAt(TAB_DROP_TYPE, 0);
-        const sourceWin = source?.documentGlobal ?? source?.ownerGlobal;
+        const sourceWin = source?.documentGlobal ?? source?.ownerDocument?.defaultView;
         if (
           sourceWin &&
           sourceWin !== win &&

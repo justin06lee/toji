@@ -362,7 +362,7 @@ class Vault {
   }
 
   async #updateKeyButton(browser) {
-    const win = browser?.ownerGlobal;
+    const win = browser?.ownerDocument?.defaultView;
     if (!win?.gBrowser || win.gBrowser.selectedBrowser !== browser) {
       return;
     }
@@ -403,11 +403,11 @@ class Vault {
   }
 
   #hideBubble(browser) {
-    browser?.ownerGlobal?.document.getElementById("toji-vault-bubble")?.remove();
+    browser?.ownerDocument?.defaultView?.document.getElementById("toji-vault-bubble")?.remove();
   }
 
   #showBubble(browser, pending) {
-    const win = browser.ownerGlobal;
+    const win = browser.ownerDocument.defaultView;
     if (!win?.gBrowser || win.gBrowser.selectedBrowser !== browser) {
       return;
     }

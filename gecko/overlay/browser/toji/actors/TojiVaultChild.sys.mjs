@@ -18,7 +18,7 @@ function isVisible(el) {
   if (rect.width < 2 || rect.height < 2) {
     return false;
   }
-  const style = el.ownerGlobal.getComputedStyle(el);
+  const style = el.ownerDocument.defaultView.getComputedStyle(el);
   return style.visibility !== "hidden" && style.display !== "none";
 }
 

@@ -42,6 +42,38 @@ function errorChannel(uri, loadInfo, message) {
   return channel;
 }
 
+const NOT_FOUND = "Toji doesn't know that page.";
+const NO_SERVER = "Toji's agent server isn't running yet. Reload in a moment.";
+// The agent server's address (never its token), for content processes.
+const SERVER_KEY = "toji:agent-server-url";
+
+/**
+ * The channel behind a toji: address. The parent opens it, with the token; the
+ * tab's content process then builds the same channel without the token, as the
+ * child it attaches to the parent's (it sends no request of its own, and one
+ * that did would be refused for want of the token).
+ */
+function channelFor(uri, loadInfo, base, token) {
+  if (uri.host !== "ask") {
+    return errorChannel(uri, loadInfo, NOT_FOUND);
+  }
+  if (!base) {
+    return errorChannel(uri, loadInfo, NO_SERVER);
+  }
+  const params = new URLSearchParams(uri.query);
+  const stream = new URLSearchParams({ q: params.get("q") ?? "" });
+  if (token) {
+    stream.set("token", token);
+  }
+  if (params.get("fresh") === "1") {
+    stream.set("fresh", "1");
+  }
+  const target = Services.io.newURI(`${base}/api/page/stream?${stream}`);
+  const channel = Services.io.newChannelFromURIWithLoadInfo(target, loadInfo);
+  channel.originalURI = uri;
+  return channel;
+}
+
 class AskProtocol {
   QueryInterface = ChromeUtils.generateQI(["nsIProtocolHandler"]);
   scheme = "toji";
@@ -52,22 +84,50 @@ class AskProtocol {
 
   newChannel(uri, loadInfo) {
     const info = lazy.TojiAgentServer.info();
-    if (uri.host !== "ask") {
-      return errorChannel(uri, loadInfo, "Toji doesn't know that page.");
+    // The content process builds its twin of this channel next, from the same
+    // address; flushed now, the server's address reaches it before it asks.
+    const shared = Services.ppmm.sharedData;
+    if (info) {
+      shared.set(SERVER_KEY, info.url);
+    } else {
+      shared.delete(SERVER_KEY);
     }
-    if (!info) {
-      return errorChannel(uri, loadInfo, "Toji's agent server isn't running yet. Reload in a moment.");
-    }
-    const params = new URLSearchParams(uri.query);
-    const q = params.get("q") ?? "";
-    const stream = new URLSearchParams({ q, token: info.token });
-    if (params.get("fresh") === "1") {
-      stream.set("fresh", "1");
-    }
-    const target = Services.io.newURI(`${info.url}/api/page/stream?${stream}`);
-    const channel = Services.io.newChannelFromURIWithLoadInfo(target, loadInfo);
-    channel.originalURI = uri;
-    return channel;
+    shared.flush();
+    return channelFor(uri, loadInfo, info?.url, info?.token);
+  }
+}
+
+const PROTOCOL_FLAGS =
+  Ci.nsIProtocolHandler.URI_NORELATIVE |
+  Ci.nsIProtocolHandler.URI_NOAUTH |
+  Ci.nsIProtocolHandler.URI_DANGEROUS_TO_LOAD |
+  Ci.nsIProtocolHandler.URI_NON_PERSISTABLE;
+
+// Loaded into every content process by init().
+const PROCESS_SCRIPT = "chrome://toji/content/ask-process.js";
+
+/**
+ * toji: in a content process. A runtime-registered scheme exists only in the
+ * process that registered it; a content process that doesn't know toji: gives
+ * it the unknown-scheme flags (URI_DOES_NOT_RETURN_DATA), so its docshell
+ * treats a navigation as another app's protocol and no page ever loads.
+ *
+ * Registered here, toji: gets its real flags, and this handler builds the
+ * content side of each load: after the parent opens the real channel
+ * (AskProtocol), the tab's process makes a matching child channel for the same
+ * address and attaches it to the parent's. The child is built without the
+ * token, from the server address the parent shares.
+ */
+class ContentAskProtocol {
+  QueryInterface = ChromeUtils.generateQI(["nsIProtocolHandler"]);
+  scheme = "toji";
+
+  allowPort() {
+    return false;
+  }
+
+  newChannel(uri, loadInfo) {
+    return channelFor(uri, loadInfo, Services.cpmm.sharedData.get(SERVER_KEY), null);
   }
 }
 
@@ -102,13 +162,23 @@ export const TojiAsk = {
       return;
     }
     registered = true;
-    const P = Ci.nsIProtocolHandler;
-    Services.io.registerProtocolHandler(
-      "toji",
-      new AskProtocol(),
-      P.URI_NORELATIVE | P.URI_NOAUTH | P.URI_DANGEROUS_TO_LOAD | P.URI_NON_PERSISTABLE,
-      -1
-    );
+    Services.io.registerProtocolHandler("toji", new AskProtocol(), PROTOCOL_FLAGS, -1);
+    // Content processes need the scheme too, now and in every later process.
+    Services.ppmm.loadProcessScript(PROCESS_SCRIPT, true);
+  },
+
+  /** In each content process, from the process script: toji:'s flags there. */
+  initContentProcess() {
+    if (Services.appinfo.processType === Services.appinfo.PROCESS_TYPE_DEFAULT) {
+      return;
+    }
+    try {
+      Services.io.registerProtocolHandler("toji", new ContentAskProtocol(), PROTOCOL_FLAGS, -1);
+    } catch (e) {
+      if (e.result !== Cr.NS_ERROR_FACTORY_EXISTS) {
+        throw e;
+      }
+    }
   },
 
   /**

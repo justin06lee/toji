@@ -174,7 +174,7 @@ async function waitForLoad(browser, run) {
 
 function drawCursor(run, point, pressed = false) {
   const tab = run.tab;
-  const win = tab.ownerGlobal;
+  const win = tab.ownerDocument.defaultView;
   const cursor = win.document.getElementById("toji-agent-cursor");
   if (!cursor) {
     return;
@@ -245,7 +245,7 @@ async function typeText(run, actor, text) {
 
 function logTo(run, role, text) {
   run.log.push({ role, text });
-  TojiAgent._render(run.tab.ownerGlobal);
+  TojiAgent._render(run.tab.ownerDocument.defaultView);
 }
 
 function setMark(run, on) {
@@ -502,11 +502,11 @@ async function runAgent(run, goal) {
       const question = action.question.trim();
       logTo(run, "agent", question);
       run.ask = question;
-      TojiAgent.openSpotlight(tab.ownerGlobal, tab);
+      TojiAgent.openSpotlight(tab.ownerDocument.defaultView, tab);
       const answer = await new Promise(resolve => (run.askResolve = resolve));
       run.askResolve = null;
       run.ask = null;
-      TojiAgent._render(tab.ownerGlobal);
+      TojiAgent._render(tab.ownerDocument.defaultView);
       if (answer === null || run.cancelled) {
         break;
       }
@@ -657,8 +657,14 @@ async function runAgent(run, goal) {
         }
         continue;
       }
-    } catch {
-      // The next screenshot shows what actually happened.
+    } catch (e) {
+      // Say why nothing happened: to the user in the log, and to the model, which
+      // otherwise sees an unchanged page after what it was told was a click.
+      const why = String(e?.message ?? e).slice(0, 200);
+      console.error(`[toji:agent] ${action.action} failed`, e);
+      logTo(run, "system", `Couldn't ${action.action}: ${why}`);
+      history.push({ action: `${action.action} FAILED`, reason: why });
+      continue;
     }
     acted++;
     const at = target ? ` ${target.x},${target.y}` : "";
@@ -680,7 +686,7 @@ async function runAgent(run, goal) {
   }
   run.running = false;
   setMark(run, false);
-  TojiAgent._render(tab.ownerGlobal);
+  TojiAgent._render(tab.ownerDocument.defaultView);
 }
 
 // --- Spotlight ----------------------------------------------------------------
@@ -703,7 +709,7 @@ async function addFiles(run, fileList) {
       logTo(run, "system", `Could not attach ${file.name}: ${e.message}`);
     }
   }
-  TojiAgent._render(run.tab.ownerGlobal);
+  TojiAgent._render(run.tab.ownerDocument.defaultView);
 }
 
 function renderSpotlight(win) {
@@ -1022,7 +1028,7 @@ export const TojiAgent = {
     run.askResolve?.(null);
     run.ask = null;
     drawCursor(run, null);
-    this._render(tab.ownerGlobal);
+    this._render(tab.ownerDocument.defaultView);
   },
 
   isRunning(tab) {
