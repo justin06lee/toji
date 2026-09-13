@@ -11,6 +11,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "moz-src:///browser/components/customizableui/CustomizableUI.sys.mjs",
   TojiAgent: "resource:///modules/toji/TojiAgent.sys.mjs",
   TojiAgentServer: "resource:///modules/toji/TojiAgentServer.sys.mjs",
+  TojiMigrate: "resource:///modules/toji/TojiMigrate.sys.mjs",
   TojiAsk: "resource:///modules/toji/TojiAsk.sys.mjs",
   TojiBugReport: "resource:///modules/toji/TojiBugReport.sys.mjs",
   TojiContainers: "resource:///modules/toji/TojiContainers.sys.mjs",
@@ -97,7 +98,11 @@ export const TojiStartup = {
       console.error("[toji] widgets", e);
     }
     // The agent server isn't needed for the first paint; start it when idle.
-    Services.tm.idleDispatchToMainThread(() => lazy.TojiAgentServer.start(), 3000);
+    // After the Electron app, its agent server data moves in before the server
+    // starts (TojiMigrate); the rest of the move carries on in the background.
+    lazy.TojiMigrate.run().then(() =>
+      Services.tm.idleDispatchToMainThread(() => lazy.TojiAgentServer.start(), 3000)
+    );
     Services.tm.idleDispatchToMainThread(() => lazy.TojiBugReport.prune(), 10000);
   },
 };

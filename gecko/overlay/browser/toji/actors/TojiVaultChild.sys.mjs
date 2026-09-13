@@ -75,7 +75,7 @@ export class TojiVaultChild extends JSWindowActorChild {
     }
     const userField = this.#usernameFor(field);
     const username = userField ? userField.value : "";
-    const account = `${this.document.nodePrincipal.origin}|${username}`;
+    const account = `${this.document.nodePrincipal.originNoSuffix}|${username}`;
     const now = Date.now();
     if (
       account === this.#lastCapture.account &&
@@ -123,7 +123,9 @@ export class TojiVaultChild extends JSWindowActorChild {
       return false;
     }
     // Refuse if the page moved to another origin since the parent decided.
-    if (this.document.nodePrincipal.origin !== data.origin) {
+    // originNoSuffix: in a container the principal's origin ends in
+    // "^userContextId=N", which would never equal the site's origin.
+    if (this.document.nodePrincipal.originNoSuffix !== data.origin) {
       return false;
     }
     const field = this.#passwordFields()[0];

@@ -294,9 +294,9 @@ bundles into `resource:///modules/toji/lib/*.sys.mjs`. No C++.
 | 3 | Tor per container, kill switch, onion routing, Tor UI, `make tor-check` | `feat/gecko-containers` | done in the browser (`gecko/test/tor-browser.ts`; tag `feat-gecko-containers`); Tor UI not yet checked |
 | 4 | Styling and extras on native widgets; Settings, Welcome, Plans | `feat/gecko-containers` | pages done (`gecko/test/phase4.ts`; tag `feat-gecko-containers`); toolbar styling and extras not yet checked |
 | 5 | Agent server as compiled sidecar; AI pages; web agent; spotlight | `feat/gecko-agent` | done (`gecko/test/phase5.ts`, `--live` for the model-backed checks; tag `feat-gecko-agent`) |
-| 6 | Passwords, imports, uBlock Origin | `feat/gecko-vault` | in progress — uBlock Origin and file-free imports verified (`gecko/test/phase6.ts`); the vault waits for the user's go-ahead (it uses the macOS Keychain) |
+| 6 | Passwords, imports, uBlock Origin | `feat/gecko-vault`, `test/gecko-vault` | done — uBlock Origin and imports (`gecko/test/phase6.ts`); the vault (`gecko/test/phase8.ts`) |
 | 7 | Bug reports, shortcuts, default browser, links from other apps | `feat/gecko-vault` | done (`gecko/test/phase7.ts`; tag `feat-gecko-reports`) — filing a real issue and setting the system default browser not exercised |
-| 8 | Data migration, retire Electron | | |
+| 8 | Data migration, retire Electron | `test/gecko-vault` | migration done (`gecko/test/phase8.ts`; tag `feat-gecko-migration`); the Electron build targets still to retire |
 
 ## Parity checklist
 
@@ -306,7 +306,7 @@ State per item: — not started · WIP · works · works differently · dropped 
 |---|---|---|
 | Profiles | Personal, Work, Shopping, Private, Onion, custom; colours, avatars, ephemeral wipe, clear | WIP — picker, one window = one container (⌘T included), Private window, isolation, wipe on close and Clear verified; custom containers, colours and avatars not yet checked |
 | Tor | managed/external tor, bootstrap UI, fail-closed, per-container circuits, NEWNYM, .onion auto-route, hold-to-Tor | WIP — managed tor, fail-closed (tor off and tor failed), per-container circuits with different exits and .onion verified; external tor, bootstrap UI, NEWNYM, .onion auto-route from a direct window and hold-to-Tor not yet checked |
-| Passwords | encrypted, container-scoped, exact-origin fill, save bubble, autosave, generator, CSV + browser import, agent-safe | — |
+| Passwords | encrypted, container-scoped, exact-origin fill, save bubble, autosave, generator, CSV + browser import, agent-safe | WIP — encrypted (OSKeyStore; only ciphertext on disk), container-scoped, exact-origin fill (`phase8.ts`); the Electron vault moves in; save bubble, autosave, generator and CSV import not yet checked |
 | Agent | screenshot loop, spotlight, Option tap, cursor, tab marks, step limit, dropped files, reference docs, memory/librarian, research sub-agent | WIP — a run presses a button on a page end to end (screenshot, model through the agent server, synthesized input), with the spotlight and cursor; dropped files, reference docs, memory/librarian, research sub-agent, Option tap and step limit not yet checked |
 | Agent backends | yagami CLIs, Cerebras, OpenAI-compatible, Toji plan (billing not wired) | — |
 | AI answer pages | Shift+Enter / wand, streamed with sources, cached, follows theme | WIP — a question streams back with its sources under `toji://ask?q=…`, token kept in the parent (`phase5.ts --live`); Shift+Enter, the wand, caching and theme not yet checked |
@@ -600,8 +600,62 @@ State per item: — not started · WIP · works · works differently · dropped 
 - Phases 6 (uBlock Origin and imports) and 7 merged to master (tag
   `feat-gecko-reports`).
 
-**Next — both need the user's go-ahead:**
-- the vault (its key lives in the macOS login Keychain; a test raises Keychain prompts
-  on the user's screen), with password import from CSV and from Chrome's profile;
-- phase 8: migrate the Electron app's data and retire it (it still shares the bundle id
-  `com.ezzy.toji`, which is why `isDefaultBrowser()` reads true).
+### 2026-09-13 — phase 8: moving the Electron app's data in
+
+The user gave the go-ahead for the vault test (Keychain prompts included) and for
+phase 8. What the Electron app kept, in `~/Library/Application Support/Toji` (the
+folder the Gecko profiles now live in too):
+
+- `Local Storage/leveldb/` — the renderer's localStorage: `toji.containers`,
+  `toji-theme`, `toji-layout`, `toji-sidebar`, `toji-bookmarks-bar`,
+  `toji-search-engine`, `toji-vault-autosave`, `toji.replay`, `toji-onboarded`,
+  `toji.agentMaxSteps`, `toji.agentNoLimit`, under the `http://127.0.0.1:8788`
+  origin. Small enough that it all sits in the LevelDB write-ahead log.
+- `data/` — the agent server's data: `settings.json` (agent choice, models, keys),
+  `page-cache.json` (saved answer pages), `bookmarks.json`, `sessions/`.
+- `vault.bin` — the vault, Electron `safeStorage` ciphertext (`v10…`) under the
+  Keychain item "Toji Safe Storage" / "Toji Key".
+- `Partitions/` (site data per container), `Cookies`, caches, `tor/`, `adblock/`.
+
+**`TojiMigrate`** runs once (pref `toji.migration.electron`) at the first start of a
+profile in Toji's own Profiles folder — never for test or scratch profiles, unless
+`TOJI_MIGRATE_FROM` points one at a copy. It only reads the Electron files:
+1. copies the agent server's data (not `bookmarks.json`) into `<profile>/agent-server`
+   before the sidecar starts;
+2. replays the localStorage log (`gecko/lib/migrate.ts`: a LevelDB log reader with
+   CRC-32C checks, and Chromium's localStorage string encodings) and applies the
+   containers (`TojiContainers.replaceAll`) and settings (through Settings' own
+   `setSetting`, plus the onboarding and agent step-limit prefs);
+3. puts the bookmarks on the bookmarks toolbar, skipping addresses already there;
+4. once the first window has started, reads the Electron app's safeStorage passphrase
+   with macOS's `security find-generic-password` (one Keychain prompt, `security`'s own,
+   while the browser keeps running) and decrypts `vault.bin` in `gecko/lib/migrate.ts`
+   (Chromium's os_crypt: `v10`, AES-128-CBC, PBKDF2-SHA1 over "saltysalt"), saving the
+   entries into Toji's vault. Firefox's `ChromeMacOSLoginCrypto` was the first try: its
+   Keychain lookup is synchronous — it runs even when handed a passphrase — so its
+   prompt froze the whole browser during startup (`phase8.ts` caught it: Marionette
+   couldn't even open its session);
+5. writes `<profile>/toji-migration.json` with counts and errors.
+
+**The vault never filled a password.** `TojiVaultChild` refused a fill unless
+`document.nodePrincipal.origin` equalled the entry's origin — but in a container that
+origin ends in `^userContextId=N`, and every Toji window is a container. It compares
+`originNoSuffix` now (still the exact site). `phase8.ts` found it: the login was offered
+in its container, and the fill came back refused.
+
+It does not move site data — cookies, sign-ins, site storage: Chromium's and Gecko's
+formats don't convert — so sites need signing into again. Compacted LevelDB table files
+(`.ldb`) aren't read; the report counts any it skipped. `gecko/test/phase8.ts` runs the
+move against a copy of the Electron data in a throwaway profile, checks a second start
+moves nothing twice, and checks the vault: offered and filled only on its own site in
+its own container, and no username or password in the clear in `toji-vault.json`.
+
+**Verified** — `phase8.ts`, all 11 checks, on a copy of the user's Electron data: 5
+containers, 8 settings, 9 bookmarks, the agent server's settings and saved pages, and 9
+vault entries moved; a second start moved nothing twice; a saved login was offered and
+filled only in its own container (page principal `http://127.0.0.1:…^userContextId=2`),
+never in another; `toji-vault.json` holds no username or password in the clear.
+
+**Next:** install over the Electron app (a zip of it is kept in
+`~/Library/Application Support/Toji-electron-backup/`), let the first real start move
+the data, then retire the Electron build targets.
