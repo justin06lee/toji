@@ -28,6 +28,12 @@ export MOZ_REQUIRE_SIGNING=1
 # Widevine arrives through GMP; keep EME built in.
 ac_add_options --enable-eme=widevine
 
+# Tor containers fail closed. Compiled-in guarantees, as Tor Browser builds:
+# no "conservative" request ever fails over from a dead proxy to DIRECT, and
+# nothing may set bypassProxy on a channel.
+ac_add_options --disable-proxy-direct-failover
+ac_add_options --enable-proxy-bypass-protection
+
 if [ -n "$TOJI_SCCACHE_DIR" ]; then
   ac_add_options --with-ccache=sccache
   export SCCACHE_DIR="$TOJI_SCCACHE_DIR"

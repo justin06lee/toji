@@ -46,6 +46,10 @@ const SRC = join(SRC_PARENT, `firefox-${version.version.replace(/esr$/, '')}`);
 const OBJ = join(WORK, 'obj');
 const APPLIED = join(WORK, 'applied-patches');
 const OVERLAY = join(GECKO, 'overlay');
+// Build outputs that are copied into the tree like the overlay: gecko/lib/*.ts
+// bundled into standalone chrome modules (and, later, the React pages).
+const GENERATED = join(WORK, 'generated');
+const LIB = join(GECKO, 'lib');
 const OVERLAY_LOG = join(WORK, 'overlay-files.json');
 const TARBALL = join(CACHE, `firefox-${version.version}.source.tar.xz`);
 const STAGED_APP = join(OBJ, 'dist', 'toji', 'Toji.app');
@@ -148,13 +152,45 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-// Copies gecko/overlay/** into the tree, touching only files whose bytes
-// changed so the build system rebuilds as little as possible.
+// Bundles each gecko/lib/*.ts (not tests) into a standalone ES module at
+// browser/toji/modules/lib/<name>.sys.mjs, i.e. resource:///modules/toji/lib/.
+// No code splitting: chrome modules import each other by full URL, so every
+// bundle carries what it needs.
+async function generate() {
+  const out = join(GENERATED, 'browser', 'toji', 'modules', 'lib');
+  if (!existsSync(LIB)) return;
+  const entries = readdirSync(LIB)
+    .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts') && !f.endsWith('.d.ts'))
+    .map((f) => join(LIB, f));
+  rmSync(out, { recursive: true, force: true });
+  mkdirSync(out, { recursive: true });
+  if (!entries.length) return;
+  const result = await Bun.build({
+    entrypoints: entries,
+    outdir: out,
+    target: 'browser',
+    format: 'esm',
+    splitting: false,
+    naming: '[name].sys.mjs'
+  });
+  if (!result.success) {
+    for (const message of result.logs) console.error(message);
+    die('bundling gecko/lib failed');
+  }
+}
+
+// Copies gecko/overlay/** and the generated files into the tree, touching only
+// files whose bytes changed so the build system rebuilds as little as possible.
 function copyOverlay() {
-  const files = walk(OVERLAY).map((f) => relative(OVERLAY, f));
+  const sources = new Map<string, string>();
+  for (const root of [OVERLAY, GENERATED]) {
+    if (!existsSync(root)) continue;
+    for (const f of walk(root)) sources.set(relative(root, f), f);
+  }
+  const files = [...sources.keys()];
   let changed = 0;
   for (const rel of files) {
-    const from = join(OVERLAY, rel);
+    const from = sources.get(rel)!;
     const to = join(SRC, rel);
     if (existsSync(to) && readFileSync(to).equals(readFileSync(from))) continue;
     mkdirSync(dirname(to), { recursive: true });
@@ -196,6 +232,7 @@ async function prepare() {
   await fetchSource();
   await extractSource();
   await applyPatches();
+  await generate();
   copyOverlay();
 }
 

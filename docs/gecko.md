@@ -100,6 +100,20 @@ Release, optimized, no tests, `--disable-crashreporter`, `--disable-updater`,
 `--disable-default-browser-agent`, `--enable-eme=widevine`, `MOZ_REQUIRE_SIGNING=1`
 (ESR otherwise lets a pref turn add-on signing off), sccache in `.work/sccache`.
 
+Two compile-time guarantees for Tor containers, as Tor Browser builds use:
+`--disable-proxy-direct-failover` (Firefox otherwise lets "conservative" requests fall
+back from a dead proxy to DIRECT) and `--enable-proxy-bypass-protection` (nothing can
+set `bypassProxy` on a channel). Both are `set_define`s in `mozilla-config.h`, so
+changing them later recompiles all C++ — decide such options before a first build.
+
+`MOZ_APP_UA_NAME` and `MOZ_APP_VENDOR` are "project flags" that configure only accepts
+as implied values, so patch 0002 sets them in `browser/moz.configure` rather than the
+mozconfig.
+
+mach trims its terminal output to warnings and errors when it sees a coding agent's
+environment variable (`CLAUDECODE`, `CODEX_SANDBOX`, `GEMINI_CLI`, `OPENCODE`), which
+hides configure errors; `build.ts` clears them for mach so build logs are complete.
+
 ### Stripping Mozilla's services
 
 Two locks, LibreWolf-style:
@@ -159,8 +173,8 @@ contextual identities on; search suggestions off by default; SOCKS remote DNS.
 
 | # | Phase | Branch | State |
 |---|---|---|---|
-| 0 | Prerequisites and decisions | `chore/gecko-prereqs` | in progress |
-| 1 | Stripped, branded browser that `make` builds, installs, launches | | |
+| 0 | Prerequisites and decisions | `chore/gecko-prereqs` | done (tag `chore-gecko-prereqs`) |
+| 1 | Stripped, branded browser that `make` builds, installs, launches | `feat/gecko-browser` | in progress |
 | 2 | Containers, one window = one profile, picker, ephemeral wipe, clear | | |
 | 3 | Tor per container, kill switch, onion routing, Tor UI, `make tor-check` | | |
 | 4 | Styling and extras on native widgets; Settings, Welcome, Plans | | |
