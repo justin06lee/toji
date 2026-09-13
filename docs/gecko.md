@@ -290,7 +290,7 @@ bundles into `resource:///modules/toji/lib/*.sys.mjs`. No C++.
 |---|---|---|---|
 | 0 | Prerequisites and decisions | `chore/gecko-prereqs` | done (tag `chore-gecko-prereqs`) |
 | 1 | Stripped, branded browser that `make` builds, installs, launches | `feat/gecko-browser` | done (tag `feat-gecko-browser`) |
-| 2 | Containers, one window = one profile, picker, ephemeral wipe, clear | | |
+| 2 | Containers, one window = one profile, picker, ephemeral wipe, clear | `feat/gecko-containers` | verified (`gecko/test/phase2.ts`), not merged yet |
 | 3 | Tor per container, kill switch, onion routing, Tor UI, `make tor-check` | | |
 | 4 | Styling and extras on native widgets; Settings, Welcome, Plans | | |
 | 5 | Agent server as compiled sidecar; AI pages; web agent; spotlight | | |
@@ -304,7 +304,7 @@ State per item: — not started · WIP · works · works differently · dropped 
 
 | Area | Item | State |
 |---|---|---|
-| Profiles | Personal, Work, Shopping, Private, Onion, custom; colours, avatars, ephemeral wipe, clear | — |
+| Profiles | Personal, Work, Shopping, Private, Onion, custom; colours, avatars, ephemeral wipe, clear | WIP — picker, one window = one container (⌘T included), Private window, isolation, wipe on close and Clear verified; custom containers, colours and avatars not yet checked |
 | Tor | managed/external tor, bootstrap UI, fail-closed, per-container circuits, NEWNYM, .onion auto-route, hold-to-Tor | — |
 | Passwords | encrypted, container-scoped, exact-origin fill, save bubble, autosave, generator, CSV + browser import, agent-safe | — |
 | Agent | screenshot loop, spotlight, Option tap, cursor, tab marks, step limit, dropped files, reference docs, memory/librarian, research sub-agent | — |
@@ -414,7 +414,30 @@ State per item: — not started · WIP · works · works differently · dropped 
 
 **Phase 1 is done** (merged to master, tag `feat-gecko-browser`).
 
-**Next:** `bun gecko/build.ts build` with the phase 2–7 layer (prepare copies it and the
-generated pages / server binary; no C++ changes, so the build should be short), then
-verify phase by phase with Marionette (chrome-context scripts) and screenshots,
-committing each phase as it verifies.
+### 2026-09-13 — phase 2 verified
+
+- Build 4 (the phase 2–7 layer on the phase-1 objdir): 42 s, nothing recompiled;
+  `bun gecko/build.ts faster` + `package` (≈30 s together) after each chrome-JS fix.
+- First run of Toji's chrome code. Two bugs:
+  - The `gecko/lib` bundles export plain functions, but the chrome modules imported
+    them with `defineESModuleGetters`, which binds one export *by name* — so
+    `lazy.ContainersLib`, `lazy.TorLib` … were undefined and startup threw. They now
+    use `defineLazyGetter` + `importESModule`, which holds the whole module.
+  - The picker window still loaded about:home. `updateBookmarkToolbarVisibility()`
+    reads and caches `gBrowserInit.uriToLoadPromise` in `onBeforeInitialXULLayout`,
+    before the before-tabbrowser hook nulls `window.arguments[0]`; the hook now
+    resets the cached value to null too.
+- `gecko/test/phase2.ts`: all 12 checks pass — picker shown, nothing loaded until a
+  profile is chosen, Work binds the window and every tab (⌘T included), ⌘⇧N gives
+  Private, cookies stay per container, closing Private's last window wipes it, Clear
+  container empties Work, the five built-ins are stored with Gecko identities.
+- Test harness: `Marionette.execAsync` runs an async body (`await` works, a throw
+  fails the call); the Clear check moves Work's tab off the cookie page first, since
+  a container's tabs reload after a clear.
+- The whole Toji layer is now committed on `feat/gecko-containers`. The modules are
+  too interlinked to split by phase (TojiStartup and TojiWindows wire up Tor, the
+  vault, the agent), so phases 3–7 ride along unverified; the branch merges to master
+  once Tor (phase 3) verifies too.
+
+**Next:** `gecko/test/tor-browser.ts` (fail-closed, per-container relays, .onion) →
+phase 3; then pages (4), agent (5), vault/imports/uBlock (6), bug reports (7).

@@ -49,6 +49,13 @@
     "EncryptedMediaExtensions": {
       "Enabled": true
     },
+    "ExtensionSettings": {
+      "uBlock0@raymondhill.net": {
+        "installation_mode": "allowed",
+        "private_browsing": true
+      }
+    },
+    "PasswordManagerEnabled": false,
     "SearchEngines": {
       "Default": "DuckDuckGo",
       "Add": [

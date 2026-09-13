@@ -177,6 +177,53 @@ async function generate() {
     for (const message of result.logs) console.error(message);
     die('bundling gecko/lib failed');
   }
+  await bundleAddons();
+  await buildPages();
+  await buildServer();
+}
+
+// Toji's pages (Settings, Welcome, Plans, start, report): the React build that
+// ships at chrome://toji/content/pages/.
+async function buildPages() {
+  const out = join(GENERATED, 'browser', 'toji', 'content', 'pages');
+  await run(['bun', 'run', 'build:pages'], { cwd: REPO, env: { TOJI_PAGES_OUT: out } });
+}
+
+// The agent server as one executable (bun build --compile), shipped as
+// Toji.app/Contents/Resources/toji-agent-server. Ad-hoc signed so macOS runs it
+// from inside the bundle.
+async function buildServer() {
+  const out = join(GENERATED, 'browser', 'toji', 'bin', 'toji-agent-server');
+  mkdirSync(dirname(out), { recursive: true });
+  await run(['bun', 'scripts/build-server.ts', '--compile', '--outfile', out], { cwd: REPO });
+  if (process.platform === 'darwin') {
+    await run(['codesign', '--force', '--sign', '-', out]);
+  }
+}
+
+// Built-in add-ons (gecko/addons.json): the AMO-signed XPI, pinned by version
+// and SHA-256, shipped in distribution/extensions so every new profile gets it.
+async function bundleAddons() {
+  const manifest = join(GECKO, 'addons.json');
+  if (!existsSync(manifest)) return;
+  const addons = JSON.parse(readFileSync(manifest, 'utf8')) as Record<string, { version: string; url: string; sha256: string }>;
+  const out = join(GENERATED, 'browser', 'toji', 'distribution', 'extensions');
+  mkdirSync(out, { recursive: true });
+  for (const [id, addon] of Object.entries(addons)) {
+    const cached = join(CACHE, `${id}-${addon.version}.xpi`);
+    if (!existsSync(cached) || (await sha256File(cached)) !== addon.sha256) {
+      log(`downloading ${id} ${addon.version}`);
+      const res = await fetch(addon.url);
+      if (!res.ok) die(`download of ${id} failed: HTTP ${res.status}`);
+      await Bun.write(cached, res);
+      const sum = await sha256File(cached);
+      if (sum !== addon.sha256) {
+        unlinkSync(cached);
+        die(`checksum mismatch for ${id} ${addon.version} (got ${sum})`);
+      }
+    }
+    copyFileSync(cached, join(out, `${id}.xpi`));
+  }
 }
 
 // Copies gecko/overlay/** and the generated files into the tree, touching only

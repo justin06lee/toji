@@ -77,10 +77,19 @@ export class Marionette {
     return r?.value as T;
   }
 
+  /**
+   * Runs `script` as an async function body; the last entry of `arguments` is the
+   * callback that returns a value. `await` works, and a throw fails the call.
+   */
   async execAsync<T = any>(script: string, args: unknown[] = [], timeoutMs = 60000): Promise<T> {
     await this.send('WebDriver:SetTimeouts', { script: timeoutMs });
-    const r = await this.send('WebDriver:ExecuteAsyncScript', { script, args });
-    return r?.value as T;
+    // An arrow function keeps the outer `arguments`, so the body reads them as usual.
+    const wrapped = `const __done = arguments[arguments.length - 1];
+      (async () => {\n${script}\n})().catch((e) => __done({ __tojiError: String((e && e.stack) || e) }));`;
+    const r = await this.send('WebDriver:ExecuteAsyncScript', { script: wrapped, args });
+    const value = r?.value;
+    if (value && typeof value === 'object' && '__tojiError' in value) throw new Error(`script error: ${value.__tojiError}`);
+    return value as T;
   }
 
   async navigate(url: string) {
