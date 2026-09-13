@@ -98,6 +98,21 @@ export interface VaultStatus {
 
 export type { BookmarkImportError, BrowserProfile, ImportBrowser, ImportResult, ImportedBookmark, PasswordImportError };
 
+/**
+ * What importing a browser returns. The Gecko browser files bookmarks straight into
+ * Firefox's own bookmarks, so `items` stays empty there and `count` says how many went
+ * in: null when Firefox's migrator did it and the number is unknown. Electron hands the
+ * bookmarks back in `items` and leaves `count` out.
+ */
+export type BrowserImportResult = Omit<ImportResult, 'bookmarks'> & { bookmarks: ImportResult['bookmarks'] & { count?: number | null } };
+
+/** An exported bookmarks file: items in Electron, a count under Gecko (see BrowserImportResult). */
+export interface BookmarksFileImport {
+  canceled: boolean;
+  bookmarks: ImportedBookmark[];
+  count?: number | null;
+}
+
 /** The rolling recording as the Gecko browser hands it to about:report. */
 export interface BridgeReplayClip {
   /** video/mp4 or video/webm. */
@@ -226,9 +241,12 @@ export interface TojiBridge {
 
   // --- import from other browsers ---
   importBrowsers?: () => Promise<ImportBrowser[]>;
-  /** Bookmarks come back; passwords go straight into the vault under `containerId`. */
-  importBrowser?: (options: { browser: string; profile: string; containerId: string }) => Promise<ImportResult>;
-  importBookmarksFile?: () => Promise<{ canceled: boolean; bookmarks: ImportedBookmark[] }>;
+  /**
+   * Passwords go straight into the vault under `containerId`. Bookmarks come back in
+   * Electron; under Gecko they go into Firefox's bookmarks and only a count comes back.
+   */
+  importBrowser?: (options: { browser: string; profile: string; containerId: string }) => Promise<BrowserImportResult>;
+  importBookmarksFile?: () => Promise<BookmarksFileImport>;
   importPasswordsFile?: (containerId: string) => Promise<PasswordsFileImport>;
   /** macOS: the Full Disk Access pane, where Toji can be allowed to read Safari's data. */
   openFullDiskAccess?: () => Promise<void>;
