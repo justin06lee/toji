@@ -291,7 +291,7 @@ bundles into `resource:///modules/toji/lib/*.sys.mjs`. No C++.
 | 0 | Prerequisites and decisions | `chore/gecko-prereqs` | done (tag `chore-gecko-prereqs`) |
 | 1 | Stripped, branded browser that `make` builds, installs, launches | `feat/gecko-browser` | done (tag `feat-gecko-browser`) |
 | 2 | Containers, one window = one profile, picker, ephemeral wipe, clear | `feat/gecko-containers` | verified (`gecko/test/phase2.ts`), not merged yet |
-| 3 | Tor per container, kill switch, onion routing, Tor UI, `make tor-check` | | |
+| 3 | Tor per container, kill switch, onion routing, Tor UI, `make tor-check` | `feat/gecko-containers` | verified (`gecko/test/tor-browser.ts`), not merged yet |
 | 4 | Styling and extras on native widgets; Settings, Welcome, Plans | | |
 | 5 | Agent server as compiled sidecar; AI pages; web agent; spotlight | | |
 | 6 | Passwords, imports, uBlock Origin | | |
@@ -305,7 +305,7 @@ State per item: — not started · WIP · works · works differently · dropped 
 | Area | Item | State |
 |---|---|---|
 | Profiles | Personal, Work, Shopping, Private, Onion, custom; colours, avatars, ephemeral wipe, clear | WIP — picker, one window = one container (⌘T included), Private window, isolation, wipe on close and Clear verified; custom containers, colours and avatars not yet checked |
-| Tor | managed/external tor, bootstrap UI, fail-closed, per-container circuits, NEWNYM, .onion auto-route, hold-to-Tor | — |
+| Tor | managed/external tor, bootstrap UI, fail-closed, per-container circuits, NEWNYM, .onion auto-route, hold-to-Tor | WIP — managed tor, fail-closed (tor off and tor failed), per-container circuits with different exits and .onion verified; external tor, bootstrap UI, NEWNYM, .onion auto-route from a direct window and hold-to-Tor not yet checked |
 | Passwords | encrypted, container-scoped, exact-origin fill, save bubble, autosave, generator, CSV + browser import, agent-safe | — |
 | Agent | screenshot loop, spotlight, Option tap, cursor, tab marks, step limit, dropped files, reference docs, memory/librarian, research sub-agent | — |
 | Agent backends | yagami CLIs, Cerebras, OpenAI-compatible, Toji plan (billing not wired) | — |
@@ -439,5 +439,43 @@ State per item: — not started · WIP · works · works differently · dropped 
   vault, the agent), so phases 3–7 ride along unverified; the branch merges to master
   once Tor (phase 3) verifies too.
 
-**Next:** `gecko/test/tor-browser.ts` (fail-closed, per-container relays, .onion) →
-phase 3; then pages (4), agent (5), vault/imports/uBlock (6), bug reports (7).
+### 2026-09-13 — phases 3 and 4 under way
+
+- **Phase 3 verified** — `gecko/test/tor-browser.ts`, all 7 checks, against a real
+  tor: with tor stopped a Tor container's request ends on
+  `about:neterror?e=proxyConnectFailure`, never direct; the managed tor bootstraps in
+  the browser (~35 s from a cached consensus); two Tor containers exit through tor from
+  different relays (204.8.96.103 / 5.255.118.218); a direct container does not use tor;
+  DuckDuckGo's .onion loads in the Onion container; each container window holds just
+  its one tab. With tor in an error state (an earlier run), every Tor-container load
+  still ended on `proxyConnectFailure`.
+- Bugs found running the Tor and page code for the first time:
+  - **No timers in system modules.** Firefox's shared module global (`SystemGlobal`)
+    has `fetch`, `Headers`, `crypto`, `OffscreenCanvas`, `WebSocket`, `URL` … but not
+    `setTimeout`/`clearTimeout`/`setInterval`, `createImageBitmap`, `queueMicrotask` or
+    `performance` (checked in the running build). Seven Toji modules called timers bare;
+    they now import them from `resource://gre/modules/Timer.sys.mjs`, as Firefox's own
+    modules do. Code that runs against a window keeps using `win.setTimeout`.
+  - **The control connection hung itself up.** It wrote a bare `\r\n` to find out it
+    was connected; before authentication tor answers anything but
+    PROTOCOLINFO/AUTHENTICATE with `514 Authentication required` and closes the
+    connection (and a SOCKS port hangs up on stray bytes, so `probePort` could never
+    find an external tor either). Connecting now waits for the transport's
+    `STATUS_CONNECTED_TO` (a refused or timed-out connect surfaces as the input
+    stream failing); nothing is sent. `isAlive()` is no substitute: right after
+    connecting it can report a live socket as dead.
+  - **Cookie race.** tor logs "Opened Control listener" before it writes
+    `control_auth_cookie`, so reading the cookie at that moment failed; Toji now waits
+    for it as it does for the port file. Both listener lines matched the trigger, so
+    two attaches raced; it is now once per tor process.
+  - **A failed attach left Tor "bootstrapping" forever** (tor at 100 %, Toji waiting for
+    a SOCKS port no one would report). Now it stops that tor and reports the reason, so
+    `whenReady` answers false and the status bar can say why.
+  - **`window.toji.saveContainers(list)`** handed `[list]` to `replaceAll`: every page
+    API method receives its arguments as an array. `saveContainers` and
+    `clearContainer` now destructure like the rest.
+- Test harness: window handles come from Marionette's `NavigableManager` (UUIDs, not
+  browserIds); `execAsync` errors carry the message as well as the stack;
+  `gecko/test/phase4.ts` (new) covers Toji's pages; `tor-browser.ts` also checks that
+  each container window holds exactly its one tab (an earlier run saw extra tabs appear
+  after tor started).

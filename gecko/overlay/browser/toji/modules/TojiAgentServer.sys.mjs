@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import { clearTimeout, setTimeout } from "resource://gre/modules/Timer.sys.mjs";
+
 // Supervises Toji's agent server: a single compiled binary (bun build
 // --compile) shipped in the app bundle, so nobody needs Node installed. It
 // listens on 127.0.0.1 only, on a port it picks, and refuses requests without

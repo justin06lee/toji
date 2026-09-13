@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import { clearTimeout, setTimeout } from "resource://gre/modules/Timer.sys.mjs";
+
 // Help › Report a Bug… (⌥⇧I): files a GitHub issue on Toji's repository, directly
 // with a token that can write to it, or through GitHub's own new-issue form in a
 // tab with the files dropped onto it. See gecko/lib/bugReport.ts for the rules.

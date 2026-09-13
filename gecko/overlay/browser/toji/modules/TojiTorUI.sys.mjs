@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import { clearTimeout, setTimeout } from "resource://gre/modules/Timer.sys.mjs";
+
 // Tor in the window: the round Go button at the end of the address bar (a click
 // goes, holding it 900 ms toggles Tor for the window), the thin status bar under
 // the toolbar while a Tor window's tor is connecting or down, and .onion

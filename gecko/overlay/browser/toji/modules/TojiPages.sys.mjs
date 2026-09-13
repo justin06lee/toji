@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import { setTimeout } from "resource://gre/modules/Timer.sys.mjs";
+
 // Toji's own pages — Settings, Welcome, Plans and the new tab page — are React
 // builds shipped as chrome://toji/content/pages/*.html and shown under about:
 // addresses registered here, in the parent process (like about:preferences).
@@ -237,11 +239,11 @@ export const TojiPageAPI = {
     return lazy.TojiContainers.list();
   },
 
-  saveContainers(list) {
+  saveContainers([list]) {
     return lazy.TojiContainers.replaceAll(list);
   },
 
-  clearContainer(id) {
+  clearContainer([id]) {
     return lazy.TojiContainers.clear(String(id));
   },
 

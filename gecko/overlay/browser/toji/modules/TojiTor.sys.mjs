@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import { clearTimeout, setTimeout } from "resource://gre/modules/Timer.sys.mjs";
+
 // Toji's Tor client manager. Runs the real tor (never an implementation of our
 // own), watches its bootstrap, and talks to its control port.
 //
@@ -62,13 +64,35 @@ class ControlConnection {
         Ci.nsISocketTransport.TIMEOUT_CONNECT,
         CONNECT_TIMEOUT_S
       );
+      // Connected is a transport status, so nothing is sent to find out: before
+      // authentication tor answers anything but PROTOCOLINFO/AUTHENTICATE with
+      // 514 and hangs up, and a SOCKS port hangs up on stray bytes. A refused
+      // or timed-out connect shows up in the input pump instead.
+      let settled = false;
+      const failed = error => {
+        if (!settled) {
+          settled = true;
+          reject(new Error(`127.0.0.1:${port}: ${error.message}`));
+        }
+        this.#fail(error);
+      };
+      this.#transport.setEventSink(
+        {
+          onTransportStatus: (_transport, status) => {
+            if (status === Ci.nsISocketTransport.STATUS_CONNECTED_TO && !settled) {
+              settled = true;
+              resolve();
+            }
+          },
+        },
+        Services.tm.mainThread
+      );
       this.#out = this.#transport.openOutputStream(0, 0, 0);
       const raw = this.#transport.openInputStream(0, 0, 0);
       this.#in = Cc["@mozilla.org/scriptableinputstream;1"].createInstance(
         Ci.nsIScriptableInputStream
       );
       this.#in.init(raw);
-      let settled = false;
       const pump = {
         onInputStreamReady: stream => {
           let chunk = "";
@@ -76,23 +100,14 @@ class ControlConnection {
             const n = stream.available();
             chunk = n ? this.#in.readBytes(n) : "";
           } catch (e) {
-            if (!settled) {
-              settled = true;
-              reject(new Error(`control port ${port}: ${e.message}`));
-            }
-            this.#fail(e);
+            failed(e);
             return;
           }
-          if (!settled) {
-            settled = true;
-            resolve();
-          }
-          if (chunk) {
-            this.#receive(chunk);
-          } else if (!this.#closed) {
-            this.#fail(new Error("control connection closed"));
+          if (!chunk) {
+            failed(new Error("connection closed"));
             return;
           }
+          this.#receive(chunk);
           if (!this.#closed) {
             stream.asyncWait(pump, 0, 0, Services.tm.mainThread);
           }
@@ -101,9 +116,6 @@ class ControlConnection {
       raw
         .QueryInterface(Ci.nsIAsyncInputStream)
         .asyncWait(pump, 0, 0, Services.tm.mainThread);
-      // A reply to nothing never comes, so connection success is known only
-      // once we can write: send a harmless no-op the protocol answers.
-      this.#out.write("\r\n", 2);
     });
   }
 
@@ -401,10 +413,9 @@ class TorService {
           continue;
         }
         log(line.trim());
-        if (/Opened Control listener|Control listener listening/.test(line)) {
-          this.#attachControl(portFile).catch(e =>
-            log("control port attach failed", e)
-          );
+        // tor logs two lines per listener; attach on the second, once.
+        if (/Opened Control listener/.test(line)) {
+          this.#attachControl(portFile).catch(e => this.#controlFailed(e));
         }
         const boot = lazy.TorLib.parseBootstrap(line);
         if (!boot) {
@@ -412,6 +423,10 @@ class TorService {
         }
         if (boot.progress >= 100) {
           await this.#whenSocksKnown();
+          if (this.#proc !== proc) {
+            // Stopped, or given up on because its control port failed.
+            return;
+          }
           this.#setStatus({
             state: "ready",
             progress: 100,
@@ -440,10 +455,15 @@ class TorService {
     return this.#socksKnown.promise;
   }
 
-  async #attachControl(portFile) {
-    if (this.#control) {
-      return;
-    }
+  #attaching = null;
+
+  /** Once per tor process, however many listener lines announce the port. */
+  #attachControl(portFile) {
+    this.#attaching ??= this.#connectControl(portFile);
+    return this.#attaching;
+  }
+
+  async #connectControl(portFile) {
     let port = null;
     for (let i = 0; i < 50 && port === null; i++) {
       try {
@@ -456,12 +476,21 @@ class TorService {
     if (port === null) {
       throw new Error("tor never wrote its control port");
     }
-    const cookie = await IOUtils.read(
-      PathUtils.join(this.dataDir, "control_auth_cookie")
-    );
+    // tor announces the listener before it writes the cookie; wait for it too.
+    const cookiePath = PathUtils.join(this.dataDir, "control_auth_cookie");
+    let cookie = null;
+    for (let i = 0; i < 50 && cookie?.length !== 32; i++) {
+      try {
+        cookie = await IOUtils.read(cookiePath);
+      } catch {}
+      if (cookie?.length !== 32) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+    }
+    if (cookie?.length !== 32) {
+      throw new Error("tor never wrote its control cookie");
+    }
     const conn = await ControlConnection.open(port);
-    // The "\r\n" probe sent on connect is answered with an error; drain it.
-    await conn.send("PROTOCOLINFO 1").catch(() => {});
     const auth = await conn.send(
       `AUTHENTICATE ${lazy.TorLib.cookieHex(cookie)}`
     );
@@ -487,11 +516,32 @@ class TorService {
     this.#socksKnown = null;
   }
 
+  /**
+   * Without its control port Toji can't learn the SOCKS port or own the
+   * process, so this tor is no use: stop it and say why.
+   */
+  #controlFailed(error) {
+    log("control port attach failed", error);
+    const proc = this.#proc;
+    this.#proc = null;
+    this.#teardown();
+    proc?.kill(500);
+    this.#setStatus({
+      state: "error",
+      progress: 0,
+      detail: `Tor's control port failed: ${error.message}`,
+    });
+  }
+
   #teardown() {
     this.#control?.close();
     this.#control = null;
+    this.#attaching = null;
     this.#socksPort = null;
     this.#source = null;
+    // Anyone waiting for the SOCKS port re-checks whether this tor still counts.
+    this.#socksKnown?.resolve();
+    this.#socksKnown = null;
   }
 
   stop() {

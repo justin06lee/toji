@@ -85,7 +85,7 @@ export class Marionette {
     await this.send('WebDriver:SetTimeouts', { script: timeoutMs });
     // An arrow function keeps the outer `arguments`, so the body reads them as usual.
     const wrapped = `const __done = arguments[arguments.length - 1];
-      (async () => {\n${script}\n})().catch((e) => __done({ __tojiError: String((e && e.stack) || e) }));`;
+      (async () => {\n${script}\n})().catch((e) => __done({ __tojiError: String(e) + (e && e.stack ? "\\n" + e.stack : "") }));`;
     const r = await this.send('WebDriver:ExecuteAsyncScript', { script: wrapped, args });
     const value = r?.value;
     if (value && typeof value === 'object' && '__tojiError' in value) throw new Error(`script error: ${value.__tojiError}`);

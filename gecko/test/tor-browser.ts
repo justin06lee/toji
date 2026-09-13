@@ -42,11 +42,25 @@ mkdirSync(profile, { recursive: true });
 const port = await freePort();
 writeFileSync(
   join(profile, 'user.js'),
-  [`user_pref("marionette.port", ${port});`, `user_pref("remote.prefs.recommended", false);`, `user_pref("toji.tor.autostart", false);`].join('\n') + '\n'
+  [
+    `user_pref("marionette.port", ${port});`,
+    `user_pref("remote.prefs.recommended", false);`,
+    `user_pref("toji.tor.autostart", false);`,
+    // Plain text for check.torproject.org's JSON, not the JSON viewer's UI.
+    `user_pref("devtools.jsonview.enabled", false);`,
+    // Chrome console (TojiTor's log) to the browser's stdout, kept below.
+    `user_pref("devtools.console.stdout.chrome", true);`
+  ].join('\n') + '\n'
 );
+const consoleLog = join(WORK, 'logs', 'tor-browser-console.log');
+mkdirSync(join(WORK, 'logs'), { recursive: true });
+rmSync(consoleLog, { force: true });
+console.log(`browser console -> ${consoleLog}`);
 // Headless unless HEADED=1, so test windows never land on the user's screen.
 const proc = Bun.spawn([join(app, 'Contents/MacOS/toji'), '-no-remote', '-profile', profile, '--marionette', '-remote-allow-system-access'], {
-  stdio: ['ignore', 'ignore', 'ignore'],
+  stdin: 'ignore',
+  stdout: Bun.file(consoleLog),
+  stderr: 'ignore',
   env: { ...process.env, ...(process.env.HEADED ? {} : { MOZ_HEADLESS: '1' }) }
 });
 const m = await Marionette.open(port);
@@ -58,32 +72,23 @@ const MODULES = `
   const { TojiWindows } = ChromeUtils.importESModule("resource:///modules/toji/TojiWindows.sys.mjs");
 `;
 
-async function handles(): Promise<string[]> {
-  const r = await m.send('WebDriver:GetWindowHandles');
-  return Array.isArray(r) ? r : (r?.value ?? []);
-}
-
 /**
  * Opens a window in `containerId` at `url`; resolves to its tab's Marionette
- * handle — the one handle that wasn't there before (handles are Marionette's
- * own ids, not browserIds).
+ * handle (Marionette's own id for the browser, from its NavigableManager).
  */
 async function openIn(containerId: string, url: string): Promise<string> {
-  const before = new Set(await handles());
   await m.context('chrome');
-  await m.execAsync(
+  return m.execAsync<string>(
     `${MODULES}
+     const { NavigableManager } = ChromeUtils.importESModule("chrome://remote/content/shared/NavigableManager.sys.mjs");
      const [containerId, url, done] = arguments;
      const win = await TojiWindows.openContainerWindow(containerId, { urls: [url] });
      await new Promise(r => win.addEventListener("load", r, { once: true }));
      await new Promise(r => setTimeout(r, 500));
-     done(true);`,
+     done(NavigableManager.getIdForBrowser(win.gBrowser.selectedBrowser));`,
     [containerId, url],
     60000
   );
-  const added = (await handles()).filter((h) => !before.has(h));
-  if (added.length !== 1) throw new Error(`expected one new window handle, got ${added.length}`);
-  return added[0];
 }
 
 /** Waits for the tab to finish loading and returns its text (or the error page's). */
@@ -115,12 +120,16 @@ try {
 
   // 2. Isolation.
   await m.context('chrome');
-  const ready = await m.execAsync<boolean>(
-    `${MODULES} const done = arguments[0]; await TojiTor.start(); done(await TojiTor.whenReady(180000));`,
+  const tor = await m.execAsync<{ ready: boolean; status: unknown }>(
+    `${MODULES}
+     const done = arguments[0];
+     await TojiTor.start();
+     const ready = await TojiTor.whenReady(180000);
+     done({ ready, status: TojiTor.status });`,
     [],
     200000
   );
-  say(ready, 'tor starts and bootstraps inside the browser');
+  say(tor.ready, 'tor starts and bootstraps inside the browser', JSON.stringify(tor.status));
   const a = await textOf(await openIn('onion', CHECK));
   const b = await textOf(await openIn('tor-two', CHECK));
   const direct = await textOf(await openIn('personal', CHECK));
@@ -133,7 +142,19 @@ try {
 
   // 3. .onion.
   const onion = await textOf(await openIn('onion', ONION));
-  say(/duckduckgo/i.test(onion.text) || /duckduckgo/i.test(onion.url), 'a .onion loads in the Onion container', onion.url.slice(0, 80));
+  // The page itself, not an error page whose address happens to name it.
+  say(!onion.url.startsWith('about:') && /duckduckgo/i.test(onion.text), 'a .onion loads in the Onion container', onion.url.slice(0, 80));
+
+  // Every window the run opened, with its tabs: each openIn adds one window
+  // with one tab, and nothing else should have appeared.
+  await m.context('chrome');
+  const windows = await m.exec<{ container: string | null; tabs: string[] }[]>(`${MODULES}
+    return [...Services.wm.getEnumerator("navigator:browser")].map(w => ({
+      container: TojiWindows.containerOf(w),
+      tabs: w.gBrowser.tabs.map(t => t.linkedBrowser.currentURI.spec),
+    }));`);
+  const opened = windows.filter((w) => w.container);
+  say(opened.length === 5 && opened.every((w) => w.tabs.length === 1), 'each container window holds just its one tab', JSON.stringify(windows));
 } catch (e) {
   console.error(`ERROR  ${(e as Error).message}`);
   failures += 1;

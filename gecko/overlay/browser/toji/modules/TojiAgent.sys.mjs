@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import { setTimeout } from "resource://gre/modules/Timer.sys.mjs";
+
 // Toji's web agent. Look, act, look, act: each turn it photographs a tab with
 // drawSnapshot (a background tab works too), the local agent server's model
 // answers with one action in the screenshot's pixels, and the TojiAgent actor

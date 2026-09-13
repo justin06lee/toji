@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import { clearTimeout, setTimeout } from "resource://gre/modules/Timer.sys.mjs";
+
 // Toji's password vault. Firefox's own password manager is locked off
 // (toji.cfg): it has no notion of containers and would offer a Work login in
 // Personal.
