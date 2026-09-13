@@ -290,9 +290,9 @@ bundles into `resource:///modules/toji/lib/*.sys.mjs`. No C++.
 |---|---|---|---|
 | 0 | Prerequisites and decisions | `chore/gecko-prereqs` | done (tag `chore-gecko-prereqs`) |
 | 1 | Stripped, branded browser that `make` builds, installs, launches | `feat/gecko-browser` | done (tag `feat-gecko-browser`) |
-| 2 | Containers, one window = one profile, picker, ephemeral wipe, clear | `feat/gecko-containers` | verified (`gecko/test/phase2.ts`), not merged yet |
-| 3 | Tor per container, kill switch, onion routing, Tor UI, `make tor-check` | `feat/gecko-containers` | verified (`gecko/test/tor-browser.ts`), not merged yet |
-| 4 | Styling and extras on native widgets; Settings, Welcome, Plans | | |
+| 2 | Containers, one window = one profile, picker, ephemeral wipe, clear | `feat/gecko-containers` | done (`gecko/test/phase2.ts`; tag `feat-gecko-containers`) |
+| 3 | Tor per container, kill switch, onion routing, Tor UI, `make tor-check` | `feat/gecko-containers` | done in the browser (`gecko/test/tor-browser.ts`; tag `feat-gecko-containers`); Tor UI not yet checked |
+| 4 | Styling and extras on native widgets; Settings, Welcome, Plans | `feat/gecko-containers` | pages done (`gecko/test/phase4.ts`; tag `feat-gecko-containers`); toolbar styling and extras not yet checked |
 | 5 | Agent server as compiled sidecar; AI pages; web agent; spotlight | | |
 | 6 | Passwords, imports, uBlock Origin | | |
 | 7 | Bug reports, shortcuts, default browser, links from other apps | | |
@@ -314,7 +314,7 @@ State per item: — not started · WIP · works · works differently · dropped 
 | Bookmarks | ⌘D, pinned or hover bar, imports | — |
 | Tabs | top/side, groups with colours, drag reorder, long-press new-tab menu, background tabs, audio/mute, agent indicator, open/close animation | — |
 | Ad blocking | uBlock Origin, on by default | — |
-| Pages | Settings, Welcome, Plans | — |
+| Pages | Settings, Welcome, Plans | WIP — Settings, Welcome, Plans, start page and bug report render with `window.toji`; web pages get no bridge; ⌘T opens about:start. Plans shows no tiers yet (they come from the agent server, phase 5) |
 | System | default browser, cold-start links from other apps | — |
 | Theme | toggle drives prefers-color-scheme | — |
 | Bug reports | written + images + screenshot; 15 s clip if a Gecko capture path holds up | — |
@@ -474,8 +474,26 @@ State per item: — not started · WIP · works · works differently · dropped 
   - **`window.toji.saveContainers(list)`** handed `[list]` to `replaceAll`: every page
     API method receives its arguments as an array. `saveContainers` and
     `clearContainer` now destructure like the rest.
+- **Toji's pages were blank.** Their HTML named its assets `./assets/…`, and a
+  relative URL can't resolve against the `about:settings` address they are shown
+  under. `vite.gecko.config.ts` now writes the HTML's asset URLs as
+  `chrome://toji/content/pages/assets/…` (imports and CSS `url()`s inside the bundle
+  stay relative, resolving against their own chrome: files).
+- **Pages verified** — `gecko/test/phase4.ts`: about:settings, about:welcome,
+  about:plans, about:start and about:report render and get `window.toji`;
+  `saveContainers(containers())` round-trips; ⌘T opens about:start; an ordinary web
+  page has no `window.toji`. Screenshots in `gecko/.work/phase4/`. Two things seen
+  there: Plans shows no plan tiers (they come from the agent server, phase 5's to
+  verify), and Welcome reports Toji as the default browser because the Electron app
+  still shares the bundle id `com.ezzy.toji` (phase 8).
 - Test harness: window handles come from Marionette's `NavigableManager` (UUIDs, not
   browserIds); `execAsync` errors carry the message as well as the stack;
   `gecko/test/phase4.ts` (new) covers Toji's pages; `tor-browser.ts` also checks that
   each container window holds exactly its one tab (an earlier run saw extra tabs appear
   after tor started).
+- Phases 2–4 merged to master (tag `feat-gecko-containers`). The phase 5–7 code is in
+  the same layer and loads without startup errors, but none of it is verified yet.
+
+**Next:** phase 5 — the agent server sidecar (it should also fill Plans' tiers), AI
+answer pages, the web agent and its spotlight; then the vault, imports and uBlock
+Origin (6), and bug reports, shortcuts, default browser and links from other apps (7).

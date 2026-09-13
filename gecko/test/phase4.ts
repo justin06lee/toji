@@ -66,18 +66,22 @@ const MODULES = `
 `;
 const shot = async (name: string) => writeFileSync(join(OUT, `${name}.png`), Buffer.from(await m.screenshot(), 'base64'));
 
-/** Waits until the page has rendered some text; returns what it shows. */
+/**
+ * Waits until the page has rendered (some text, or a text field: the start page
+ * is little more than a search box); returns what it shows.
+ */
 async function rendered(timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const r = await m.exec<{ url: string; text: string; toji: string; platform: string | null }>(`
+    const r = await m.exec<{ url: string; text: string; fields: number; toji: string; platform: string | null }>(`
       return {
         url: document.documentURI,
         text: document.body ? document.body.innerText.trim() : "",
+        fields: document.querySelectorAll("input, textarea").length,
         toji: typeof window.toji,
         platform: window.toji ? window.toji.platform : null,
       };`);
-    if (r.text.length > 20 || Date.now() > deadline) return r;
+    if (r.text.length > 20 || r.fields > 0 || Date.now() > deadline) return r;
     await Bun.sleep(500);
   }
 }
@@ -105,7 +109,7 @@ try {
       continue;
     }
     const r = await rendered();
-    say(r.url.startsWith(`about:${page}`) && r.text.length > 20, `about:${page} renders`, `${r.text.length} chars`);
+    say(r.url.startsWith(`about:${page}`) && (r.text.length > 20 || r.fields > 0), `about:${page} renders`, `${r.text.length} chars, ${r.fields} fields`);
     say(r.toji === 'object' && r.platform === 'darwin', `about:${page} has window.toji`, `${r.toji}, ${r.platform}`);
     await shot(page);
   }
