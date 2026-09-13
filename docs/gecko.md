@@ -293,7 +293,7 @@ bundles into `resource:///modules/toji/lib/*.sys.mjs`. No C++.
 | 2 | Containers, one window = one profile, picker, ephemeral wipe, clear | `feat/gecko-containers` | done (`gecko/test/phase2.ts`; tag `feat-gecko-containers`) |
 | 3 | Tor per container, kill switch, onion routing, Tor UI, `make tor-check` | `feat/gecko-containers` | done in the browser (`gecko/test/tor-browser.ts`; tag `feat-gecko-containers`); Tor UI not yet checked |
 | 4 | Styling and extras on native widgets; Settings, Welcome, Plans | `feat/gecko-containers` | pages done (`gecko/test/phase4.ts`; tag `feat-gecko-containers`); toolbar styling and extras not yet checked |
-| 5 | Agent server as compiled sidecar; AI pages; web agent; spotlight | `feat/gecko-agent` | in progress — sidecar, `toji:` pages and spotlight verified (`gecko/test/phase5.ts`); streamed answers and agent runs not yet |
+| 5 | Agent server as compiled sidecar; AI pages; web agent; spotlight | `feat/gecko-agent` | done (`gecko/test/phase5.ts`, `--live` for the model-backed checks; tag `feat-gecko-agent`) |
 | 6 | Passwords, imports, uBlock Origin | | |
 | 7 | Bug reports, shortcuts, default browser, links from other apps | | |
 | 8 | Data migration, retire Electron | | |
@@ -307,9 +307,9 @@ State per item: — not started · WIP · works · works differently · dropped 
 | Profiles | Personal, Work, Shopping, Private, Onion, custom; colours, avatars, ephemeral wipe, clear | WIP — picker, one window = one container (⌘T included), Private window, isolation, wipe on close and Clear verified; custom containers, colours and avatars not yet checked |
 | Tor | managed/external tor, bootstrap UI, fail-closed, per-container circuits, NEWNYM, .onion auto-route, hold-to-Tor | WIP — managed tor, fail-closed (tor off and tor failed), per-container circuits with different exits and .onion verified; external tor, bootstrap UI, NEWNYM, .onion auto-route from a direct window and hold-to-Tor not yet checked |
 | Passwords | encrypted, container-scoped, exact-origin fill, save bubble, autosave, generator, CSV + browser import, agent-safe | — |
-| Agent | screenshot loop, spotlight, Option tap, cursor, tab marks, step limit, dropped files, reference docs, memory/librarian, research sub-agent | WIP — spotlight opens; the agent server finds the coding CLIs; a run not yet checked |
+| Agent | screenshot loop, spotlight, Option tap, cursor, tab marks, step limit, dropped files, reference docs, memory/librarian, research sub-agent | WIP — a run presses a button on a page end to end (screenshot, model through the agent server, synthesized input), with the spotlight and cursor; dropped files, reference docs, memory/librarian, research sub-agent, Option tap and step limit not yet checked |
 | Agent backends | yagami CLIs, Cerebras, OpenAI-compatible, Toji plan (billing not wired) | — |
-| AI answer pages | Shift+Enter / wand, streamed with sources, cached, follows theme | WIP — `toji://ask` loads through the agent server under its own address, token kept in the parent; a streamed answer not yet checked (`phase5.ts --live`) |
+| AI answer pages | Shift+Enter / wand, streamed with sources, cached, follows theme | WIP — a question streams back with its sources under `toji://ask?q=…`, token kept in the parent (`phase5.ts --live`); Shift+Enter, the wand, caching and theme not yet checked |
 | Omnibox | engine choice, long-URL fade, star, vault fill, Go/Tor button | — |
 | Bookmarks | ⌘D, pinned or hover bar, imports | — |
 | Tabs | top/side, groups with colours, drag reorder, long-press new-tab menu, background tabs, audio/mute, agent indicator, open/close animation | — |
@@ -545,6 +545,31 @@ State per item: — not started · WIP · works · works differently · dropped 
   model. The default agent choice is still "toji" (the Toji plan, billing not wired),
   which sends answers to about:plans; a live check needs a CLI backend chosen.
 
-**Next:** finish phase 5 (live answer page and an agent run), then the vault, imports
-and uBlock Origin (6), and bug reports, shortcuts, default browser and links from
-other apps (7).
+- **Live answer page verified** (`phase5.ts --live`, a throwaway profile switched to
+  the coding CLIs through `PATCH /api/settings`): the question streams back ("The
+  capital of France is Paris…") under `toji://ask?q=…`, no token in the address.
+- **The web agent's clicks never reached the page.** The run log showed nothing wrong;
+  the page's own event log showed not a single mouse event. Two defects:
+  - **`ownerGlobal` is gone in Firefox 153** — `Node.webidl` has
+    `[ChromeOnly] documentGlobal` instead, and Firefox's own code uses that. Toji read
+    `ownerGlobal` in 13 places, all `undefined`: the agent's cursor (every click threw
+    before its press), the spotlight's live log (`_render` skips a missing window, so it
+    silently never updated), the vault's save bubble and key button, the vault's
+    visibility check in pages, a startup handler, and an opener fallback. All now use the
+    standard `ownerDocument.defaultView`.
+  - **The loop swallowed action errors** (`catch {}`, "the next screenshot shows what
+    happened"), so the model was told a click happened and kept retrying. A failed action
+    now goes to the run log and the model's history, and its stack to the console.
+  The actor's own input was fine throughout: a direct press/release clicked, and Enter
+  and Space activate a focused button.
+
+- **Agent run verified** (`phase5.ts --live`): goal "Click the button labeled 'Press
+  me'" on a local page; the page logged `mousedown`, `mouseup` and `click` on the
+  button and its title turned "Pressed". Phases 2 and 4 rechecked after the
+  `ownerGlobal` change: all pass.
+- Phase 5 merged to master (tag `feat-gecko-agent`).
+
+**Next:** phase 6 — the vault, imports (bookmarks and passwords from files; importing
+Chrome's passwords reads the user's real data and brings up a Keychain prompt, so it
+waits for the user's go-ahead) and uBlock Origin; then bug reports, shortcuts, default
+browser and links from other apps (7).

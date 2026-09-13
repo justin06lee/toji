@@ -42,8 +42,30 @@ const freePort = () =>
 
 // A web page that tries to send itself to toji:.
 const webPort = await freePort();
-const server: Server = createServer((_req, res) => {
+const server: Server = createServer((req, res) => {
   res.setHeader('Content-Type', 'text/html');
+  if (req.url?.startsWith('/agent')) {
+    // For the agent run: one obvious button that changes the page when pressed.
+    // Every mouse and key event is logged, so a failed run shows what arrived.
+    res.end(`<title>Agent test</title><body style="font:20px sans-serif;margin:80px">
+      <h1>Agent test</h1>
+      <button id="go" style="font-size:24px;padding:16px 32px"
+        onclick="document.title='Pressed';document.getElementById('state').textContent='Pressed'">Press me</button>
+      <p id="state">Not pressed yet</p>
+      <script>
+        window.__events = [];
+        window.__moves = 0;
+        addEventListener('mousemove', () => { window.__moves++; }, true);
+        for (const type of ['mousedown', 'mouseup', 'click', 'keydown', 'keyup']) {
+          addEventListener(type, (e) => {
+            window.__events.push(type + '@' + (e.clientX ?? '') + ',' + (e.clientY ?? '') +
+              ' b' + (e.button ?? '') + '/' + (e.buttons ?? '') + ' ' + (e.key ?? '') +
+              ' ' + (e.target.id || e.target.localName) + (e.isTrusted ? '' : ' UNTRUSTED'));
+          }, true);
+        }
+      </script></body>`);
+    return;
+  }
   res.end('<title>web</title><p>web page</p>');
 });
 server.listen(webPort, '127.0.0.1');
@@ -173,13 +195,66 @@ try {
 
   // 5. A live answer page.
   if (LIVE) {
-    await load(`toji://ask?q=${encodeURIComponent('What is the capital of France? One sentence.')}`, 45000);
+    // This profile's own agent server (its data lives in the test profile, not
+    // the user's): answer through the coding CLIs here, not the Toji plan.
+    await m.context('chrome');
+    const choice = await m.execAsync<number>(`${MODULES}
+      const done = arguments[0];
+      const res = await TojiAgentServer.fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent: "yagami" }),
+      });
+      done(res.status);`);
+    say(choice === 200, 'the test profile answers through the coding CLIs', `PATCH /api/settings ${choice}`);
+    await load(`toji://ask?q=${encodeURIComponent('What is the capital of France? One sentence.')}`, 3000);
     await m.context('content');
-    const page = await m.exec<{ url: string; text: string }>('return { url: document.documentURI, text: document.body ? document.body.innerText : "" }');
+    let page = { url: '', text: '' };
+    for (let waited = 0; waited < 120000 && !/paris/i.test(page.text); waited += 3000) {
+      page = await m.exec<{ url: string; text: string }>('return { url: document.documentURI, text: document.body ? document.body.innerText : "" }');
+      if (!/paris/i.test(page.text)) await Bun.sleep(3000);
+    }
     say(page.url.startsWith('toji://ask') && !page.url.includes('token'), 'the answer page keeps its toji://ask address, no token', page.url.slice(0, 80));
-    say(/paris/i.test(page.text), 'the answer streams in', page.text.slice(0, 120).replace(/\s+/g, ' '));
+    say(/paris/i.test(page.text), 'the answer streams in', page.text.slice(0, 160).replace(/\s+/g, ' '));
     await m.context('chrome');
     await shot('answer');
+
+    // A web agent run: one click on a local page, through screenshots, the model
+    // (via the agent server) and synthesized input.
+    await load(`http://127.0.0.1:${webPort}/agent`, 1500);
+    await m.context('chrome');
+    const agentRun = await m.execAsync<{ running: boolean; title: string; log: string }>(
+      `${MODULES}
+       const done = arguments[0];
+       const win = BrowserWindowTracker.getTopWindow();
+       const tab = win.gBrowser.selectedTab;
+       TojiAgent.run(tab, 'Click the button labeled "Press me".');
+       const t0 = Date.now();
+       await new Promise(r => setTimeout(r, 1000));
+       while (TojiAgent.isRunning(tab) && Date.now() - t0 < 180000) {
+         await new Promise(r => setTimeout(r, 2000));
+       }
+       TojiAgent.openSpotlight(win, tab);
+       await new Promise(r => setTimeout(r, 500));
+       done({
+         running: TojiAgent.isRunning(tab),
+         title: tab.linkedBrowser.contentTitle,
+         log: win.document.getElementById("toji-spotlight")?.textContent ?? "",
+       });`,
+      [],
+      200000
+    );
+    // What the page itself received, in order.
+    await m.context('content');
+    const events = await m.exec<string[]>('return [`mousemoves ${window.__moves ?? 0}`].concat(window.__events || [])');
+    await m.context('chrome');
+    say(
+      !agentRun.running && agentRun.title === 'Pressed',
+      'the web agent presses the button on a page',
+      `title "${agentRun.title}"; page events: ${events.slice(0, 24).join(' | ') || 'none'}; log: ${agentRun.log.replace(/\s+/g, ' ').slice(0, 240)}`
+    );
+    await shot('agent-run');
+    await m.exec(`${MODULES} TojiAgent.closeSpotlight(BrowserWindowTracker.getTopWindow()); return true;`);
   } else {
     console.log('SKIP  live answer page (run with --live; it sends one question to the configured model)');
   }

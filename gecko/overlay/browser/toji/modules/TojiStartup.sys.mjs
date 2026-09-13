@@ -50,7 +50,7 @@ function createWidgets() {
     tooltiptext: "Profile",
     defaultArea: lazy.CustomizableUI.AREA_NAVBAR,
     onCommand(event) {
-      const win = event.target.ownerGlobal;
+      const win = event.target.ownerDocument.defaultView;
       lazy.TojiWindows.showProfileMenu(win, event.target);
     },
   });
