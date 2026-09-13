@@ -1,8 +1,9 @@
 import { MousePointer2, Volume2, VolumeX } from 'lucide-react';
 import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { publicAsset } from '../lib/publicAsset';
 import type { BrowserTab } from '../types';
 
-const ICON = `${import.meta.env.BASE_URL}toji-round.png`;
+const ICON = publicAsset('toji-round.png');
 
 /**
  * A tab's leading slot: the site's favicon (or its group colour), with a spinner while
