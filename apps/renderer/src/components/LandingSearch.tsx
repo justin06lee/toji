@@ -13,6 +13,12 @@ interface LandingSearchProps {
    * this it is a plain submit button of the same size and look.
    */
   tor?: { active: boolean; onToggle?: () => void };
+  /**
+   * Take the keys when it appears (the default). The Gecko browser's start page doesn't:
+   * there, as in the Electron app, a new tab's keys go to the toolbar's omnibox, and a
+   * page that focused itself would take them from it.
+   */
+  autoFocus?: boolean;
 }
 
 /**
@@ -20,7 +26,7 @@ interface LandingSearchProps {
  * mirrored into the toolbar omnibox (typing in one showing up in the other read as a
  * glitch, not a feature).
  */
-export function LandingSearch({ onGo, onAi, tor }: LandingSearchProps) {
+export function LandingSearch({ onGo, onAi, tor, autoFocus = true }: LandingSearchProps) {
   const [value, setValue] = useState('');
   const submit = () => {
     if (value.trim()) onGo(value);
@@ -49,7 +55,7 @@ export function LandingSearch({ onGo, onAi, tor }: LandingSearchProps) {
           placeholder="search or enter a url"
           spellCheck={false}
           autoComplete="off"
-          autoFocus
+          autoFocus={autoFocus}
           aria-label="Search"
           className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-neutral-400"
         />

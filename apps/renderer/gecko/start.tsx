@@ -10,7 +10,7 @@ import { askAI, navigate } from './navigation';
 function StartPage() {
   return (
     <div className="flex h-full w-full bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
-      <LandingSearch onGo={navigate} onAi={askAI()} />
+      <LandingSearch onGo={navigate} onAi={askAI()} autoFocus={false} />
     </div>
   );
 }

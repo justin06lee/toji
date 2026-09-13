@@ -1,10 +1,7 @@
-import { ArrowLeft, ArrowRight, Copy, FolderPlus, Moon, MousePointer2, PanelLeft, PanelTop, RefreshCcw, RotateCw, Search, Settings, Star, Sun, Volume2, VolumeX, WandSparkles, X } from 'lucide-react';
-import { AnimatePresence, motion, Reorder } from 'motion/react';
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
-import { createPortal, flushSync } from 'react-dom';
+import { AnimatePresence } from 'motion/react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AgentSpotlight, type AgentLogEntry } from './components/AgentSpotlight';
 import { WindowProfilePicker } from './components/WindowProfilePicker';
-import { TorHoldButton } from './components/TorHoldButton';
 import { LandingSearch } from './components/LandingSearch';
 import { TorStatusBar } from './components/TorStatusBar';
 import { VaultFillButton, VaultPromptBar } from './components/VaultBar';
@@ -13,9 +10,13 @@ import { BugReportSheet, type BugReportRequest, type FormReportResult } from './
 import { BugReportTray, type FormReport } from './components/BugReportTray';
 import { PageView } from './components/PageView';
 import { Sidebar } from './components/Sidebar';
-import { NewTabButton } from './components/NewTabButton';
 import { BOOKMARKS_BAR_EVENT, BookmarksBar, bookmarksBarPinned, setBookmarksBarPinned } from './components/BookmarksBar';
-import { TabMarks, TabStatus } from './components/TabStatus';
+import { AddressRow } from './components/AddressRow';
+import { AgentCursor } from './components/AgentCursor';
+import { BrowserFrame } from './components/BrowserFrame';
+import { TabContextMenu, type TabMenuAt } from './components/TabContextMenu';
+import { TopTabStrip } from './components/TopTabStrip';
+import { WindowDragHandle } from './components/WindowDragHandle';
 import { WebView } from './components/WebView';
 import { addBookmarks, addMemory, agentResearch, agentStep, deleteBookmark, fetchPageSources, getAgents, getBookmarks, getReferences, librarian, pageStreamUrl, uploadFile, type Bookmark } from './lib/api';
 import { eyesAct, eyesAvailable, pageScreenshot, toPagePoint, PAGE_SIGNATURE_JS } from './lib/agentDom';
@@ -31,12 +32,10 @@ import {
 } from './lib/containers';
 import { hostOf, isOnionUrl, looksLikeUrl, toUrl, webSearchUrl, type SearchEngineId } from './lib/nav';
 import { bridge, type OpenUrlOptions, type TorStatus, type VaultEntry, type VaultPrompt } from './lib/bridge';
-import { DRAG_HANDLE_DWELL_MS, revealDragHandle } from './lib/dragHandle';
-import { dragBoundsX, type DragBoundsX } from './lib/dragBounds';
-import { TAB_ENTER, TAB_EXIT, TAB_REST, TAB_TRANSITION } from './lib/tabMotion';
+import { useBookmarksPeek } from './lib/useBookmarksPeek';
 import { insertTabAfter, replacePristineTabWithWelcome, startBrowsingInTab } from './lib/tabLifecycle';
 import { tabTitle } from './lib/tabPresentation';
-import { GROUP_COLORS, type BrowserTab, type TabGroup } from './types';
+import type { BrowserTab, TabGroup } from './types';
 import { AUTOSAVE_TIMEOUT_MS, autosaveEnabled, autosaveVerdict } from './lib/vaultAutosave';
 import { REPLAY_EVENT, isReplayStorageKey, issuePageState, replayEnabled } from './lib/bugReport';
 import { ReplayRecorder, type ReplayState } from './lib/replayRecorder';
@@ -56,10 +55,6 @@ interface AgentFile {
 }
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const DEFAULT_AGENT_MAX_STEPS = 40;
-/** How long the pointer rests under the address bar before the unpinned bookmarks bar shows. */
-const BOOKMARKS_PEEK_DWELL_MS = 90;
-/** How long the bar stays after the pointer leaves it. */
-const BOOKMARKS_PEEK_LINGER_MS = 160;
 
 const isMac = (window as unknown as { toji?: { platform?: string } }).toji?.platform === 'darwin';
 // Only macOS hides the native title bar (titleBarStyle: 'hiddenInset'), so only macOS
@@ -90,31 +85,13 @@ export function App() {
   const [layout, setLayout] = useState<'top' | 'side'>(() => (localStorage.getItem('toji-layout') === 'side' ? 'side' : 'top'));
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem('toji-sidebar') !== 'closed');
   const [sidebarPeek, setSidebarPeek] = useState(false);
-  const [dragHandleVisible, setDragHandleVisible] = useState(false);
-  // The notch stays in the tree while it fades out; it leaves once that animation ends.
-  const [dragHandleMounted, setDragHandleMounted] = useState(false);
   // The bookmarks bar: part of the chrome when pinned, a hover reveal under the address
   // bar when not. The pin state is shared with Settings through localStorage.
   const [bookmarksPinned, setBookmarksPinned] = useState(bookmarksBarPinned);
-  const [bookmarksPeek, setBookmarksPeek] = useState(false);
-  const bookmarksPeekRef = useRef(false);
-  bookmarksPeekRef.current = bookmarksPeek;
-  const bookmarksPeekShowTimer = useRef<number | null>(null);
-  const bookmarksPeekHideTimer = useRef<number | null>(null);
-  /** The revealed bar itself, for the cursor-stream check below. */
-  const bookmarksPeekEl = useRef<HTMLDivElement | null>(null);
-  // Mirrors dragHandleVisible for the cursor stream (which reads it far more often
-  // than React re-renders), and pins it while the pointer is on the notch or holding it.
-  const dragHandleVisibleRef = useRef(false);
-  const dragHandleHeldRef = useRef(false);
-  const [dragHandleHolding, setDragHandleHolding] = useState(false);
+  const bookmarksPeek = useBookmarksPeek(bookmarksPinned);
+  // Whether the top tab row has filled up (the window-drag notch shows then).
   const [topTabsCrowded, setTopTabsCrowded] = useState(false);
-  const [draggingTopTabId, setDraggingTopTabId] = useState<string | null>(null);
-  // How far the tab under the pointer may be dragged before it leaves the strip. Measured
-  // on pointer-down (Motion reads it as the gesture starts) rather than handed over as a
-  // ref, which would put Motion's own resize listener in charge of every tab's offset.
-  const [topDragBounds, setTopDragBounds] = useState<{ id: string; bounds: DragBoundsX } | null>(null);
-  const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tabId: string } | null>(null);
+  const [tabMenu, setTabMenu] = useState<TabMenuAt | null>(null);
   const [containers, setContainers] = useState<Container[]>(loadContainers);
   // Bookmarks live in the server's store (the import panel fills it too); the omnibox
   // star reads and toggles the entry for the page on screen.
@@ -145,11 +122,6 @@ export function App() {
   // partition — cookies from a previous Tor session in this window can never carry over.
   const torHoldEpoch = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  // A long address is cut off by the star at the omnibox's right end. While it is
-  // longer than the box (and not being edited) its tail fades out just before the
-  // buttons instead of stopping dead against them.
-  const [omniboxOverflows, setOmniboxOverflows] = useState(false);
-  const topTabStripRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     saveContainers(containers);
@@ -230,11 +202,6 @@ export function App() {
     if (torMode) void bridge().torStart?.();
   }, [torMode]);
 
-  const groupColor = (groupId: string | null) => {
-    if (!groupId) return null;
-    const idx = groups.findIndex((g) => g.id === groupId);
-    return idx < 0 ? null : GROUP_COLORS[idx % GROUP_COLORS.length];
-  };
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
@@ -252,179 +219,8 @@ export function App() {
       window.removeEventListener('storage', sync);
     };
   }, []);
-  // The unpinned bookmarks bar appears while the pointer rests where the bar would be:
-  // the gap under the address bar (Toji's own, see the trigger in the header) and the
-  // top of the page (reported by the guest, whose mouse events never reach here). It
-  // waits a moment before showing, so a pointer merely passing through on its way to the
-  // omnibox does not flash it, and lingers a moment after the pointer leaves.
-  const showBookmarksPeek = useCallback(() => {
-    if (bookmarksPeekHideTimer.current !== null) window.clearTimeout(bookmarksPeekHideTimer.current);
-    bookmarksPeekHideTimer.current = null;
-    if (bookmarksPeekRef.current || bookmarksPeekShowTimer.current !== null || bookmarksBarPinned()) return;
-    bookmarksPeekShowTimer.current = window.setTimeout(() => {
-      bookmarksPeekShowTimer.current = null;
-      setBookmarksPeek(true);
-    }, BOOKMARKS_PEEK_DWELL_MS);
-  }, []);
-  const hideBookmarksPeek = useCallback(() => {
-    if (bookmarksPeekShowTimer.current !== null) window.clearTimeout(bookmarksPeekShowTimer.current);
-    bookmarksPeekShowTimer.current = null;
-    if (bookmarksPeekHideTimer.current !== null) window.clearTimeout(bookmarksPeekHideTimer.current);
-    bookmarksPeekHideTimer.current = window.setTimeout(() => {
-      bookmarksPeekHideTimer.current = null;
-      setBookmarksPeek(false);
-    }, BOOKMARKS_PEEK_LINGER_MS);
-  }, []);
-  useEffect(() => {
-    if (bookmarksPinned) setBookmarksPeek(false);
-  }, [bookmarksPinned]);
-  // The chrome above the bar is a native drag region, and macOS delivers no mouse events
-  // over those — a pointer that leaves the bar upward can leave it hanging, its
-  // mouseleave never fired. The cursor stream (the window-drag notch uses it for the same
-  // reason) closes it once the pointer is clearly somewhere else.
-  useEffect(() => {
-    if (!bookmarksPeek) return;
-    return bridge().onWindowCursor?.((cursor) => {
-      const zone = bookmarksPeekEl.current?.getBoundingClientRect();
-      if (!zone) return;
-      const over = cursor.inside && cursor.x >= zone.left && cursor.x <= zone.right && cursor.y >= zone.top && cursor.y <= zone.bottom;
-      if (!over) hideBookmarksPeek();
-    });
-  }, [bookmarksPeek, hideBookmarksPeek]);
-  // Keep the active tab in view in the top strip: after a switch, a resize, or a layout
-  // change the strip may have scrolled it out of sight.
-  useEffect(() => {
-    if (layout !== 'top') return;
-    const strip = topTabStripRef.current;
-    if (!strip) return;
-    const frame = requestAnimationFrame(() => {
-      const el = strip.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(activeId)}"]`);
-      el?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [activeId, layout, topTabsCrowded]);
   useEffect(() => localStorage.setItem('toji-layout', layout), [layout]);
   useEffect(() => localStorage.setItem('toji-sidebar', sidebarOpen ? 'open' : 'closed'), [sidebarOpen]);
-  useEffect(() => {
-    if (layout !== 'top') {
-      setTopTabsCrowded(false);
-      return;
-    }
-    const strip = topTabStripRef.current;
-    if (!strip) return;
-    const measure = () => {
-      const items = Array.from(strip.querySelectorAll<HTMLElement>('[data-testid="top-tab"]'));
-      const occupied = items.reduce((sum, item) => sum + item.getBoundingClientRect().width, 0) + Math.max(0, items.length - 1) * 4;
-      setTopTabsCrowded(strip.clientWidth - occupied < 120);
-      // Shrinking the window can leave the active tab past the strip's edge; bring it back.
-      if (strip.scrollWidth > strip.clientWidth) strip.querySelector<HTMLElement>('[data-testid="top-tab"][data-active]')?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
-    };
-    const frame = requestAnimationFrame(measure);
-    const observer = new ResizeObserver(measure);
-    observer.observe(strip);
-    return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-    };
-  }, [layout, tabs.length]);
-  // The window-drag notch reveals from the tracked cursor position streamed by the
-  // main process, never from DOM hover: the chrome around it is a native drag region,
-  // so mouse events over that are swallowed by the OS and hover there never fires.
-  // Two things keep it steady rather than strobing: it never hides while the pointer
-  // is actually on it (the notch itself is not a drag region, so it does get hover),
-  // and hiding waits out a brief dwell so one stray sample can't blink it away.
-  const setDragHandle = useCallback((visible: boolean) => {
-    if (dragHandleVisibleRef.current === visible) return;
-    dragHandleVisibleRef.current = visible;
-    setDragHandleVisible(visible);
-    if (visible) setDragHandleMounted(true);
-  }, []);
-  useEffect(() => {
-    setDragHandle(false);
-    let hideTimer: ReturnType<typeof setTimeout> | null = null;
-    const cancelHide = () => {
-      if (hideTimer === null) return;
-      clearTimeout(hideTimer);
-      hideTimer = null;
-    };
-    const off = bridge().onWindowCursor?.((cursor) => {
-      const shown = dragHandleVisibleRef.current;
-      if (dragHandleHeldRef.current || revealDragHandle(cursor, shown, layout)) {
-        cancelHide();
-        setDragHandle(true);
-        return;
-      }
-      if (!shown || hideTimer !== null) return;
-      hideTimer = setTimeout(() => {
-        hideTimer = null;
-        if (!dragHandleHeldRef.current) setDragHandle(false);
-      }, DRAG_HANDLE_DWELL_MS);
-    });
-    return () => {
-      cancelHide();
-      off?.();
-    };
-  }, [layout, setDragHandle]);
-  // Grabbing the notch hands the window to the main process, which follows the cursor
-  // until we let go. Letting go is watched on the whole window, not just the notch: the
-  // pointer can outrun a window that has hit a screen edge, and a drag that never ends
-  // would leave the window stuck to the cursor.
-  const releaseWindowDrag = useCallback(() => {
-    if (!dragHandleHeldRef.current) return;
-    dragHandleHeldRef.current = false;
-    setDragHandleHolding(false);
-    bridge().endWindowDrag?.();
-  }, []);
-  const holdWindowDrag = useCallback(
-    (event: ReactMouseEvent) => {
-      if (event.button !== 0) return;
-      event.preventDefault();
-      dragHandleHeldRef.current = true;
-      setDragHandleHolding(true);
-      setDragHandle(true);
-      bridge().startWindowDrag?.();
-    },
-    [setDragHandle]
-  );
-  useEffect(() => {
-    if (!dragHandleHolding) return;
-    window.addEventListener('mouseup', releaseWindowDrag);
-    window.addEventListener('blur', releaseWindowDrag);
-    return () => {
-      window.removeEventListener('mouseup', releaseWindowDrag);
-      window.removeEventListener('blur', releaseWindowDrag);
-    };
-  }, [dragHandleHolding, releaseWindowDrag]);
-  // Vertical wheel scrolls the horizontal tab strip. Registered natively because React
-  // attaches onWheel as a PASSIVE listener, where preventDefault() is a no-op.
-  useEffect(() => {
-    if (layout !== 'top') return;
-    const strip = topTabStripRef.current;
-    if (!strip) return;
-    const onWheel = (event: WheelEvent) => {
-      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
-      strip.scrollLeft += event.deltaY;
-      event.preventDefault();
-    };
-    strip.addEventListener('wheel', onWheel, { passive: false });
-    return () => strip.removeEventListener('wheel', onWheel);
-  }, [layout]);
-  const omniboxValue = activeTab?.query ?? '';
-  useEffect(() => {
-    const input = inputRef.current;
-    if (!input) return;
-    const measure = () => setOmniboxOverflows(input.scrollWidth > input.clientWidth + 1);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(input);
-    return () => observer.disconnect();
-  }, [omniboxValue, layout, sidebarOpen]);
-  useEffect(() => {
-    if (!tabMenu) return;
-    const onEsc = (e: KeyboardEvent) => e.key === 'Escape' && setTabMenu(null);
-    window.addEventListener('keydown', onEsc);
-    return () => window.removeEventListener('keydown', onEsc);
-  }, [tabMenu]);
 
   // Tap the ⌥ Option key to toggle the agent spotlight for the active tab.
   // (Tap detection so Option-as-a-modifier for typing accents still works.)
@@ -874,20 +670,6 @@ export function App() {
     };
   }, [closeTab, openTab]);
 
-  const onSubmit = (event: FormEvent) => {
-    event.preventDefault();
-    if (activeTab) go(activeTab.id, activeTab.query);
-    inputRef.current?.blur();
-  };
-
-  // Plain Enter searches/navigates like any browser (form submit); Shift+Enter asks the AI for an answer page.
-  const onSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter' && event.shiftKey) {
-      event.preventDefault();
-      if (activeTab) go(activeTab.id, activeTab.query, { ai: true });
-      (event.currentTarget as HTMLInputElement).blur();
-    }
-  };
 
   const reloadTab = useCallback(
     (tabId: string) => {
@@ -978,8 +760,8 @@ export function App() {
       // The pointer entered or left the top of the page — where the unpinned bookmarks
       // bar goes. Only the page in front can be under the pointer at all.
       if (tabId !== activeRef.current) return;
-      if ((payload as { inside?: boolean } | undefined)?.inside) showBookmarksPeek();
-      else hideBookmarksPeek();
+      if ((payload as { inside?: boolean } | undefined)?.inside) bookmarksPeek.show();
+      else bookmarksPeek.hide();
       return;
     }
     if (channel !== 'toji-vault:form') return;
@@ -998,7 +780,7 @@ export function App() {
     void bridge()
       .vaultMatches?.(webContentsId)
       .then((result) => setVaultMatches((m) => ({ ...m, [tabId]: result?.ok ? result.value : [] })));
-  }, [hideBookmarksPeek, showBookmarksPeek]);
+  }, [bookmarksPeek.hide, bookmarksPeek.show]);
 
   /** Ask the main process to fill a credential into a tab's page. */
   const fillCredential = useCallback((tabId: string, entryId: string) => {
@@ -1779,59 +1561,6 @@ export function App() {
   const canReload = Boolean(activeTab && (activeTab.url || activeTab.query.trim()));
   const activeBookmarked = Boolean(activeTab?.url && bookmarks.some((b) => b.url === activeTab.url));
 
-  const iconBtn =
-    'no-drag inline-flex items-center justify-center rounded-full text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-black/5 dark:hover:bg-white/10 transition-colors disabled:opacity-35 disabled:pointer-events-none';
-
-  // The visible "grab here" notch. It mounts only while revealDragHandle says the
-  // tracked cursor is near the top band (see the onWindowCursor effect) — it must
-  // unmount when hidden, because even a transparent handle would steal clicks from
-  // the tabs beneath it.
-  //
-  // It is deliberately NOT a native -webkit-app-region: drag rect. Those swallow every
-  // mouse event, which is why the notch had no grab cursor and no double-click, and why
-  // it flickered. Instead the main process follows the cursor between drag-start and
-  // drag-end, which behaves the same on macOS and on Linux (where drag regions only
-  // work on frameless windows at all).
-  //
-  // It fades out exactly as it fades in: the same slide and fade, run backwards. While
-  // it is on its way out it takes no pointer events, so a tab underneath is clickable
-  // at once, and it leaves the tree only when the animation has finished.
-  const dragHandleShown = dragHandleVisible && (layout === 'side' || topTabsCrowded);
-  const windowDragHandle = (placement: 'side' | 'tabs') => (
-    <motion.div
-      className={`drag-strip drag-strip-${placement}`}
-      data-testid="window-drag-handle"
-      data-state={dragHandleShown ? 'shown' : 'hiding'}
-      aria-hidden
-      initial={{ opacity: 0, y: '-100%' }}
-      animate={dragHandleShown ? { opacity: 1, y: 0 } : { opacity: 0, y: '-100%' }}
-      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-      onAnimationComplete={() => {
-        if (!dragHandleVisibleRef.current) setDragHandleMounted(false);
-      }}
-    >
-      <span
-        className={`drag-notch${dragHandleHolding ? ' drag-notch-holding' : ''}`}
-        data-testid="window-drag-notch"
-        role="presentation"
-        title="Drag to move the window — double-click to zoom"
-        style={{ pointerEvents: dragHandleShown ? 'auto' : 'none' }}
-        onMouseDown={holdWindowDrag}
-        onMouseUp={releaseWindowDrag}
-        onMouseEnter={() => setDragHandle(true)}
-        onDoubleClick={() => {
-          releaseWindowDrag();
-          bridge().windowTitleAction?.();
-        }}
-      >
-        <span className="drag-grip">
-          {Array.from({ length: 12 }, (_, i) => (
-            <i key={i} />
-          ))}
-        </span>
-      </span>
-    </motion.div>
-  );
   const torBar = activeContainer.egress === 'tor' ? <TorStatusBar container={activeContainer} status={torStatus} /> : null;
   const vaultBar = vaultPrompt ? (
     <VaultPromptBar prompt={vaultPrompt} container={findContainer(containers, vaultPrompt.containerId ?? undefined)} error={vaultPromptError} onDone={() => setVaultPrompt(null)} />
@@ -1852,65 +1581,31 @@ export function App() {
   ) : null;
 
   const addressRow = (
-    // In side-tab mode the omnibox row is the topmost row, so it needs the macOS traffic-light
-    // offset (just enough to sit right beside them); in top-tab mode the TAB STRIP is above
-    // it, so the row sits flush left.
-    <div className={`flex items-center gap-1 ${isMac && layout === 'side' ? 'pl-[72px]' : ''}`}>
-      <button type="button" aria-label="Back" title="Back  ⌘[" disabled={!activeTab?.canBack} onClick={goBack} className={`${iconBtn} h-9 w-9 border border-black/[0.08] dark:border-white/10`}>
-        <ArrowLeft size={15} />
-      </button>
-      <button type="button" aria-label="Forward" title="Forward  ⌘]" disabled={!activeTab?.canForward} onClick={goForward} className={`${iconBtn} h-9 w-9 border border-black/[0.08] dark:border-white/10`}>
-        <ArrowRight size={15} />
-      </button>
-      <button type="button" aria-label="Reload" disabled={!canReload} onClick={reloadActive} className={`${iconBtn} h-9 w-9 border border-black/[0.08] dark:border-white/10`}>
-        <RotateCw size={14} />
-      </button>
-      {/* The omnibox and everything anchored to it: the save-password card hangs off
-          this box's right edge rather than pushing the page down. */}
-      <div className="relative flex min-w-0 flex-1">
-      <form onSubmit={onSubmit} className="no-drag flex h-9 w-full min-w-0 items-center rounded-full border border-black/[0.09] bg-black/[0.03] pl-3.5 pr-1 transition focus-within:bg-transparent dark:border-white/12 dark:bg-white/[0.04]">
-        <Search size={15} className="shrink-0 text-neutral-400 mr-2.5 mb-0.25" />
-        <input
-          ref={inputRef}
-          value={activeTab?.query ?? ''}
-          onChange={(e) => activeTab && patchTab(activeTab.id, { query: e.target.value })}
-          onKeyDown={onSearchKeyDown}
-          placeholder="search or enter a url"
-          spellCheck={false}
-          autoComplete="off"
-          aria-label="Search"
-          className={`min-w-0 flex-1 bg-transparent pr-3 text-sm outline-none placeholder:text-neutral-400${omniboxOverflows ? ' omnibox-overflowing' : ''}`}
-        />
-        {activeTab && <VaultFillButton matches={vaultMatches[activeTab.id] ?? []} onFill={(entryId) => fillCredential(activeTab.id, entryId)} />}
-        {activeTab?.mode === 'web' && activeTab.url && (
-          <button
-            type="button"
-            aria-label={activeBookmarked ? 'Remove bookmark' : 'Bookmark this page'}
-            aria-pressed={activeBookmarked}
-            title={activeBookmarked ? 'Remove bookmark  ⌘D' : 'Bookmark this page  ⌘D'}
-            onClick={() => void toggleBookmark(activeTab)}
-            className="inline-flex h-7 w-7 mr-0.5 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-black/10 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/15 dark:hover:text-white"
-          >
-            <Star size={15} className={activeBookmarked ? 'fill-current' : ''} />
-          </button>
-        )}
-        <button type="button" aria-label="Generate an AI page" title="Generate an AI page  ⇧↵" onClick={() => activeTab && go(activeTab.id, activeTab.query, { ai: true })} className="inline-flex h-7 w-7 mr-1 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-black/10 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/15 dark:hover:text-white">
-          <WandSparkles size={15} />
-        </button>
-        <TorHoldButton compact active={torMode} onGo={() => activeTab && go(activeTab.id, activeTab.query)} onToggle={baseContainer.egress === 'tor' ? undefined : toggleWindowTor} />
-      </form>
-      {vaultBar}
-      </div>
-      <button type="button" aria-label="Toggle tab layout" title={layout === 'side' ? 'Top tabs' : 'Side tabs'} onClick={() => setLayout((l) => (l === 'side' ? 'top' : 'side'))} className={`${iconBtn} h-9 w-9 border border-black/[0.08] dark:border-white/10`}>
-        {layout === 'side' ? <PanelTop size={14} /> : <PanelLeft size={14} />}
-      </button>
-      <button type="button" aria-label="Toggle theme" onClick={toggleTheme} className={`${iconBtn} h-9 w-9 border border-black/[0.08] dark:border-white/10`}>
-        {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
-      </button>
-      <button type="button" aria-label="Settings" title="Settings" onClick={() => openInternal('settings')} className={`${iconBtn} h-9 w-9 border border-black/[0.08] dark:border-white/10`}>
-        <Settings size={14} />
-      </button>
-    </div>
+    <AddressRow
+      trafficLights={isMac}
+      layout={layout}
+      theme={theme}
+      canBack={Boolean(activeTab?.canBack)}
+      canForward={Boolean(activeTab?.canForward)}
+      canReload={canReload}
+      value={activeTab?.query ?? ''}
+      onValueChange={(value) => activeTab && patchTab(activeTab.id, { query: value })}
+      inputRef={inputRef}
+      onGo={() => activeTab && go(activeTab.id, activeTab.query)}
+      onAi={() => activeTab && go(activeTab.id, activeTab.query, { ai: true })}
+      vaultButton={activeTab && <VaultFillButton matches={vaultMatches[activeTab.id] ?? []} onFill={(entryId) => fillCredential(activeTab.id, entryId)} />}
+      star={activeTab?.mode === 'web' && activeTab.url ? { bookmarked: activeBookmarked, onToggle: () => void toggleBookmark(activeTab) } : null}
+      torMode={torMode}
+      onToggleTor={baseContainer.egress === 'tor' ? undefined : toggleWindowTor}
+      vaultBar={vaultBar}
+      onBack={goBack}
+      onForward={goForward}
+      onReload={reloadActive}
+      onToggleLayout={() => setLayout((l) => (l === 'side' ? 'top' : 'side'))}
+      onToggleTheme={toggleTheme}
+      onSettings={() => openInternal('settings')}
+      sidebarOpen={sidebarOpen}
+    />
   );
 
   const landing = activeTab ? (
@@ -2064,88 +1759,25 @@ export function App() {
       );
     })();
 
-  // The agent's visible "own mouse" — glides to each target and ripples on click.
-  const agentCursorEl =
-    agentCursor &&
-    createPortal(
-      <motion.div className="pointer-events-none fixed left-0 top-0 z-[55]" animate={{ x: agentCursor.x, y: agentCursor.y }} transition={{ type: 'spring', stiffness: 240, damping: 24 }}>
-        <MousePointer2 size={22} className="fill-white text-neutral-900 drop-shadow-[0_2px_6px_rgba(0,0,0,0.55)]" />
-        <motion.span key={agentCursor.tick} className="absolute left-0 top-0 block h-5 w-5 rounded-full border-2 border-white shadow-[0_0_0_1.5px_rgba(0,0,0,0.55)]" initial={{ scale: 0.3, opacity: 0.9 }} animate={{ scale: 1.9, opacity: 0 }} transition={{ duration: 0.45 }} />
-      </motion.div>,
-      document.body
-    );
 
   // Right-click menu for a tab — shared by the top tab strip AND the sidebar tab rows.
-  const tabContextMenu =
-    tabMenu &&
-    (() => {
-      const menuTab = tabs.find((t) => t.id === tabMenu.tabId);
-      if (!menuTab) return null;
-      const run = (fn: () => void) => () => {
-        fn();
-        setTabMenu(null);
-      };
-      const item =
-        'flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-neutral-700 hover:bg-black/[0.06] dark:text-neutral-200 dark:hover:bg-white/10';
-      const sep = <div className="my-1 border-t border-black/[0.06] dark:border-white/[0.08]" />;
-      const otherGroups = groups.filter((g) => g.id !== menuTab.groupId);
-      const hasContent = Boolean(menuTab.url || menuTab.query.trim());
-      const left = Math.min(tabMenu.x, window.innerWidth - 224);
-      const top = Math.min(tabMenu.y, window.innerHeight - 300);
-      return createPortal(
-        <>
-          <div className="no-drag fixed inset-0 z-[100]" onClick={() => setTabMenu(null)} onContextMenu={(e) => { e.preventDefault(); setTabMenu(null); }} />
-          <div
-            className="no-drag fixed z-[101] min-w-[200px] select-none rounded-xl border border-black/10 bg-white p-1 shadow-xl dark:border-white/10 dark:bg-neutral-900"
-            style={{ left, top }}
-          >
-            <button type="button" className={item} onClick={run(() => duplicateTab(menuTab.id))}>
-              <Copy size={14} /> Duplicate tab
-            </button>
-            {hasContent && (
-              <button type="button" className={item} onClick={run(() => reloadTab(menuTab.id))}>
-                <RotateCw size={14} /> Reload
-              </button>
-            )}
-            {menuTab.mode === 'web' && menuTab.url && (
-              <button type="button" className={item} onClick={run(() => resetContext(menuTab.id))}>
-                <RefreshCcw size={14} /> Reset context
-              </button>
-            )}
-            {menuTab.mode === 'web' && menuTab.url && (
-              <button type="button" className={item} onClick={run(() => toggleMute(menuTab.id))}>
-                {menuTab.muted ? <Volume2 size={14} /> : <VolumeX size={14} />} {menuTab.muted ? 'Unmute tab' : 'Mute tab'}
-              </button>
-            )}
-            {sep}
-            <button type="button" className={item} onClick={run(() => createGroup(menuTab.id))}>
-              <FolderPlus size={14} /> New group
-            </button>
-            {otherGroups.map((g) => (
-              <button key={g.id} type="button" className={item} onClick={run(() => addTabToGroup(menuTab.id, g.id))}>
-                <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: GROUP_COLORS[groups.findIndex((x) => x.id === g.id) % GROUP_COLORS.length] }} />
-                Add to {g.name}
-              </button>
-            ))}
-            {menuTab.groupId && (
-              <button type="button" className={item} onClick={run(() => ungroupTab(menuTab.id))}>
-                <X size={14} /> Remove from group
-              </button>
-            )}
-            {sep}
-            <button type="button" className={item} onClick={run(() => closeTab(menuTab.id))}>
-              <X size={14} /> Close tab
-            </button>
-            {tabs.length > 1 && (
-              <button type="button" className={item} onClick={run(() => closeOtherTabs(menuTab.id))}>
-                <X size={14} /> Close other tabs
-              </button>
-            )}
-          </div>
-        </>,
-        document.body
-      );
-    })();
+  const tabContextMenu = tabMenu && (
+    <TabContextMenu
+      menu={tabMenu}
+      tabs={tabs}
+      groups={groups}
+      onDismiss={() => setTabMenu(null)}
+      onDuplicate={duplicateTab}
+      onReload={reloadTab}
+      onResetContext={resetContext}
+      onToggleMute={toggleMute}
+      onNewGroup={createGroup}
+      onAddToGroup={addTabToGroup}
+      onUngroup={ungroupTab}
+      onClose={closeTab}
+      onCloseOthers={closeOtherTabs}
+    />
+  );
 
   // Which tabs the agent is driving — the side strip marks them the same way the top one does.
   const agentTabIds = new Set(Object.entries(agents).filter(([, a]) => a?.running).map(([id]) => id));
@@ -2208,180 +1840,44 @@ export function App() {
   );
 
   const topTabStrip = (
-    // Tabs sit at the very top (offset past the macOS traffic lights); the omnibox lives
-    // just beneath them, flush left since nothing overlaps it there.
-    // Tabs are drag-reorderable along the X axis only (they live in a horizontal strip).
-    <div className="flex h-9">
-      {isMac && <div aria-hidden className="w-[82px] shrink-0" />}
-      <Reorder.Group
-        ref={topTabStripRef}
-        as="div"
-        axis="x"
-        values={tabs}
-        onReorder={setTabs}
-        layoutScroll
-        data-testid="top-tab-strip"
-        // Positioned so a closing tab, popped out of the flow while it fades, stays put.
-        className="tab-strip relative flex min-w-0 flex-1 select-none items-center gap-1 overflow-x-auto overflow-y-hidden"
-      >
-        {/* A closing tab leaves the flow at once (popLayout) so its neighbours slide
-            into the gap while it fades where it was. */}
-        <AnimatePresence initial={false} mode="popLayout">
-          {tabs.map((tab) => {
-            const color = groupColor(tab.groupId);
-            return (
-              <Reorder.Item
-                as="div"
-                key={tab.id}
-                value={tab}
-                // Only positions animate. Animating size too squashed the titles while
-                // the row reflowed — on every open, close and window resize.
-                layout="position"
-                initial={TAB_ENTER.x}
-                animate={TAB_REST}
-                exit={TAB_EXIT}
-                transition={TAB_TRANSITION}
-                dragConstraints={topDragBounds?.id === tab.id ? topDragBounds.bounds : undefined}
-                dragElastic={0}
-                dragMomentum={false}
-                data-testid="top-tab"
-                data-tab-id={tab.id}
-                data-active={tab.id === activeId || undefined}
-                onPointerDownCapture={(event: React.PointerEvent<HTMLDivElement>) => {
-                  const strip = topTabStripRef.current;
-                  if (event.button !== 0 || !strip) return;
-                  flushSync(() => setTopDragBounds({ id: tab.id, bounds: dragBoundsX(event.currentTarget.getBoundingClientRect(), strip.getBoundingClientRect()) }));
-                }}
-                onClick={() => setActiveId(tab.id)}
-                onDragStart={() => {
-                  setDraggingTopTabId(tab.id);
-                  setActiveId(tab.id);
-                }}
-                onDragEnd={() => setDraggingTopTabId(null)}
-                onContextMenu={(e: React.MouseEvent<HTMLDivElement>) => {
-                  e.preventDefault();
-                  setActiveId(tab.id);
-                  setTabMenu({ x: e.clientX, y: e.clientY, tabId: tab.id });
-                }}
-                whileDrag={{ cursor: 'grabbing', zIndex: 90 }}
-                // Tabs share the row evenly and shrink together as it fills, down to a
-                // width that still shows the favicon and a word of the title; past that
-                // the strip scrolls. Nothing depends on the window being any one size.
-                className={`no-drag group relative flex h-8 w-[210px] min-w-[104px] max-w-[210px] flex-[1_1_210px] cursor-grab items-center gap-2 overflow-hidden rounded-xl px-2.5 transition-colors ${
-                  draggingTopTabId === tab.id || tab.id === activeId
-                    ? `bg-[var(--tab-active)]${draggingTopTabId === tab.id ? ' top-tab-dragging' : ''}`
-                    : 'bg-[var(--tab)] text-neutral-500 hover:bg-[var(--tab-hover)] dark:text-neutral-400'
-                }`}
-              >
-                <TabStatus tab={tab} color={color} />
-                <span className="min-w-0 flex-1 truncate text-[13px]">{tabTitle(tab)}</span>
-                {/* Sound first, then the agent's mark, then close; the title, not the
-                    favicon, gives up room for them. */}
-                <TabMarks tab={tab} agentRunning={agents[tab.id]?.running} onToggleMute={() => toggleMute(tab.id)} />
-                <button
-                  type="button"
-                  aria-label="Close tab"
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    closeTab(tab.id);
-                  }}
-                  className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-md text-neutral-400 opacity-0 transition group-hover:opacity-100 hover:bg-black/10 hover:text-neutral-900 dark:hover:bg-white/15 dark:hover:text-white"
-                >
-                  <X size={12} />
-                </button>
-              </Reorder.Item>
-            );
-          })}
-        </AnimatePresence>
-        {/* New-tab sits right beside the last tab and slides along with it as tabs come
-            and go; once the row fills up it pins to the corner. */}
-        {!topTabsCrowded && (
-          <motion.div layout="position" transition={TAB_TRANSITION} className="flex shrink-0">
-            <NewTabButton className="ml-0.5" onNewTab={() => openTab(null)} onNewGroup={openTabInNewGroup} onNewAgentTab={openAgentTab} data-testid="top-new-tab" />
-          </motion.div>
-        )}
-      </Reorder.Group>
-      {topTabsCrowded && <NewTabButton className="ml-1.5" onNewTab={() => openTab(null)} onNewGroup={openTabInNewGroup} onNewAgentTab={openAgentTab} data-testid="top-new-tab" />}
-    </div>
+    <TopTabStrip
+      tabs={tabs}
+      groups={groups}
+      activeId={activeId}
+      trafficLights={isMac}
+      agentTabIds={agentTabIds}
+      onSelect={setActiveId}
+      onClose={closeTab}
+      onReorder={setTabs}
+      onContextMenu={(tabId, x, y) => {
+        setActiveId(tabId);
+        setTabMenu({ x, y, tabId });
+      }}
+      onToggleMute={toggleMute}
+      onNewTab={() => openTab(null)}
+      onNewGroup={openTabInNewGroup}
+      onNewAgentTab={openAgentTab}
+      onCrowdedChange={setTopTabsCrowded}
+    />
   );
 
-  // The picker only ever shows before this window has an identity (fresh window, or
-  // its profile was deleted underneath it) — a window's profile is fixed once chosen,
-  // so there is no mid-session picker and nothing underneath worth keeping mounted.
-  if (profilePickerOpen) {
-    return (
-      <div className="relative h-screen bg-white dark:bg-neutral-950">
-        <div className="drag fixed inset-x-0 top-0 z-50 h-16" data-testid="profile-drag-region" aria-hidden />
-        {profilePicker}
-      </div>
-    );
-  }
 
-  // One tree for both layouts. The header changes shape and the sidebar comes and goes,
-  // but the viewport — every mounted page — keeps its place in the tree, so switching
-  // between top and side tabs rearranges the chrome without reloading a single tab.
-  const sideTabs = layout === 'side';
   return (
-    <div className="flex h-screen flex-col bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
-      {hasCustomTitleBar && dragHandleMounted && windowDragHandle(sideTabs ? 'side' : 'tabs')}
-      <header className="drag relative shrink-0 border-b border-black/[0.07] px-3 pt-2.5 pb-2.5 dark:border-white/10">
-        {!sideTabs && topTabStrip}
-        {/* Same 10px rhythm as the header's top/bottom padding, so all three gaps match. */}
-        <div className={sideTabs ? '' : 'mt-2.5'}>{addressRow}</div>
-        {/* Tight under the address bar: the bar's own 3px chip inset plus 2px each side,
-            and it eats most of the header's bottom padding so the border sits close too. */}
-        {bookmarksPinned && <div className="mt-0.5 -mb-2">{bookmarksBar}</div>}
-        {torBar}
-        {!bookmarksPinned && (
-          // Unpinned, the bar shows itself when the pointer rests anywhere in the gap
-          // between the address bar and the header's bottom edge — over the page, never
-          // moving it. The header is a native drag region, which never sees the pointer,
-          // so the strip that senses it is carved out of that region. What appears is
-          // laid out exactly as the pinned bar: same gaps, same border, no shadow.
-          <div className="no-drag absolute inset-x-0 bottom-0 z-[60] h-2.5" onMouseEnter={showBookmarksPeek} onMouseLeave={hideBookmarksPeek} data-testid="bookmarks-bar-trigger">
-            <AnimatePresence>
-              {bookmarksPeek && (
-                <motion.div
-                  ref={bookmarksPeekEl}
-                  className="absolute inset-x-0 top-0 border-b border-black/[0.07] bg-white px-3 pt-0.5 pb-0.5 dark:border-white/10 dark:bg-neutral-950"
-                  data-testid="bookmarks-bar-peek"
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -4 }}
-                  transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
-                >
-                  {bookmarksBar}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        )}
-      </header>
-      <div className="relative flex min-h-0 flex-1">
-        {sideTabs && sidebarOpen && sidebarEl()}
-        {viewport}
-        {sideTabs && !sidebarOpen && (
-          <>
-            <div className="absolute left-0 top-0 z-[70] h-full w-3" data-testid="sidebar-peek-trigger" onMouseEnter={() => setSidebarPeek(true)} />
-            <AnimatePresence>
-              {sidebarPeek && (
-                <motion.div
-                  className="absolute left-0 top-0 z-[75] flex h-full bg-white dark:bg-neutral-950"
-                  data-testid="sidebar-peek"
-                  onMouseLeave={() => setSidebarPeek(false)}
-                  initial={{ x: -240 }}
-                  animate={{ x: 0 }}
-                  exit={{ x: -240 }}
-                  transition={{ type: 'spring', stiffness: 420, damping: 38 }}
-                >
-                  {sidebarEl(true)}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </>
-        )}
-      </div>
+    <BrowserFrame
+      layout={layout}
+      dragHandle={hasCustomTitleBar && <WindowDragHandle layout={layout} crowded={topTabsCrowded} />}
+      topTabStrip={topTabStrip}
+      addressRow={addressRow}
+      bookmarksBar={bookmarksBar}
+      bookmarksPinned={bookmarksPinned}
+      bookmarksPeek={bookmarksPeek}
+      torBar={torBar}
+      sidebar={sidebarEl}
+      sidebarOpen={sidebarOpen}
+      sidebarPeek={sidebarPeek}
+      onSidebarPeek={setSidebarPeek}
+      viewport={viewport}
+    >
       <AnimatePresence>{agentSpotlight}</AnimatePresence>
       <AnimatePresence>
         {bugReport && (
@@ -2410,8 +1906,8 @@ export function App() {
           />
         )}
       </AnimatePresence>
-      {agentCursorEl}
+      <AgentCursor cursor={agentCursor} />
       {tabContextMenu}
-    </div>
+    </BrowserFrame>
   );
 }

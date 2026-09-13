@@ -7,8 +7,6 @@
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
-  CustomizableUI:
-    "moz-src:///browser/components/customizableui/CustomizableUI.sys.mjs",
   TojiAgent: "resource:///modules/toji/TojiAgent.sys.mjs",
   TojiAgentServer: "resource:///modules/toji/TojiAgentServer.sys.mjs",
   TojiMigrate: "resource:///modules/toji/TojiMigrate.sys.mjs",
@@ -17,6 +15,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   TojiContainers: "resource:///modules/toji/TojiContainers.sys.mjs",
   TojiPages: "resource:///modules/toji/TojiPages.sys.mjs",
   TojiProxy: "resource:///modules/toji/TojiProxy.sys.mjs",
+  TojiFirefoxUI: "resource:///modules/toji/TojiFirefoxUI.sys.mjs",
+  TojiShell: "resource:///modules/toji/TojiShell.sys.mjs",
   TojiWindows: "resource:///modules/toji/TojiWindows.sys.mjs",
   TojiVaultForAgent: "resource:///modules/toji/TojiVault.sys.mjs",
   initVault: "resource:///modules/toji/TojiVault.sys.mjs",
@@ -43,18 +43,16 @@ function blockPeerConnections(params) {
   }
 }
 
-function createWidgets() {
-  lazy.CustomizableUI.createWidget({
-    id: "toji-profile-button",
-    type: "button",
-    label: "Profile",
-    tooltiptext: "Profile",
-    defaultArea: lazy.CustomizableUI.AREA_NAVBAR,
-    onCommand(event) {
-      const win = event.target.ownerDocument.defaultView;
-      lazy.TojiWindows.showProfileMenu(win, event.target);
-    },
-  });
+// The tab layout was Firefox's vertical-tabs pref before the shell drew Toji's own;
+// it is Toji's pref now, and Firefox's vertical tabs stay off.
+function migrateLayout() {
+  const p = Services.prefs;
+  if (p.prefHasUserValue("sidebar.verticalTabs")) {
+    if (!p.prefHasUserValue("toji.layout")) {
+      p.setStringPref("toji.layout", p.getBoolPref("sidebar.verticalTabs", false) ? "side" : "top");
+    }
+    p.clearUserPref("sidebar.verticalTabs");
+  }
 }
 
 // Toji's light/dark toggle. Firefox's own look follows the system colour scheme,
@@ -93,9 +91,11 @@ export const TojiStartup = {
       console.error("[toji] agent/vault", e);
     }
     try {
-      createWidgets();
+      migrateLayout();
+      lazy.TojiFirefoxUI.init();
+      lazy.TojiShell.init();
     } catch (e) {
-      console.error("[toji] widgets", e);
+      console.error("[toji] shell", e);
     }
     // The agent server isn't needed for the first paint; start it when idle.
     // After the Electron app, its agent server data moves in before the server

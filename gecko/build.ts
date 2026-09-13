@@ -179,6 +179,7 @@ async function generate() {
   }
   await bundleAddons();
   await buildPages();
+  await buildShell();
   await buildServer();
 }
 
@@ -187,6 +188,13 @@ async function generate() {
 async function buildPages() {
   const out = join(GENERATED, 'browser', 'toji', 'content', 'pages');
   await run(['bun', 'run', 'build:pages'], { cwd: REPO, env: { TOJI_PAGES_OUT: out } });
+}
+
+// The browser window's shell (Toji's tab strip, address bar, sidebar, overlays in
+// place of Firefox's): the React build that ships at chrome://toji/content/shell/.
+async function buildShell() {
+  const out = join(GENERATED, 'browser', 'toji', 'content', 'shell');
+  await run(['bun', 'run', 'build:shell'], { cwd: REPO, env: { TOJI_SHELL_OUT: out } });
 }
 
 // The agent server as one executable (bun build --compile), shipped as

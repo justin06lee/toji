@@ -11,6 +11,7 @@ import { clearTimeout, setTimeout } from "resource://gre/modules/Timer.sys.mjs";
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
+  TojiShell: "resource:///modules/toji/TojiShell.sys.mjs",
   Subprocess: "resource://gre/modules/Subprocess.sys.mjs",
 });
 // gecko/lib bundles export plain functions, so each of these holds the whole module.
@@ -19,7 +20,6 @@ ChromeUtils.defineLazyGetter(lazy, "ReportLib", () =>
 );
 
 const PENDING_TTL_MS = 24 * 60 * 60 * 1000;
-const XHTML_NS = "http://www.w3.org/1999/xhtml";
 
 function env() {
   const out = {};
@@ -155,7 +155,7 @@ class BugReports {
     }
     const tab = win.gBrowser.addTrustedTab(url, { relatedToCurrent: true });
     win.gBrowser.selectedTab = tab;
-    this.#pending.set(reportId, { files, at: Date.now(), url, tab });
+    this.#pending.set(reportId, { files, at: Date.now(), url, tab, bodyOnClipboard: overflow });
     this.#watch(win, reportId);
     return {
       ok: true,
@@ -198,36 +198,50 @@ class BugReports {
     return true;
   }
 
-  // The report tray: bottom-right over the form's tab while the report is
-  // finished there. Attaches once the form has loaded; says when it's filed.
+  // The report tray is the shell's (bottom-right over the form's tab, while the
+  // report is finished there): this attaches once the form has loaded and tells the
+  // shell how it is going, and when it's filed.
   #watch(win, reportId) {
     const pending = this.#pending.get(reportId);
-    const tray = this.#tray(win, reportId);
+    const tell = (status, extra = {}) => {
+      const state = lazy.ReportLib.issuePageState(this.target, pending.tab.linkedBrowser?.currentURI?.spec ?? "");
+      lazy.TojiShell.reportTray(win, {
+        reportId,
+        tab: pending.tab,
+        url: pending.url,
+        files: pending.files.map(f => f.name),
+        bodyOnClipboard: !!pending.bodyOnClipboard,
+        status,
+        onForm: state === "form",
+        ...extra,
+      });
+    };
     const update = async () => {
-      const browser = pending.tab.linkedBrowser;
-      const state = lazy.ReportLib.issuePageState(this.target, browser.currentURI?.spec ?? "");
-      tray.hidden = !pending.tab.selected;
+      const spec = pending.tab.linkedBrowser?.currentURI?.spec ?? "";
+      const state = lazy.ReportLib.issuePageState(this.target, spec);
       if (state === "filed") {
-        this.#trayText(tray, "Filed. Thank you.");
+        const number = Number(/\/issues\/(\d+)/.exec(spec)?.[1]) || undefined;
+        tell("filed", { number });
         setTimeout(() => this.#closeTray(win, reportId), 6000);
         return;
       }
-      if (state !== "form") {
-        this.#trayText(tray, "Sign in to GitHub to finish the report.");
+      if (state !== "form" || !pending.files.length) {
+        tell(pending.attached ? "attached" : "waiting");
         return;
       }
-      if (pending.attached || pending.attaching || browser.webProgress?.isLoadingDocument) {
+      if (pending.attached || pending.attaching || pending.tab.linkedBrowser?.webProgress?.isLoadingDocument) {
+        tell(pending.attached ? "attached" : pending.attaching ? "attaching" : "waiting");
         return;
       }
       pending.attaching = true;
-      this.#trayText(tray, "Attaching the files…");
+      tell("attaching");
       const result = await this.attach(reportId).catch(e => ({ ok: false, error: e.message }));
       pending.attaching = false;
       if (result?.ok) {
         pending.attached = true;
-        this.#trayText(tray, "Files attached — check the form, then submit.");
+        tell("attached");
       } else {
-        this.#trayChips(win, tray, reportId, result?.error);
+        tell("failed", { error: result?.error || "The files didn't attach." });
       }
     };
     const listener = {
@@ -239,72 +253,39 @@ class BugReports {
       },
     };
     win.gBrowser.addTabsProgressListener(listener);
-    const onSelect = () => update();
     const onClose = e => {
       if (e.target === pending.tab) {
         this.#closeTray(win, reportId);
       }
     };
-    win.gBrowser.tabContainer.addEventListener("TabSelect", onSelect);
     win.gBrowser.tabContainer.addEventListener("TabClose", onClose);
     pending.cleanup = () => {
       win.gBrowser.removeTabsProgressListener(listener);
-      win.gBrowser.tabContainer.removeEventListener("TabSelect", onSelect);
       win.gBrowser.tabContainer.removeEventListener("TabClose", onClose);
     };
     update();
   }
 
-  #tray(win, reportId) {
-    const doc = win.document;
-    const tray = doc.createElementNS(XHTML_NS, "div");
-    tray.className = "toji-report-tray";
-    tray.dataset.report = reportId;
-    doc.body.append(tray);
-    return tray;
-  }
-
-  #trayText(tray, text) {
-    tray.replaceChildren(tray.ownerDocument.createTextNode(text));
-  }
-
-  #trayChips(win, tray, reportId, error) {
-    const doc = win.document;
+  /** The tray's "Try again". */
+  retryTray(win, reportId) {
     const pending = this.#pending.get(reportId);
-    const p = doc.createElementNS(XHTML_NS, "p");
-    p.textContent = `${error || "The files didn't attach."} Drag them onto the form:`;
-    const list = doc.createElementNS(XHTML_NS, "div");
-    list.className = "toji-report-chips";
-    for (const f of pending.files) {
-      const chip = doc.createElementNS(XHTML_NS, "span");
-      chip.className = "toji-report-chip";
-      chip.textContent = f.name;
-      chip.draggable = true;
-      chip.addEventListener("dragstart", e => {
-        const file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
-        file.initWithPath(f.path);
-        e.dataTransfer.mozSetDataAt("application/x-moz-file", file, 0);
-        e.dataTransfer.effectAllowed = "copy";
-      });
-      list.append(chip);
+    if (!pending) {
+      return;
     }
-    const retry = doc.createElementNS(XHTML_NS, "button");
-    retry.textContent = "Try again";
-    retry.addEventListener("click", () => {
-      pending.attached = false;
-      this.#closeTray(win, reportId, true);
-      this.#watch(win, reportId);
-    });
-    const reveal = doc.createElementNS(XHTML_NS, "button");
-    reveal.textContent = "Show in Finder";
-    reveal.addEventListener("click", () => this.reveal(reportId));
-    tray.replaceChildren(p, list, retry, reveal);
+    pending.attached = false;
+    pending.cleanup?.();
+    this.#watch(win, reportId);
+  }
+
+  /** The tray's close button: the report stops waiting. */
+  dismissTray(win, reportId) {
+    this.#closeTray(win, reportId);
   }
 
   #closeTray(win, reportId, keepPending = false) {
     const pending = this.#pending.get(reportId);
     pending?.cleanup?.();
-    win.document.querySelector(`.toji-report-tray[data-report="${reportId}"]`)?.remove();
+    lazy.TojiShell.reportTray(win, null);
     if (!keepPending) {
       this.#pending.delete(reportId);
       IOUtils.remove(PathUtils.join(reportsDir(), reportId), { recursive: true, ignoreAbsent: true }).catch(() => {});

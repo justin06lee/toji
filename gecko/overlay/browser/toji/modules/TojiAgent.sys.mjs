@@ -10,71 +10,23 @@ import { setTimeout } from "resource://gre/modules/Timer.sys.mjs";
 // dispatches real input into the page. The browser drives itself; there is no
 // remote protocol.
 //
-// Also here: the spotlight (tap Option to toggle), the agent's gliding cursor,
-// and the mark on a tab the agent is driving.
+// Its spotlight, gliding cursor and the mark on a driven tab are the shell's
+// (TojiShell): this module reports the runs, the pointer and the Option tap.
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   TojiAgentServer: "resource:///modules/toji/TojiAgentServer.sys.mjs",
+  TojiShell: "resource:///modules/toji/TojiShell.sys.mjs",
 });
 // gecko/lib bundles export plain functions, so each of these holds the whole module.
 ChromeUtils.defineLazyGetter(lazy, "AgentLib", () =>
   ChromeUtils.importESModule("resource:///modules/toji/lib/agent.sys.mjs")
 );
 
-const XHTML_NS = "http://www.w3.org/1999/xhtml";
-const SVG_NS = "http://www.w3.org/2000/svg";
 const MAX_FREE_STEPS = 24;
 const TAP_MS = 400;
 
-const ICONS = {
-  pointer:
-    "M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z",
-  paperclip:
-    "m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551",
-  arrowUp: "m5 12 7-7 7 7M12 19V5",
-  square: "M5 5h14v14H5z",
-  minus: "M5 12h14",
-  plus: "M5 12h14M12 5v14",
-  x: "M18 6 6 18M6 6l12 12",
-};
-
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-function icon(doc, name, size = 16) {
-  const svg = doc.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("width", size);
-  svg.setAttribute("height", size);
-  svg.setAttribute("aria-hidden", "true");
-  svg.classList.add("toji-icon");
-  const path = doc.createElementNS(SVG_NS, "path");
-  path.setAttribute("d", ICONS[name]);
-  svg.append(path);
-  return svg;
-}
-
-function h(doc, tag, attrs = {}, ...children) {
-  const el = doc.createElementNS(XHTML_NS, tag);
-  for (const [key, value] of Object.entries(attrs)) {
-    if (value == null || value === false) {
-      continue;
-    }
-    if (key === "class") {
-      el.className = value;
-    } else if (key.startsWith("on")) {
-      el.addEventListener(key.slice(2), value);
-    } else {
-      el.setAttribute(key, value === true ? "" : value);
-    }
-  }
-  for (const child of children) {
-    if (child != null) {
-      el.append(child);
-    }
-  }
-  return el;
-}
 
 function toUrl(input) {
   const text = String(input).trim();
@@ -172,27 +124,17 @@ async function waitForLoad(browser, run) {
   }
 }
 
+/** Where the agent's pointer is, in the window, for the shell's cursor; none off-screen. */
 function drawCursor(run, point, pressed = false) {
   const tab = run.tab;
   const win = tab.ownerDocument.defaultView;
-  const cursor = win.document.getElementById("toji-agent-cursor");
-  if (!cursor) {
-    return;
-  }
   if (!point || !tab.selected) {
-    cursor.hidden = true;
+    lazy.TojiShell.agentPointer(win, null);
     return;
   }
   const rect = tab.linkedBrowser.getBoundingClientRect();
   const zoom = tab.linkedBrowser.fullZoom || 1;
-  cursor.hidden = false;
-  cursor.style.transform = `translate(${rect.left + point.x * zoom}px, ${rect.top + point.y * zoom}px)`;
-  if (pressed) {
-    cursor.classList.remove("toji-agent-ripple");
-    // Restart the ripple animation.
-    void cursor.offsetWidth;
-    cursor.classList.add("toji-agent-ripple");
-  }
+  lazy.TojiShell.agentPointer(win, { x: rect.left + point.x * zoom, y: rect.top + point.y * zoom, pressed });
 }
 
 async function glide(run, actor, to, buttons = 0) {
@@ -248,19 +190,9 @@ function logTo(run, role, text) {
   TojiAgent._render(run.tab.ownerDocument.defaultView);
 }
 
-function setMark(run, on) {
-  const tab = run.tab;
-  tab.toggleAttribute("toji-agent", on);
-  let mark = tab.querySelector(".toji-agent-mark");
-  if (on && !mark) {
-    mark = tab.ownerDocument.createElementNS(XHTML_NS, "span");
-    mark.className = "toji-agent-mark";
-    mark.append(icon(tab.ownerDocument, "pointer", 13));
-    const close = tab.querySelector(".tab-close-button");
-    (close?.parentNode ?? tab.querySelector(".tab-content"))?.insertBefore(mark, close ?? null);
-  } else if (!on) {
-    mark?.remove();
-  }
+/** The tab's mark comes from the run's state; the shell redraws it. */
+function setMark(run, _on) {
+  TojiAgent._render(run.tab.ownerDocument.defaultView);
 }
 
 async function runAgent(run, goal) {
@@ -502,6 +434,7 @@ async function runAgent(run, goal) {
       const question = action.question.trim();
       logTo(run, "agent", question);
       run.ask = question;
+      // Bring the chat up so the user sees the question.
       TojiAgent.openSpotlight(tab.ownerDocument.defaultView, tab);
       const answer = await new Promise(resolve => (run.askResolve = resolve));
       run.askResolve = null;
@@ -689,10 +622,7 @@ async function runAgent(run, goal) {
   TojiAgent._render(tab.ownerDocument.defaultView);
 }
 
-// --- Spotlight ----------------------------------------------------------------
-
-/** window -> the tab the open spotlight talks to */
-const spotlights = new WeakMap();
+// --- Files dropped on the spotlight ------------------------------------------------
 
 async function addFiles(run, fileList) {
   for (const file of fileList) {
@@ -710,196 +640,6 @@ async function addFiles(run, fileList) {
     }
   }
   TojiAgent._render(run.tab.ownerDocument.defaultView);
-}
-
-function renderSpotlight(win) {
-  const doc = win.document;
-  const tab = spotlights.get(win);
-  let root = doc.getElementById("toji-spotlight");
-  if (!tab) {
-    root?.remove();
-    return;
-  }
-  const run = runFor(tab);
-  if (!root) {
-    root = h(doc, "div", { id: "toji-spotlight" });
-    root.addEventListener("mousedown", e => {
-      if (e.target === root) {
-        TojiAgent.closeSpotlight(win);
-      }
-    });
-    root.addEventListener("keydown", e => {
-      if (e.key === "Escape") {
-        TojiAgent.closeSpotlight(win);
-      }
-    });
-    doc.body.append(root);
-  }
-  const previousValue = root.querySelector(".toji-spotlight-input")?.value ?? "";
-  const target = tab.linkedBrowser.contentTitle || hostOf(tab.linkedBrowser.currentURI?.spec) || "this page";
-  const prefs = Services.prefs;
-  const maxSteps = prefs.getIntPref("toji.agent.maxSteps", 40);
-  const noLimit = prefs.getBoolPref("toji.agent.noLimit", false);
-
-  const logBox = run.log.length
-    ? h(
-        doc,
-        "div",
-        { class: "toji-spotlight-log" },
-        ...run.log.map(l =>
-          h(
-            doc,
-            "div",
-            { class: `toji-log-row toji-log-${l.role}` },
-            l.role === "you" ? null : icon(doc, "pointer", 14),
-            h(doc, "div", { class: "toji-log-bubble" }, l.text)
-          )
-        ),
-        run.running && !run.ask ? h(doc, "div", { class: "toji-log-working" }, h(doc, "span", { class: "toji-spinner" }), "Working…") : null,
-        run.ask ? h(doc, "div", { class: "toji-log-asking" }, h(doc, "span", { class: "toji-dot" }), "Waiting for your answer…") : null
-      )
-    : null;
-
-  const files = run.files.length
-    ? h(
-        doc,
-        "div",
-        { class: "toji-spotlight-files" },
-        ...run.files.map(f =>
-          h(
-            doc,
-            "span",
-            { class: "toji-file-chip" },
-            icon(doc, "paperclip", 12),
-            h(doc, "span", { class: "toji-file-name" }, f.name),
-            h(
-              doc,
-              "button",
-              {
-                type: "button",
-                "aria-label": `Remove ${f.name}`,
-                onclick: () => {
-                  run.files = run.files.filter(x => x.index !== f.index);
-                  renderSpotlight(win);
-                },
-              },
-              icon(doc, "x", 12)
-            )
-          )
-        )
-      )
-    : null;
-
-  const input = h(doc, "input", {
-    class: "toji-spotlight-input",
-    placeholder: run.ask ? "Answer the agent…" : `Tell the agent what to do on ${target}…`,
-    spellcheck: "false",
-  });
-  input.value = previousValue;
-  const picker = h(doc, "input", { type: "file", multiple: true, hidden: true });
-  picker.addEventListener("change", () => {
-    if (picker.files.length) {
-      addFiles(run, [...picker.files]);
-    }
-  });
-  const form = h(
-    doc,
-    "form",
-    {
-      class: "toji-spotlight-form",
-      onsubmit: e => {
-        e.preventDefault();
-        const value = input.value.trim();
-        if (!value) {
-          return;
-        }
-        input.value = "";
-        if (run.ask && run.askResolve) {
-          logTo(run, "you", value);
-          run.askResolve(value);
-          return;
-        }
-        TojiAgent.closeSpotlight(win);
-        if (!run.running) {
-          runAgent(run, value).catch(e => {
-            logTo(run, "system", `The agent stopped: ${e.message}`);
-            run.running = false;
-            setMark(run, false);
-          });
-        }
-      },
-    },
-    picker,
-    h(
-      doc,
-      "button",
-      { type: "button", class: "toji-ghost", "aria-label": "Attach files", title: "Attach files (or drop them here)", onclick: () => picker.click() },
-      icon(doc, "paperclip", 17)
-    ),
-    icon(doc, "pointer", 19),
-    input,
-    run.running
-      ? h(doc, "button", { type: "button", class: "toji-stop", title: "Stop", onclick: () => TojiAgent.stop(tab) }, icon(doc, "square", 14))
-      : null,
-    !run.running || run.ask
-      ? h(doc, "button", { type: "submit", class: "toji-run", "aria-label": run.ask ? "Answer" : "Run" }, icon(doc, "arrowUp", 17))
-      : null
-  );
-
-  const footer = h(
-    doc,
-    "div",
-    { class: "toji-spotlight-footer" },
-    h(doc, "span", {}, "Runs until done."),
-    h(doc, "span", { class: "toji-sep" }, "·"),
-    h(doc, "span", {}, "Step limit"),
-    h(
-      doc,
-      "div",
-      { class: `toji-stepper${noLimit ? " disabled" : ""}` },
-      h(doc, "button", { type: "button", "aria-label": "Fewer steps", onclick: () => { prefs.setIntPref("toji.agent.maxSteps", Math.max(1, maxSteps - 5)); renderSpotlight(win); } }, icon(doc, "minus", 12)),
-      h(doc, "span", { class: "toji-steps" }, String(maxSteps)),
-      h(doc, "button", { type: "button", "aria-label": "More steps", onclick: () => { prefs.setIntPref("toji.agent.maxSteps", maxSteps + 5); renderSpotlight(win); } }, icon(doc, "plus", 12))
-    ),
-    h(
-      doc,
-      "button",
-      {
-        type: "button",
-        role: "switch",
-        class: "toji-switch",
-        "aria-checked": String(noLimit),
-        onclick: () => {
-          prefs.setBoolPref("toji.agent.noLimit", !noLimit);
-          renderSpotlight(win);
-        },
-      },
-      h(doc, "span", { class: "toji-switch-track" }, h(doc, "span", { class: "toji-switch-thumb" })),
-      h(doc, "span", {}, "No limit")
-    ),
-    noLimit ? h(doc, "span", { class: "toji-warn" }, "⚠ may run long — Stop to halt") : null
-  );
-
-  const card = h(doc, "div", { class: "toji-spotlight-card" }, logBox, files, form, footer);
-  card.addEventListener("mousedown", e => e.stopPropagation());
-  card.addEventListener("dragover", e => {
-    e.preventDefault();
-    card.classList.add("dragover");
-  });
-  card.addEventListener("dragleave", () => card.classList.remove("dragover"));
-  card.addEventListener("drop", e => {
-    e.preventDefault();
-    card.classList.remove("dragover");
-    if (e.dataTransfer.files.length) {
-      addFiles(run, [...e.dataTransfer.files]);
-    }
-  });
-  root.replaceChildren(card);
-  const log = root.querySelector(".toji-spotlight-log");
-  if (log) {
-    log.scrollTop = log.scrollHeight;
-  }
-  input.focus();
 }
 
 // --- Option tap -----------------------------------------------------------------
@@ -960,55 +700,38 @@ export const TojiAgent = {
   },
 
   initWindow(win) {
-    const doc = win.document;
-    if (!doc.getElementById("toji-agent-cursor")) {
-      const cursor = h(doc, "div", { id: "toji-agent-cursor", hidden: true });
-      cursor.append(icon(doc, "pointer", 22));
-      doc.body.append(cursor);
-    }
     watchOptionTap(win);
     win.gBrowser.tabContainer.addEventListener("TabClose", e => {
-      const run = runs.get(e.target);
-      if (run) {
+      if (runs.get(e.target)) {
         this.stop(e.target);
         runs.delete(e.target);
       }
-      if (spotlights.get(win) === e.target) {
-        this.closeSpotlight(win);
-      }
     });
     win.gBrowser.tabContainer.addEventListener("TabSelect", () => {
-      for (const tab of win.gBrowser.tabs) {
-        const run = runs.get(tab);
-        if (run?.running) {
-          drawCursor(run, tab.selected ? run.pointer : null);
-        }
-      }
-      if (!runs.get(win.gBrowser.selectedTab)?.running) {
-        doc.getElementById("toji-agent-cursor")?.setAttribute("hidden", "true");
-      }
+      // The cursor shows over the tab in front only.
+      const run = runs.get(win.gBrowser.selectedTab);
+      drawCursor(run ?? { tab: win.gBrowser.selectedTab }, run?.running ? run.pointer : null);
+      this._render(win);
     });
   },
 
+  /** The spotlight is the shell's; these open it on a tab, close it, or toggle it (Option). */
   openSpotlight(win, tab = win.gBrowser.selectedTab) {
     if (win.document.documentElement.hasAttribute("toji-picking")) {
       return;
     }
-    spotlights.set(win, tab);
-    renderSpotlight(win);
+    lazy.TojiShell.spotlight(win, tab);
   },
 
   closeSpotlight(win) {
-    spotlights.delete(win);
-    renderSpotlight(win);
+    lazy.TojiShell.spotlight(win, null);
   },
 
   toggleSpotlight(win) {
-    if (spotlights.has(win)) {
-      this.closeSpotlight(win);
-    } else {
-      this.openSpotlight(win);
+    if (win.document.documentElement.hasAttribute("toji-picking")) {
+      return;
     }
+    lazy.TojiShell.spotlight(win, "toggle");
   },
 
   /** Starts a run from outside the spotlight (e.g. a new AI tab). */
@@ -1017,6 +740,28 @@ export const TojiAgent = {
     if (!run.running) {
       runAgent(run, goal);
     }
+  },
+
+  /**
+   * What was typed into the spotlight for a tab: the answer to the agent's question
+   * if it is waiting on one, otherwise a new run (unless one is already going).
+   */
+  submit(tab, text) {
+    const run = runFor(tab);
+    if (run.ask && run.askResolve) {
+      logTo(run, "you", text);
+      run.askResolve(text);
+      return "answered";
+    }
+    if (run.running) {
+      return "busy";
+    }
+    runAgent(run, text).catch(e => {
+      logTo(run, "system", `The agent stopped: ${e.message}`);
+      run.running = false;
+      setMark(run, false);
+    });
+    return "started";
   },
 
   stop(tab) {
@@ -1035,9 +780,33 @@ export const TojiAgent = {
     return !!runs.get(tab)?.running;
   },
 
+  /** A tab's run as the shell shows it: no paths, no internals. */
+  stateOf(tab) {
+    const run = tab ? runs.get(tab) : null;
+    return {
+      running: !!run?.running,
+      log: run ? run.log.map(l => ({ role: l.role, text: l.text })) : [],
+      ask: run?.ask ?? null,
+      files: run ? run.files.map(f => ({ index: f.index, name: f.name })) : [],
+    };
+  },
+
+  addFiles(tab, files) {
+    return addFiles(runFor(tab), files);
+  },
+
+  removeFile(tab, index) {
+    const run = runs.get(tab);
+    if (run) {
+      run.files = run.files.filter(f => f.index !== index);
+      this._render(tab.ownerDocument.defaultView);
+    }
+  },
+
+  /** Something about a run in this window changed: the shell redraws. */
   _render(win) {
-    if (win && spotlights.has(win)) {
-      renderSpotlight(win);
+    if (win) {
+      lazy.TojiShell.agentChanged(win);
     }
   },
 };

@@ -6,44 +6,15 @@
 //   bun run build:pages                 → dist/gecko-pages/
 //   TOJI_PAGES_OUT=/some/dir bun run build:pages
 
-import { dirname, parse, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { bundledPublicAssets, outputDir, root } from './vite.gecko.shared';
 
-const repo = dirname(fileURLToPath(import.meta.url));
-const root = resolve(repo, 'apps/renderer');
 const PAGES = ['settings', 'welcome', 'plans', 'start', 'report'] as const;
 const SHARED_ASSETS = resolve(root, 'src/lib/publicAsset.ts');
 const BUNDLED_ASSETS = resolve(root, 'gecko/publicAsset.ts');
-
-/**
- * The output directory is emptied before every build, so refuse one that would take
- * something else with it: the filesystem root, the repository or anything above it, or
- * the renderer's sources.
- */
-function outputDir(): string {
-  const out = resolve(repo, process.env.TOJI_PAGES_OUT || 'dist/gecko-pages');
-  const inside = (parent: string, child: string) => child === parent || child.startsWith(parent + sep);
-  if (out === parse(out).root || inside(out, repo) || inside(root, out)) {
-    throw new Error(`TOJI_PAGES_OUT=${out} would be emptied before the build; point it at a directory of its own.`);
-  }
-  return out;
-}
-
-/** Swap src/lib/publicAsset.ts for gecko/publicAsset.ts, which bundles public/ into assets/. */
-function bundledPublicAssets(): Plugin {
-  return {
-    name: 'toji-gecko-public-assets',
-    enforce: 'pre',
-    async resolveId(source, importer) {
-      if (!importer || !/(^|\/)publicAsset$/.test(source)) return null;
-      const resolved = await this.resolve(source, importer, { skipSelf: true });
-      return resolved?.id === SHARED_ASSETS ? BUNDLED_ASSETS : null;
-    }
-  };
-}
 
 /**
  * Vite names each page after its path from the root (gecko/settings.html) and points it
@@ -81,7 +52,7 @@ export default defineConfig({
   publicDir: false,
   plugins: [bundledPublicAssets(), react(), tailwindcss(), pagesAtTop()],
   build: {
-    outDir: outputDir(),
+    outDir: outputDir('TOJI_PAGES_OUT', 'dist/gecko-pages'),
     emptyOutDir: true,
     // Firefox ESR 140 and later: nothing needs transpiling for older engines.
     target: 'firefox140',

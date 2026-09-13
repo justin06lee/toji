@@ -4,8 +4,8 @@
 
 // One window = one container. A window learns its container when it opens
 // (Toji passes it in window.arguments), from the tab it adopts, from the page
-// that opened it, or — if nothing says — from the "Who's browsing?" picker it
-// shows instead of a page. From then on every tab created in it gets that
+// that opened it, or — if nothing says — from the "Who's browsing?" picker its
+// shell shows instead of a page (TojiShell). From then on every tab created in it gets that
 // container's userContextId, and tabs can't be dragged in from another one.
 //
 // Ephemeral containers live in private windows: Firefox never writes their
@@ -17,10 +17,10 @@ ChromeUtils.defineESModuleGetters(lazy, {
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
   TojiAgent: "resource:///modules/toji/TojiAgent.sys.mjs",
-  TojiAsk: "resource:///modules/toji/TojiAsk.sys.mjs",
   TojiBugReport: "resource:///modules/toji/TojiBugReport.sys.mjs",
   TojiContainers: "resource:///modules/toji/TojiContainers.sys.mjs",
   TojiRecorder: "resource:///modules/toji/TojiRecorder.sys.mjs",
+  TojiShell: "resource:///modules/toji/TojiShell.sys.mjs",
   TojiTorUI: "resource:///modules/toji/TojiTorUI.sys.mjs",
   TojiVault: "resource:///modules/toji/TojiVault.sys.mjs",
 });
@@ -30,11 +30,11 @@ ChromeUtils.defineLazyGetter(lazy, "ContainersLib", () =>
 );
 
 const BAG_KEY = "toji-container";
-const XHTML_NS = "http://www.w3.org/1999/xhtml";
 const STYLESHEET = "chrome://toji/content/toji.css";
 const TAB_DROP_TYPE = "application/x-moz-tabbrowser-tab";
 const CLEARED_TOPIC = "toji-container-cleared";
 const CHANGED_TOPIC = "toji-containers-changed";
+const START_PAGE = "about:start";
 
 /** window -> { containerId, userContextId, pending: string[] } */
 const windows = new WeakMap();
@@ -47,16 +47,13 @@ function isPrivate(win) {
   return lazy.PrivateBrowsingUtils.isWindowPrivate(win);
 }
 
-function avatarURL(c) {
-  return c?.avatar ? `chrome://toji/content/${c.avatar}` : "";
-}
-
 function isStartPage(url, win) {
   if (!url) {
     return true;
   }
   if (
     [
+      "about:start",
       "about:home",
       "about:newtab",
       "about:privatebrowsing",
@@ -226,28 +223,6 @@ function whenDelayedStartup(win) {
   });
 }
 
-function h(doc, tag, attrs = {}, ...children) {
-  const el = doc.createElementNS(XHTML_NS, tag);
-  for (const [key, value] of Object.entries(attrs)) {
-    if (value == null || value === false) {
-      continue;
-    }
-    if (key === "class") {
-      el.className = value;
-    } else if (key.startsWith("on")) {
-      el.addEventListener(key.slice(2), value);
-    } else {
-      el.setAttribute(key, value === true ? "" : value);
-    }
-  }
-  for (const child of children) {
-    if (child != null) {
-      el.append(child);
-    }
-  }
-  return el;
-}
-
 function wrapTabbrowser(win) {
   const gBrowser = win.gBrowser;
 
@@ -313,6 +288,7 @@ function applyContainer(win) {
   const root = win.document.documentElement;
   if (!c) {
     root.removeAttribute("toji-container");
+    lazy.TojiShell.refresh(win);
     return;
   }
   root.setAttribute("toji-container", c.id);
@@ -321,163 +297,18 @@ function applyContainer(win) {
   root.toggleAttribute("toji-hold-tor", !!c.temporary);
   root.style.setProperty("--toji-container-color", c.color);
   lazy.TojiTorUI.refresh(win);
-  const button = win.document.getElementById("toji-profile-button");
-  if (button) {
-    button.style.listStyleImage = `url("${avatarURL(c)}")`;
-    button.setAttribute("tooltiptext", `${c.name} · ${lazy.ContainersLib.routeLabel(c)}`);
-    button.setAttribute("label", c.name);
-  }
+  lazy.TojiShell.refresh(win);
 }
 
+// "Who's browsing?" is the shell's: it shows while the window has no container.
 function hidePicker(win) {
-  win.document.getElementById("toji-picker")?.remove();
   win.document.documentElement.removeAttribute("toji-picking");
+  lazy.TojiShell.refresh(win);
 }
 
 function showPicker(win) {
-  const doc = win.document;
-  if (doc.getElementById("toji-picker")) {
-    return;
-  }
-  doc.documentElement.setAttribute("toji-picking", "true");
-  const root = h(doc, "div", {
-    id: "toji-picker",
-    role: "dialog",
-    "aria-labelledby": "toji-picker-title",
-  });
-  let creating = false;
-  let draftAvatar = null;
-
-  const render = () => {
-    const lib = lazy.ContainersLib;
-    const containers = lazy.TojiContainers.list();
-    draftAvatar ??= lib.PROFILE_AVATARS[containers.length % lib.PROFILE_AVATARS.length];
-    const cards = containers.map(c =>
-      h(
-        doc,
-        "button",
-        {
-          class: "toji-picker-card",
-          type: "button",
-          "data-container": c.id,
-          onclick: () => TojiWindows.choose(win, c.id),
-        },
-        h(doc, "img", { class: "toji-avatar toji-avatar-lg", src: avatarURL(c), alt: "" }),
-        h(doc, "span", { class: "toji-picker-name" }, c.name),
-        h(doc, "span", { class: "toji-picker-route" }, lib.routeLabel(c))
-      )
-    );
-    const add = h(
-      doc,
-      "button",
-      {
-        class: "toji-picker-card toji-picker-add",
-        type: "button",
-        onclick: () => {
-          creating = true;
-          render();
-          root.querySelector(".toji-picker-create input")?.focus();
-        },
-      },
-      h(doc, "span", { class: "toji-avatar toji-avatar-lg toji-picker-plus" }, "+"),
-      h(doc, "span", { class: "toji-picker-name" }, "Add profile"),
-      h(doc, "span", { class: "toji-picker-route" }, "New identity")
-    );
-    let create = null;
-    if (creating) {
-      const input = h(doc, "input", {
-        type: "text",
-        placeholder: "Profile name",
-        "aria-label": "Profile name",
-      });
-      const submit = async () => {
-        const name = input.value.trim();
-        if (!name) {
-          return;
-        }
-        const c = await lazy.TojiContainers.add(name, draftAvatar);
-        TojiWindows.choose(win, c.id);
-      };
-      input.addEventListener("keydown", e => {
-        if (e.key === "Enter") {
-          submit();
-        }
-      });
-      create = h(
-        doc,
-        "section",
-        { class: "toji-picker-create", "aria-label": "Create profile" },
-        h(
-          doc,
-          "button",
-          {
-            class: "toji-picker-close",
-            type: "button",
-            "aria-label": "Close",
-            onclick: () => {
-              creating = false;
-              render();
-            },
-          },
-          "×"
-        ),
-        h(doc, "p", { class: "toji-picker-label" }, "Choose a picture"),
-        h(
-          doc,
-          "div",
-          { class: "toji-picker-avatars" },
-          ...lib.PROFILE_AVATARS.map(a =>
-            h(
-              doc,
-              "button",
-              {
-                type: "button",
-                class: `toji-picker-avatar${a === draftAvatar ? " selected" : ""}`,
-                "aria-label": "Choose profile picture",
-                onclick: () => {
-                  draftAvatar = a;
-                  const value = input.value;
-                  render();
-                  const again = root.querySelector(".toji-picker-create input");
-                  if (again) {
-                    again.value = value;
-                    again.focus();
-                  }
-                },
-              },
-              h(doc, "img", { src: `chrome://toji/content/${a}`, alt: "" })
-            )
-          )
-        ),
-        h(
-          doc,
-          "div",
-          { class: "toji-picker-row" },
-          input,
-          h(doc, "button", { class: "toji-picker-submit", type: "button", onclick: submit }, "Create")
-        )
-      );
-    }
-    root.replaceChildren(
-      h(
-        doc,
-        "div",
-        { class: "toji-picker-inner" },
-        h(doc, "h1", { id: "toji-picker-title" }, "Who’s browsing?"),
-        h(
-          doc,
-          "p",
-          { class: "toji-picker-lede" },
-          "Every tab in this window stays inside the profile you choose."
-        ),
-        h(doc, "div", { class: "toji-picker-grid" }, ...cards, add),
-        create
-      )
-    );
-  };
-  render();
-  doc.body.append(root);
-  root.querySelector(".toji-picker-card")?.focus();
+  win.document.documentElement.setAttribute("toji-picking", "true");
+  lazy.TojiShell.refresh(win);
 }
 
 function reloadContainerTabs(containerId) {
@@ -505,10 +336,6 @@ function observeOnce() {
   Services.obs.addObserver(() => {
     for (const win of lazy.BrowserWindowTracker.orderedWindows) {
       applyContainer(win);
-      if (win.document.getElementById("toji-picker")) {
-        hidePicker(win);
-        showPicker(win);
-      }
     }
   }, CHANGED_TOPIC);
 }
@@ -535,6 +362,11 @@ export const TojiWindows = {
         });
         if (!win.gBrowserInit?.getTabToAdopt?.() && !openWindowInfoOf(win)) {
           setUserContextArgument(win, container.userContextId);
+        }
+        // Firefox forces a private window's first page to about:privatebrowsing.
+        const first = urlsFromArgument(win.arguments?.[0]);
+        if (first.length === 1 && first[0] === "about:privatebrowsing") {
+          win.arguments[0] = START_PAGE;
         }
         return;
       }
@@ -588,7 +420,6 @@ export const TojiWindows = {
     }
     try {
       lazy.TojiAgent.initWindow(win);
-      lazy.TojiAsk.initWindow(win);
     } catch (e) {
       console.error("[toji:windows] agent", e);
     }
@@ -602,6 +433,12 @@ export const TojiWindows = {
       lazy.TojiRecorder.initWindow(win);
     } catch (e) {
       console.error("[toji:windows] bug report", e);
+    }
+    // Toji's own UI for the window, in place of Firefox's.
+    try {
+      lazy.TojiShell.initWindow(win);
+    } catch (e) {
+      console.error("[toji:windows] shell", e);
     }
     if (windows.get(win).containerId) {
       applyContainer(win);
@@ -664,6 +501,7 @@ export const TojiWindows = {
   uninit(win) {
     const state = windows.get(win);
     windows.delete(win);
+    lazy.TojiShell.uninitWindow(win);
     if (!state?.containerId) {
       return;
     }
@@ -711,15 +549,17 @@ export const TojiWindows = {
     this.bind(win, c);
     const gBrowser = win.gBrowser;
     const blank = [...gBrowser.tabs];
-    const urls = pending.length ? pending : [win.BROWSER_NEW_TAB_URL];
+    // The first window after installing shows Welcome, once.
+    const welcome = !pending.length && !Services.prefs.getBoolPref("toji.onboarded", false);
+    const urls = pending.length ? pending : [welcome ? "about:welcome" : win.BROWSER_NEW_TAB_URL];
     urls.forEach((url, i) =>
       gBrowser.addTrustedTab(url, { inBackground: i > 0 })
     );
     for (const tab of blank) {
       gBrowser.removeTab(tab, { animate: false, skipPermitUnload: true });
     }
-    if (!pending.length) {
-      win.gURLBar?.select();
+    if (!pending.length && !welcome) {
+      lazy.TojiShell.focusOmnibox(win);
     }
   },
 
@@ -730,7 +570,7 @@ export const TojiWindows = {
       throw new Error(`no container ${containerId}`);
     }
     const [first, ...rest] = urls;
-    const url = first ?? (c.ephemeral ? "about:privatebrowsing" : "about:newtab");
+    const url = first ?? START_PAGE;
     const win = lazy.BrowserWindowTracker.openWindow({
       private: c.ephemeral,
       args: windowArguments(url, c),
@@ -755,8 +595,9 @@ export const TojiWindows = {
   },
 
   /**
-   * Help › Report a Bug…: takes a still of the window first (so the sheet itself
-   * isn't in it), then opens the report sheet beside the current tab.
+   * Help › Report a Bug…: takes a still of the window and freezes the last 15
+   * seconds first (so the sheet itself is in neither), then opens the shell's
+   * report sheet over the window, as the Electron app did.
    */
   async openBugReport(win) {
     if (win.document.documentElement.hasAttribute("toji-picking")) {
@@ -764,17 +605,24 @@ export const TojiWindows = {
     }
     const browser = win.gBrowser.selectedBrowser;
     const pageUrl = browser.currentURI?.spec ?? "";
-    pendingScreenshots.set(win, lazy.TojiBugReport.captureWindow(win).catch(() => null));
-    // Freeze the last 15 seconds now, before the report page is on screen.
-    pendingClips.set(win, lazy.TojiRecorder.clip(win).catch(() => null));
-    const params = new URLSearchParams({
-      page: /^https?:/.test(pageUrl) ? pageUrl : "",
-      window: `${win.innerWidth}×${win.innerHeight}`,
-      layout: Services.prefs.getBoolPref("sidebar.verticalTabs", false) ? "side" : "top",
-      theme: Services.prefs.getStringPref("toji.theme", "light"),
-    });
-    win.gBrowser.selectedTab = win.gBrowser.addTrustedTab(`about:report?${params}`, {
-      relatedToCurrent: true,
+    const c = lazy.TojiContainers.byId(windows.get(win)?.containerId ?? "");
+    const recordable = !!c && !c.ephemeral && c.egress !== "tor";
+    const replayOn = Services.prefs.getBoolPref("toji.replay", true);
+    const clip = replayOn && recordable ? lazy.TojiRecorder.clip(win).catch(() => null) : null;
+    const screenshot = await lazy.TojiBugReport.captureWindow(win).catch(() => null);
+    const unavailable = !replayOn ? "off" : !recordable ? "private" : clip ? null : "unsupported";
+    lazy.TojiShell.reportBug(win, {
+      screenshot,
+      clip: clip?.then(v =>
+        v ? { type: v.type, data: v.data, seconds: v.seconds, width: v.width ?? 0, height: v.height ?? 0, poster: v.poster ?? null } : null
+      ) ?? null,
+      unavailable,
+      pageUrl: /^https?:/.test(pageUrl) ? pageUrl : null,
+      context: {
+        window: `${win.innerWidth}×${win.innerHeight}`,
+        layout: Services.prefs.getStringPref("toji.layout", "top") === "side" ? "side" : "top",
+        theme: Services.prefs.getStringPref("toji.theme", "light"),
+      },
     });
   },
 
@@ -792,51 +640,5 @@ export const TojiWindows = {
     return clip;
   },
 
-  /** The profile button's menu: who this window is, clear it, open another. */
-  showProfileMenu(win, anchor) {
-    const doc = win.document;
-    const state = windows.get(win);
-    const c = state?.containerId ? lazy.TojiContainers.byId(state.containerId) : null;
-    doc.getElementById("toji-profile-menu")?.remove();
-    const popup = doc.createXULElement("menupopup");
-    popup.id = "toji-profile-menu";
-    const item = (label, command, disabled = false) => {
-      const mi = doc.createXULElement("menuitem");
-      mi.setAttribute("label", label);
-      if (disabled) {
-        mi.setAttribute("disabled", "true");
-      }
-      if (command) {
-        mi.addEventListener("command", command);
-      }
-      popup.append(mi);
-      return mi;
-    };
-    if (c) {
-      item(`${c.name} · ${lazy.ContainersLib.routeLabel(c)}`, null, true);
-      popup.append(doc.createXULElement("menuseparator"));
-      item(`Clear ${c.name}…`, () => this.confirmClear(win, c.id));
-    }
-    item("New window…", () => win.OpenBrowserWindow());
-    popup.addEventListener("popuphidden", () => popup.remove(), { once: true });
-    doc.getElementById("mainPopupSet").append(popup);
-    popup.openPopup(anchor, "after_end");
-  },
 
-  async confirmClear(win, containerId) {
-    const c = lazy.TojiContainers.byId(containerId);
-    if (!c) {
-      return;
-    }
-    const ok =
-      c.ephemeral ||
-      Services.prompt.confirm(
-        win,
-        `Clear ${c.name}?`,
-        `Every cookie, cache and saved site setting in ${c.name} will be deleted, and its tabs reloaded. You will be signed out of sites in this profile.`
-      );
-    if (ok) {
-      await lazy.TojiContainers.clear(c.id);
-    }
-  },
 };

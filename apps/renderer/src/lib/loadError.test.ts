@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { describeLoadError, hostOfUrl } from './loadError';
+import { describeLoadError, geckoLoadFailure, hostOfUrl } from './loadError';
 
 const failure = (code: number, url = 'http://localhost:7333/', description = 'ERR_X') => ({ code, description, url });
 
@@ -33,5 +33,23 @@ describe('hostOfUrl', () => {
   test('keeps the port and survives junk', () => {
     expect(hostOfUrl('http://localhost:7333/x')).toBe('localhost:7333');
     expect(hostOfUrl('not a url')).toBe('not a url');
+  });
+});
+
+describe('geckoLoadFailure', () => {
+  test("reads the error from Firefox's error page address", () => {
+    expect(geckoLoadFailure('about:neterror?e=dnsNotFound&u=https%3A//nope.invalid/&c=UTF-8', 'https://nope.invalid/')).toEqual({ code: -105, description: 'ERR_NAME_NOT_RESOLVED', url: 'https://nope.invalid/' });
+    expect(describeLoadError(geckoLoadFailure('about:neterror?e=connectionFailure', 'http://127.0.0.1:1/')!).kind).toBe('refused');
+    expect(describeLoadError(geckoLoadFailure('about:certerror?e=nssBadCert', 'https://self-signed.test/')!).kind).toBe('insecure');
+  });
+  test('says Tor when a Tor container could not reach its proxy', () => {
+    const copy = describeLoadError(geckoLoadFailure('about:neterror?e=proxyConnectFailure', 'https://example.com/')!, { tor: true });
+    expect(copy.detail).toMatch(/Tor/);
+  });
+  test('covers blocked sites, crashes, unknown errors, and no error at all', () => {
+    expect(geckoLoadFailure('about:blocked?e=malwareBlocked', 'https://bad.test/')?.code).toBe(-20);
+    expect(geckoLoadFailure(null, 'https://a.test/', true)).toEqual({ code: 0, description: 'TAB_CRASHED', url: 'https://a.test/' });
+    expect(geckoLoadFailure('about:neterror?e=somethingNew', 'https://a.test/')).toEqual({ code: 0, description: 'somethingNew', url: 'https://a.test/' });
+    expect(geckoLoadFailure(null, 'https://a.test/')).toBeNull();
   });
 });

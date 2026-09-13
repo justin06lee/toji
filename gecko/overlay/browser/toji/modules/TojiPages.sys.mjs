@@ -99,7 +99,7 @@ function registerActors() {
 // --- Settings the pages can read and change ---------------------------------
 
 const PREF_THEME = "toji.theme";
-const PREF_LAYOUT = "sidebar.verticalTabs";
+const PREF_LAYOUT = "toji.layout";
 const PREF_BOOKMARKS_BAR = "browser.toolbars.bookmarks.visibility";
 const PREF_VAULT_AUTOSAVE = "toji.vault.autosave";
 const PREF_REPLAY = "toji.replay";
@@ -124,11 +124,13 @@ async function readSettings() {
   }
   return {
     theme: Services.prefs.getStringPref(PREF_THEME, "light") === "dark" ? "dark" : "light",
-    layout: Services.prefs.getBoolPref(PREF_LAYOUT, false) ? "side" : "top",
+    layout: Services.prefs.getStringPref(PREF_LAYOUT, "top") === "side" ? "side" : "top",
+    // Pinned unless set to show on hover, as in the Electron app (Firefox's own
+    // default for this pref is "newtab").
     bookmarksBar:
-      Services.prefs.getStringPref(PREF_BOOKMARKS_BAR, "always") === "always"
-        ? "pinned"
-        : "hover",
+      Services.prefs.getStringPref(PREF_BOOKMARKS_BAR, "always") === "never"
+        ? "hover"
+        : "pinned",
     searchEngine: current,
     searchEngines: engines,
     vaultAutosave: Services.prefs.getBoolPref(PREF_VAULT_AUTOSAVE, true),
@@ -143,8 +145,7 @@ async function writeSetting(key, value) {
       Services.prefs.setStringPref(PREF_THEME, value === "dark" ? "dark" : "light");
       break;
     case "layout":
-      Services.prefs.setBoolPref("sidebar.revamp", true);
-      Services.prefs.setBoolPref(PREF_LAYOUT, value === "side");
+      Services.prefs.setStringPref(PREF_LAYOUT, value === "side" ? "side" : "top");
       break;
     case "bookmarksBar":
       Services.prefs.setStringPref(PREF_BOOKMARKS_BAR, value === "pinned" ? "always" : "never");
@@ -177,6 +178,12 @@ async function writeSetting(key, value) {
   TojiPageEvents.emit("settings", settings);
   return settings;
 }
+
+/** Settings for chrome code (the window's shell), through the same setter as the pages. */
+export const TojiSettings = {
+  read: readSettings,
+  write: writeSetting,
+};
 
 // --- Events pushed to open pages --------------------------------------------
 

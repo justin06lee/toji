@@ -186,8 +186,12 @@ try {
   const spot = await m.exec<{ open: boolean; ids: string[] }>(`${MODULES}
     const win = BrowserWindowTracker.getTopWindow();
     TojiAgent.openSpotlight(win);
-    const found = [...win.document.querySelectorAll("[id^='toji-']")].map(e => e.id);
-    return { open: found.some(id => /spotlight/.test(id)), ids: found };`);
+    // The spotlight is the window shell's, in its shadow root.
+    const shadow = win.document.getElementById("toji-shell")?.shadowRoot;
+    return new Promise(done => win.setTimeout(() => {
+      const input = shadow?.querySelector('input[placeholder^="Tell the agent"]');
+      done({ open: !!input, ids: input ? [input.placeholder] : [] });
+    }, 400));`);
   say(spot.open, 'the agent spotlight opens', spot.ids.join(', '));
   await Bun.sleep(500);
   await shot('spotlight');
@@ -234,12 +238,10 @@ try {
        while (TojiAgent.isRunning(tab) && Date.now() - t0 < 180000) {
          await new Promise(r => setTimeout(r, 2000));
        }
-       TojiAgent.openSpotlight(win, tab);
-       await new Promise(r => setTimeout(r, 500));
        done({
          running: TojiAgent.isRunning(tab),
          title: tab.linkedBrowser.contentTitle,
-         log: win.document.getElementById("toji-spotlight")?.textContent ?? "",
+         log: TojiAgent.stateOf(tab).log.map(l => l.role + ": " + l.text).join(" | "),
        });`,
       [],
       200000
@@ -254,7 +256,6 @@ try {
       `title "${agentRun.title}"; page events: ${events.slice(0, 24).join(' | ') || 'none'}; log: ${agentRun.log.replace(/\s+/g, ' ').slice(0, 240)}`
     );
     await shot('agent-run');
-    await m.exec(`${MODULES} TojiAgent.closeSpotlight(BrowserWindowTracker.getTopWindow()); return true;`);
   } else {
     console.log('SKIP  live answer page (run with --live; it sends one question to the configured model)');
   }

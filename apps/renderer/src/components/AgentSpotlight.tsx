@@ -1,6 +1,7 @@
 import { ArrowUp, Minus, MousePointer2, Paperclip, Plus, Square, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { portalRoot } from '../lib/portalRoot';
 import { motion } from 'motion/react';
 
 export interface AgentLogEntry {
@@ -203,6 +204,6 @@ export function AgentSpotlight({ target, insetLeft = 0, running, pendingAsk, log
         </div>
       </motion.div>
     </motion.div>,
-    document.body
+    portalRoot()
   );
 }

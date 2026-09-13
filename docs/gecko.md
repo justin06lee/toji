@@ -11,18 +11,22 @@ Chrome 148 user agent with "Chromium"-only client-hint brands, an empty
 `window.chrome`, no Widevine, no Touch ID passkeys, and every permission already
 granted (Electron auto-approves). The `<webview>` itself caused reload-on-navigation,
 resize and focus bugs, and Toji patched each symptom page by page. On Gecko Toji is a
-real browser: Firefox's own tab strip, URL bar, prompts, context menu, downloads, PiP,
-printing and error pages, with Toji's features layered on in chrome JS/CSS.
+real browser underneath — Firefox's engine, tabs, session, prompts, downloads, printing —
+and on top it is the Electron app's own UI, unchanged (see "The shell" below).
 
 Rules that follow (from the brief, kept here so they aren't lost):
 
 - Present honestly as Firefox (standard Gecko UA, no Chrome impersonation).
 - Never auto-grant permissions; Firefox's own prompts stay.
-- Don't reimplement what Firefox does (context menu, find bar, downloads, permission
-  prompts, error pages — restyle only —, PiP, tab audio/mute, popups and OAuth windows,
-  printing, default-browser handling, vertical tabs, tab groups).
-- Extend Firefox's tab strip, URL bar, sidebar and bookmarks toolbar with JS/CSS (as
-  Zen does); never replace tabbrowser or the urlbar with React.
+- Don't reimplement what Firefox does *as behaviour* (tabs and session, permission
+  prompts, downloads, popups and OAuth windows, printing, default-browser handling).
+- **Firefox contributes no UI** (the user's decision, 2026-09-13, overriding the brief's
+  "extend Firefox's tab strip and URL bar"): every window draws the Electron app's React
+  UI — tab strip, address bar, bookmarks bar, sidebar, picker, spotlight, sheets — in
+  place of Firefox's chrome, from the same components the Electron app used. gBrowser
+  stays the tab model; only its UI is gone. What Firefox still has to draw (a page's
+  alert(), a permission request, an infobar) wears Toji's look; native macOS surfaces
+  (menu bar, context menu) keep only the Electron app's items.
 - Prefer prefs, enterprise policies and chrome JS/CSS overlays over C++ patches.
 
 ## Decisions
@@ -284,6 +288,62 @@ bundles into `resource:///modules/toji/lib/*.sys.mjs`. No C++.
   Sources get appended to the streamed page by the server. Plan gating (Toji plan without a
   subscription → `about:plans?q=`) happens before loading.
 
+## The shell: Toji's UI in every window
+
+`TojiShell.sys.mjs` (per window, from `TojiWindows.init`) mounts the shell — a React
+bundle, `apps/renderer/gecko/shell.tsx` → `GeckoShell.tsx`, built by
+`vite.shell.config.ts` into `chrome://toji/content/shell/` — in a shadow root
+(`#toji-shell`) covering `browser.xhtml`. The shadow root keeps Tailwind's preflight away
+from Firefox's own popups and panels, which live in the same document.
+
+- **Same components.** `App.tsx`'s header, tab strip, address row, tab menu, drag notch,
+  agent cursor and layout were split out (`BrowserFrame`, `TopTabStrip`, `AddressRow`,
+  `TabContextMenu`, `WindowDragHandle`, `AgentCursor`, `useBookmarksPeek`, `PageSources`);
+  the Electron app and the shell both render them, so the two cannot drift apart.
+- **The page is a hole.** The shell's viewport reports its box (`setViewport`), and
+  `#browser` is laid out exactly there, *under* the shell (toji.css). The shell's frame is
+  `pointer-events: none` and transparent; the header, sidebar and overlays take the
+  pointer, so the page gets everything the shell doesn't draw. Overlays over a page (the
+  loading bar, Toji's error page in place of Firefox's, the bookmarks peek, the vault
+  bubble) are the shell's, like the Electron app's were over its `<webview>`.
+- **Tabs are gBrowser's.** `window.tojiShell` (contract: `apps/renderer/gecko/shellHost.ts`)
+  pushes a snapshot of the tabs on every tab event and top-level location/state change;
+  `shellTabs.ts` maps them onto the Electron app's `BrowserTab`, cached per tab so Motion's
+  reordering keeps object identity while `moveTabTo` moves the real tabs. Groups are the
+  window's own, as in the Electron app. `window.toji` is the pages' bridge
+  (`TojiPageAPI`), so the shared components that call `bridge()` work unchanged.
+- **Firefox's paths into its hidden UI** are redirected: `gURLBar.select/focus` (⌘L, new
+  windows) and `_adjustFocusAfterTabSwitch` (a new tab) focus the shell's omnibox;
+  `PlacesCommandHook.bookmarkPage` (⌘D) toggles the page on the bookmarks toolbar, which
+  the shell's bar shows flattened; `openPreferences` (⌘,) opens about:settings.
+- **Modules that drew UI in chrome now tell the shell**: TojiAgent (runs, the pointer,
+  the Option tap), TojiVault (key-button matches, the save bubble), TojiBugReport (the
+  report sheet and its tray), TojiWindows (the picker is the shell's while the window has
+  no container). The Go/Tor button, wand, status bar and profile widget are gone.
+- **Window chrome.** `#toji-window-buttons` carries `-moz-window-button-box`, so macOS puts
+  the traffic lights where the Electron app had them (checked headed: centres ≈ 20/44/67 pt,
+  29 pt down). The header is a `-moz-window-dragging` region (double-click zooms natively);
+  the notch is a drag region too (Gecko has no JS window-move API).
+- **What Firefox still draws**, in Toji's look (toji.css, `prompts.css` as a user sheet for
+  the prompt's own document): tab-modal prompts, infobars (their toolbox stays, floated
+  over the page top with its toolbars hidden, since `tab-notification-deck` lives in it),
+  and the permission panel, hung from a XUL anchor under the omnibox (`popupnotificationanchor`
+  must be a XUL element property — an id string throws in 153). `TojiFirefoxUI` trims the
+  menu bar (File/Edit/View/Window/Help as in Electron), the page context menu (Electron's
+  items; uBlock's entry hidden; Print… added), and shortcuts that open Firefox panels
+  (emptied, not removed — Firefox code looks some up), and sets prefs that keep Firefox's
+  panels shut (downloads → Save dialog, no status bubble, no close-tab warnings, system
+  print dialog).
+- **Gotchas.** In the chrome document `rem` is the system UI font (11px), so the build
+  converts rem to px; `@property` and `@font-face` only work in document sheets, so the
+  build hoists `@property` into `shell-global.css` and toji.css declares Poppins; the start
+  page no longer autofocuses its search box (content focus would take the keys from the
+  omnibox); Firefox's default bookmarks-bar pref is `newtab`, read as pinned.
+
+`gecko/test/shell.ts` drives it headless with real input — `win.synthesizeMouseEvent`
+through the window's own hit testing and `nsITextInputProcessor` keys (Marionette's
+element commands are content-only) — 32 checks.
+
 ## Phases
 
 | # | Phase | Branch | State |
@@ -310,13 +370,13 @@ State per item: — not started · WIP · works · works differently · dropped 
 | Agent | screenshot loop, spotlight, Option tap, cursor, tab marks, step limit, dropped files, reference docs, memory/librarian, research sub-agent | WIP — a run presses a button on a page end to end (screenshot, model through the agent server, synthesized input), with the spotlight and cursor; dropped files, reference docs, memory/librarian, research sub-agent, Option tap and step limit not yet checked |
 | Agent backends | yagami CLIs, Cerebras, OpenAI-compatible, Toji plan (billing not wired) | — |
 | AI answer pages | Shift+Enter / wand, streamed with sources, cached, follows theme | WIP — a question streams back with its sources under `toji://ask?q=…`, token kept in the parent (`phase5.ts --live`); Shift+Enter, the wand, caching and theme not yet checked |
-| Omnibox | engine choice, long-URL fade, star, vault fill, Go/Tor button | — |
-| Bookmarks | ⌘D, pinned or hover bar, imports | — |
-| Tabs | top/side, groups with colours, drag reorder, long-press new-tab menu, background tabs, audio/mute, agent indicator, open/close animation | — |
+| Omnibox | engine choice, long-URL fade, star, vault fill, Go/Tor button | works — the Electron app's AddressRow in the shell; typing and Enter load, Shift+Enter/wand ask, ⌘L focuses it, a new tab focuses it (`shell.ts`) |
+| Bookmarks | ⌘D, pinned or hover bar, imports | works — the shell's bar over the bookmarks toolbar (flattened); star and ⌘D toggle; hover mode comes down from the page's top edge (`TojiEdge` actor) |
+| Tabs | top/side, groups with colours, drag reorder, long-press new-tab menu, background tabs, audio/mute, agent indicator, open/close animation | works — the Electron app's strip and sidebar over gBrowser; drag reorder moves the real tabs; groups are per window as in Electron. Reset context (a per-tab throwaway session) is not offered: a Gecko window is one container |
 | Ad blocking | uBlock Origin, on by default | works — the pinned 1.74.0, active in new profiles and private windows; blocks a tracker a page requests; the Settings switch turns it off and on (`phase6.ts`) |
 | Pages | Settings, Welcome, Plans | WIP — Settings, Welcome, Plans, start page and bug report render with `window.toji`; web pages get no bridge; ⌘T opens about:start. Plans shows no tiers yet (they come from the agent server, phase 5) |
 | System | default browser, cold-start links from other apps | WIP — a link handed over at launch waits for "Who's browsing?" and opens in the container chosen; an external link lands in its window's container; `isDefaultBrowser()` answers (it reads true while the Electron app shares the bundle id). Setting the default browser not exercised |
-| Theme | toggle drives prefers-color-scheme | — |
+| Theme | toggle drives prefers-color-scheme | works — the shell's toggle; pages and Firefox's prompts follow |
 | Bug reports | written + images + screenshot; 15 s clip if a Gecko capture path holds up | WIP — ⌥⇧I and Help › Report a Bug… open the sheet beside the tab with the page and window size; the window still is a PNG (no Screen Recording needed). Filing to GitHub and the 15 s clip not exercised |
 | Imports | Chrome family incl. Helium, Arc, Dia; Safari; files | WIP — Helium bookmarks (Toji's own Chromium reader, also used for Arc and Dia) import into a "From Helium (<profile>)" folder, tested from a fake home (`TOJI_IMPORT_HOME`); Firefox's migrators (Chrome, Brave, Edge…), Safari, password import and the file pickers not yet checked |
 | Extensions | Firefox add-ons (not the Chrome Web Store) | — |
@@ -659,3 +719,19 @@ never in another; `toji-vault.json` holds no username or password in the clear.
 **Next:** install over the Electron app (a zip of it is kept in
 `~/Library/Application Support/Toji-electron-backup/`), let the first real start move
 the data, then retire the Electron build targets.
+
+### 2026-09-13 — Toji's shell replaces Firefox's UI
+
+The user asked for the Electron app's UI, identical, with Firefox contributing no UI at
+all. Built as described in "The shell" above, on `feat/gecko-shell`.
+
+- Verified: `gecko/test/shell.ts` 32/32 (headless, real input); phases 2, 4, 5, 6 and 7
+  rechecked on the same build (their picker/spotlight/report checks now read the shell);
+  headed window captures for the traffic lights. Unit tests 645, typecheck and the
+  Electron production build pass.
+- Not verified visually: the permission panel (a native popup; a hidden test window
+  doesn't paint and macOS has no occlusion pref to turn off) — its anchoring is checked.
+  Phase 8 not rerun (it prompts the Keychain); its layout check now reads `toji.layout`.
+- Known gaps: ⌘F does nothing (the Electron app had no find bar; Firefox's is hidden);
+  Firefox's own Picture-in-Picture toggle and player remain; about:addons (from Welcome's
+  "Browse add-ons") is Firefox's page; Reset context is not offered.

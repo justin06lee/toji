@@ -1,6 +1,7 @@
 import { Globe, Pin, PinOff, Trash2, X } from 'lucide-react';
 import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
+import { portalRoot } from '../lib/portalRoot';
 import type { Bookmark } from '../lib/api';
 import { hostOf } from '../lib/nav';
 
@@ -131,7 +132,7 @@ export function BookmarksBar({ bookmarks, pinned, onTogglePinned, onOpen, onOpen
               </button>
             </div>
           </>,
-          document.body
+          portalRoot()
         )}
     </div>
   );

@@ -11,8 +11,8 @@
    read fine while tabs sat side by side but let a dragged tab show the tab underneath
    straight through it. These are the same shades flattened against the window
    background — white in light, neutral-950 in dark — so nothing looks different until
-   two tabs overlap. */
-:root {
+   two tabs overlap. :host is the Gecko browser's shell, which lives in a shadow root. */
+:root, :host {
   --tab: #fafafa;
   --tab-hover: #f6f6f6;
   --tab-active: #f0f0f0;
@@ -71,9 +71,10 @@ svg {
 * { scrollbar-width: none; }
 *::-webkit-scrollbar { display: none; }
 
-/* Drag region for the custom title bar */
-.drag { -webkit-app-region: drag; }
-.no-drag { -webkit-app-region: no-drag; }
+/* Drag region for the custom title bar: Electron's property, and Gecko's for the shell
+   in the Gecko browser. Each engine ignores the other's. */
+.drag { -webkit-app-region: drag; -moz-window-dragging: drag; }
+.no-drag { -webkit-app-region: no-drag; -moz-window-dragging: no-drag; }
 
 /* The notch is revealed by the main process's cursor stream (see revealDragHandle),
    because the chrome AROUND it is a native drag region and macOS delivers no mouse
@@ -109,6 +110,10 @@ svg {
      cursor, answer a double-click, and behave identically on Linux, where app-region
      only applies to frameless windows. */
   -webkit-app-region: no-drag;
+  /* The Gecko browser has no way to move a window from script, so there the notch is
+     a native drag region (which still shows the grab cursor and zooms on a
+     double-click). Electron ignores this property. */
+  -moz-window-dragging: drag;
   pointer-events: auto;
   cursor: grab;
   display: flex;

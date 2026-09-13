@@ -2,6 +2,7 @@ import { Camera, Check, CircleAlert, ExternalLink, FileText, ImagePlus, Loader2,
 import { motion } from 'motion/react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { portalRoot } from '../lib/portalRoot';
 import { bridge, type BugReportAccount, type BugReportDraft, type BugReportFile, type BugReportResult } from '../lib/bridge';
 import { draftProblem, formatBytes, imageProblem, MAX_IMAGES, REPLAY_SECONDS, routeLine } from '../lib/bugReport';
 import { FIELD, FIELD_BUTTON, FIELD_BUTTON_QUIET, FIELD_TEXTAREA } from '../lib/fieldStyles';
@@ -452,7 +453,7 @@ export function BugReportSheet({ request, insetLeft = 0, onOpenUrl, onOpenSettin
         )}
       </motion.div>
     </motion.div>,
-    document.body
+    portalRoot()
   );
 }
 

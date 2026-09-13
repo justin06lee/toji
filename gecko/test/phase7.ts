@@ -113,7 +113,7 @@ try {
   say(external.url === FROM_APP && external.uc === external.work, 'an external link lands in the window\'s own container', `uc ${external.uc} (Work ${external.work})`);
 
   // 3. The bug report: shortcut, menu item, the sheet, the still.
-  const report = await m.execAsync<{ key: string | null; menu: boolean; tab: string; shot: { kind: string; size: number } }>(`${MODULES}
+  const report = await m.execAsync<{ key: string | null; menu: boolean; request: { pageUrl: string | null; window: string } | null; sheet: boolean; shot: { kind: string; size: number } }>(`${MODULES}
     const done = arguments[0];
     const win = BrowserWindowTracker.getTopWindow();
     const doc = win.document;
@@ -123,20 +123,25 @@ try {
     const bytes = shot?.data ?? new Uint8Array();
     const png = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
     const size = png && shot.type === "image/png" ? bytes.length : 0;
+    // The window's shell draws the sheet from what the browser hands it.
+    let request = null;
+    const off = win.tojiShell.onReportBug(r => (request = { pageUrl: r.pageUrl, window: r.context.window }));
     key?.doCommand();
     await new Promise(r => setTimeout(r, 1500));
+    off();
+    const shadow = doc.getElementById("toji-shell")?.shadowRoot;
     done({
       key: key ? key.getAttribute("modifiers") + "+" + key.getAttribute("key") : null,
       menu: !!doc.getElementById("toji-report-bug"),
-      tab: win.gBrowser.selectedBrowser.currentURI.spec,
+      request,
+      sheet: !!shadow?.querySelector('[role="dialog"]') && /report/i.test(shadow.textContent),
       shot: { kind: shot?.type ?? "null", size },
     });`);
   say(report.key === 'alt,shift+I' && report.menu, '⌥⇧I and Help › Report a Bug… are there', `${report.key}, menu ${report.menu}`);
-  const reportUrl = URL.parse(report.tab);
   say(
-    report.tab.startsWith('about:report') && reportUrl?.searchParams.get('page') === FROM_APP && /\d+×\d+/.test(reportUrl?.searchParams.get('window') ?? ''),
-    'the shortcut opens the report sheet with the page and window size',
-    report.tab.slice(0, 120)
+    report.sheet && report.request?.pageUrl === FROM_APP && /\d+×\d+/.test(report.request?.window ?? ''),
+    'the shortcut opens the report sheet over the window, with the page and window size',
+    JSON.stringify({ sheet: report.sheet, request: report.request })
   );
   say(report.shot.size > 1000, 'the window still is a PNG', `${report.shot.kind}, ${report.shot.size} bytes`);
 
@@ -155,8 +160,8 @@ try {
     await new Promise(r => setTimeout(r, 80));
     tip.keyup(alt);
     await new Promise(r => setTimeout(r, 600));
-    const el = win.document.getElementById("toji-spotlight");
-    done({ open: !!el && !el.hidden && el.childElementCount > 0 });`);
+    const shadow = win.document.getElementById("toji-shell")?.shadowRoot;
+    done({ open: !!shadow?.querySelector('input[placeholder^="Tell the agent"]') });`);
   say(spot.open, 'tapping Option opens the agent spotlight');
 } catch (e) {
   console.error(`ERROR  ${(e as Error).message}`);
