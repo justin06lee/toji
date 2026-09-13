@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- 'self' on an about: page is the about: URL, so chrome: is named for the assets. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self' chrome:; script-src 'self' chrome:; style-src 'self' chrome: 'unsafe-inline'; img-src 'self' chrome: data: blob:; font-src 'self' chrome:; connect-src http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:*; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>Welcome to Toji</title>
+    <link rel="icon" type="image/png" href="../public/toji-round.png" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./welcome.tsx"></script>
+  </body>
+</html>
