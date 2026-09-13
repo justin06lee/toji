@@ -1,21 +1,35 @@
 import type { AgentsStatus, AppConfig, Billing, CerebrasModels, ModelCatalog, PageSource, PredictionResult, ResearchMode, ResearchOptions, ResearchSessionState, ServerEvent, UserSettings } from '../types';
 import type { AgentStepResult } from './agentDom';
+import { bridge } from './bridge';
+import { authHeaders, createEndpointResolver, eventsUrl, withToken, type ServerEndpoint } from './serverEndpoint';
 
 const DEFAULT_BASE = 'http://127.0.0.1:8788';
+/** Where the server is without the Gecko bridge (the Electron app, `bun run dev:web`). */
 export const API_BASE = import.meta.env.VITE_AGENT_SERVER_URL || DEFAULT_BASE;
 
-function wsUrl() {
-  const url = new URL(API_BASE);
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  url.pathname = '/ws';
-  return url.toString();
+// In the Gecko browser the bridge says where the server is and hands over its token;
+// elsewhere this settles at once on API_BASE with no token, exactly as before.
+const endpoint = createEndpointResolver(() => {
+  const toji = bridge();
+  return { server: toji.server ? () => toji.server!() : undefined, fallbackBase: API_BASE };
+});
+
+/** The server's base URL and token, once the bridge has answered. */
+export function serverEndpoint(): Promise<ServerEndpoint> {
+  return endpoint.get();
+}
+
+/** For URLs built synchronously: the resolved endpoint, or API_BASE until it is known. */
+function knownEndpoint(): ServerEndpoint {
+  return endpoint.current() ?? { base: API_BASE, token: null };
 }
 
 async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const { base, token } = await endpoint.get();
+  const response = await fetch(`${base}${path}`, {
     ...init,
     headers: {
-      'content-type': 'application/json',
+      ...authHeaders(token),
       ...(init?.headers ?? {})
     }
   });
@@ -127,10 +141,12 @@ export function saveSettings(patch: Partial<UserSettings>) {
 /** URL the page iframe streams its HTML from (rendered progressively by the browser).
  *  Pass reloadKey > 0 to force a fresh (uncached) regeneration on reload. The page
  *  carries both themes and follows the app's, so the URL — and the page — never changes
- *  with the theme. */
+ *  with the theme. An iframe cannot send a header, so the token rides in the query; under
+ *  the Gecko bridge, await serverEndpoint() first so it is known. */
 export function pageStreamUrl(query: string, reloadKey = 0) {
-  const base = `${API_BASE}/api/page/stream?q=${encodeURIComponent(query)}`;
-  return reloadKey > 0 ? `${base}&fresh=1&n=${reloadKey}` : base;
+  const { base, token } = knownEndpoint();
+  const url = `${base}/api/page/stream?q=${encodeURIComponent(query)}`;
+  return withToken(reloadKey > 0 ? `${url}&fresh=1&n=${reloadKey}` : url, token);
 }
 
 export function fetchPageSources(query: string) {
@@ -230,8 +246,10 @@ export function getResearchSession(id: string) {
   return jsonFetch<ResearchSessionState>(`/api/research/${id}`);
 }
 
+/** A download link, so like pageStreamUrl it carries the token in the query. */
 export function exportUrl(id: string, format: 'markdown' | 'json' = 'markdown') {
-  return `${API_BASE}/api/research/${id}/export?format=${format}`;
+  const { base, token } = knownEndpoint();
+  return withToken(`${base}/api/research/${id}/export?format=${format}`, token);
 }
 
 export function connectEvents(onEvent: (event: ServerEvent) => void, onState?: (connected: boolean) => void) {
@@ -239,22 +257,32 @@ export function connectEvents(onEvent: (event: ServerEvent) => void, onState?: (
   let socket: WebSocket | null = null;
   let reconnectTimer: number | undefined;
 
-  const connect = () => {
-    socket = new WebSocket(wsUrl());
-    socket.onopen = () => onState?.(true);
-    socket.onclose = () => {
-      onState?.(false);
-      if (!closedByClient) reconnectTimer = window.setTimeout(connect, 1200);
-    };
-    socket.onerror = () => onState?.(false);
-    socket.onmessage = (message) => {
-      try {
-        onEvent(JSON.parse(message.data) as ServerEvent);
-      } catch {
-        // Ignore malformed events.
-      }
-    };
+  const retry = () => {
+    if (!closedByClient) reconnectTimer = window.setTimeout(connect, 1200);
   };
+
+  function connect() {
+    void endpoint.get().then((resolved) => {
+      if (closedByClient) return;
+      socket = new WebSocket(eventsUrl(resolved));
+      socket.onopen = () => onState?.(true);
+      socket.onclose = () => {
+        onState?.(false);
+        retry();
+      };
+      socket.onerror = () => onState?.(false);
+      socket.onmessage = (message) => {
+        try {
+          onEvent(JSON.parse(message.data) as ServerEvent);
+        } catch {
+          // Ignore malformed events.
+        }
+      };
+    }, () => {
+      onState?.(false);
+      retry();
+    });
+  }
 
   connect();
 
