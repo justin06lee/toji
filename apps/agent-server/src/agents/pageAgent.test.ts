@@ -86,3 +86,37 @@ describe('streamAnswerPage', () => {
     expect(html).toContain('&lt;script&gt;');
   });
 });
+
+// The outcome is what decides whether a page is cached, so every path must report it.
+describe('streamAnswerPage outcome', () => {
+  async function outcome() {
+    const stream = streamAnswerPage('dubai work visa');
+    while (true) {
+      const next = await stream.next();
+      if (next.done) return next.value;
+    }
+  }
+
+  test('a complete model page is the one "model" outcome, the only kind worth caching', async () => {
+    state.chunks = ['<!DOCTYPE html><h1>Dubai</h1></html>'];
+    expect(await outcome()).toBe('model');
+  });
+
+  test('a failing backend and an empty page both end as "error"', async () => {
+    state.error = 'Cerebras: Payment required to access this resource.';
+    expect(await outcome()).toBe('error');
+    state.error = null;
+    expect(await outcome()).toBe('error');
+  });
+
+  test('no backend at all ends as "demo"', async () => {
+    state.available = false;
+    expect(await outcome()).toBe('demo');
+  });
+
+  test('a page cut short by an error ends as "partial"', async () => {
+    state.chunks = ['<!DOCTYPE html><h1>Dubai</h1>'];
+    state.error = 'connection reset';
+    expect(await outcome()).toBe('partial');
+  });
+});
