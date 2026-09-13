@@ -2,6 +2,10 @@ import { ArrowLeft, EyeOff, Plus, Route, Settings2, X } from 'lucide-react';
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { CONTAINER_COLORS, PROFILE_AVATARS, containerId, type Container } from '../lib/containers';
+import { publicAsset } from '../lib/publicAsset';
+import { ProfileAvatar } from './ProfileAvatar';
+
+export { ProfileAvatar };
 
 interface WindowProfilePickerProps {
   containers: Container[];
@@ -10,17 +14,6 @@ interface WindowProfilePickerProps {
   onContainersChange: (containers: Container[]) => void;
   onManage: () => void;
   onClose?: () => void;
-}
-
-export function ProfileAvatar({ container, size = 'md' }: { container: Container; size?: 'sm' | 'md' | 'lg' }) {
-  const classes = size === 'sm' ? 'h-6 w-6 text-[13px]' : size === 'lg' ? 'h-[72px] w-[72px] text-2xl' : 'h-9 w-9 text-lg';
-  const avatar = container.avatar ?? '';
-  const isArtwork = avatar.includes('/');
-  return (
-    <span className={`inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800 ${classes}`}>
-      {isArtwork ? <img src={`${import.meta.env.BASE_URL}${avatar}`} alt="" className="h-full w-full object-cover" /> : avatar || container.name.slice(0, 1).toUpperCase()}
-    </span>
-  );
 }
 
 export function WindowProfilePicker({ containers, currentId, onSelect, onContainersChange, onManage, onClose }: WindowProfilePickerProps) {
@@ -113,7 +106,7 @@ export function WindowProfilePicker({ containers, currentId, onSelect, onContain
                 <div className="mb-5 flex flex-wrap gap-2.5">
                   {PROFILE_AVATARS.map((option) => (
                     <button key={option} type="button" onClick={() => setAvatar(option)} aria-label="Choose profile picture" className={`h-12 w-12 overflow-hidden rounded-full transition ${avatar === option ? 'ring-2 ring-neutral-900 ring-offset-2 ring-offset-white dark:ring-white dark:ring-offset-neutral-950' : 'opacity-60 hover:opacity-100'}`}>
-                      <img src={`${import.meta.env.BASE_URL}${option}`} alt="" className="h-full w-full object-cover" />
+                      <img src={publicAsset(option)} alt=""className="h-full w-full object-cover" />
                     </button>
                   ))}
                 </div>
