@@ -1634,10 +1634,16 @@ function BrowsingSettings() {
 /** The rolling recording, and where a report goes. */
 function BugReportSettings({ onReportBug }: { onReportBug?: () => void }) {
   // The rolling recording is a browser setting under the Gecko bridge and a localStorage
-  // key in the Electron app. Filing a report needs the Electron app's report sheet
-  // (onReportBug); where that is missing the row says so instead of offering a dead button.
+  // key in the Electron app. Filing a report opens the Electron app's report sheet
+  // (onReportBug), or under Gecko the browser's about:report page (openReport); where
+  // neither is there the row says so instead of offering a dead button.
   const settings = useBrowserSettings();
   const viaBrowser = hasBrowserSettings();
+  const toji = bridge();
+  const geckoReport = viaBrowser && Boolean(toji.submitBugReport);
+  // Under Gecko the switch only means something when the browser keeps a recording to
+  // hand to the report page (replayClip); the Electron app records in this renderer.
+  const showReplay = !viaBrowser || Boolean(toji.replayClip);
   const [localOn, setLocalOn] = useState(() => (viaBrowser ? true : replayEnabled()));
   const [account, setAccount] = useState<BugReportAccount | null>(null);
   const hasAccount = Boolean(bridge().bugReportAccount);
@@ -1657,7 +1663,8 @@ function BugReportSettings({ onReportBug }: { onReportBug?: () => void }) {
     if (viaBrowser) void setBrowserSetting('replay', next);
     else setReplayEnabled(next);
   };
-  const canReport = isElectron() && Boolean(onReportBug);
+  const canReport = geckoReport ? Boolean(toji.openReport) : isElectron() && Boolean(onReportBug);
+  const report = geckoReport ? () => toji.openReport?.() : onReportBug;
   const shortcut = bridge().platform === 'darwin' ? '⌥⇧I' : 'Alt+Shift+I';
   const route = !hasAccount
     ? ''
@@ -1670,6 +1677,7 @@ function BugReportSettings({ onReportBug }: { onReportBug?: () => void }) {
   return (
     <Section icon={<Bug size={16} />} title="Bug reports">
       <div className="divide-y divide-black/[0.06] rounded-xl border border-black/10 px-3 dark:divide-white/[0.08] dark:border-white/10">
+        {showReplay && (
         <div className={row}>
           <div className="min-w-0">
             <div className="text-[13px]">Keep the last {REPLAY_SECONDS} seconds</div>
@@ -1685,15 +1693,22 @@ function BugReportSettings({ onReportBug }: { onReportBug?: () => void }) {
           </div>
           <Switch checked={on && canRecord} disabled={!canRecord} onChange={setOn} label={`Keep the last ${REPLAY_SECONDS} seconds`} />
         </div>
+        )}
         <div className={row}>
           <div className="min-w-0">
             <div className="text-[13px]">Report a bug</div>
             <p className="text-[12px] text-neutral-500">
-              {canReport ? `${route ? `${route} ` : ''}Also in the Help menu, or ${shortcut}.` : isElectron() ? 'Reporting a bug from this page isn’t available in this version yet.' : notHere()}
+              {!canReport
+                ? isElectron()
+                  ? 'Reporting a bug from this page isn’t available in this version yet.'
+                  : notHere()
+                : geckoReport
+                  ? route || 'Opens a page to write the report, with images of what you saw.'
+                  : `${route ? `${route} ` : ''}Also in the Help menu, or ${shortcut}.`}
             </p>
           </div>
           {canReport && (
-            <button type="button" className={FIELD_BUTTON_QUIET} onClick={onReportBug}>
+            <button type="button" className={FIELD_BUTTON_QUIET} onClick={report}>
               Report a bug…
             </button>
           )}

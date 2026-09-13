@@ -296,6 +296,8 @@ export interface TojiBridge {
    * a new tab, with a tray that attaches the files; about:report only has to close.
    */
   submitBugReport?: (draft: BugReportDraft) => Promise<BugReportResult>;
+  /** Gecko: open about:report for the window this page is in (Settings › Bug reports). */
+  openReport?: () => void;
   /** Gecko: close about:report's own tab. */
   closeReport?: () => void;
   /**
