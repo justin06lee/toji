@@ -12,7 +12,7 @@ import { addSocket, broadcast, sendToSocket } from './lib/events.js';
 import { sessionToMarkdown, sessionToPortableJson } from './lib/export.js';
 import { predictIntent } from './agents/predictionAgent.js';
 import { researchOrchestrator } from './agents/researchAgent.js';
-import { streamAnswerPage } from './agents/pageAgent.js';
+import { streamAnswerPage, type PageOutcome } from './agents/pageAgent.js';
 import { gatherPageSources } from './agents/search.js';
 import { getCachedPage, putCachedPage } from './lib/pageCache.js';
 import { nextAgentAction, researchHelp } from './agents/webAgent.js';
@@ -57,6 +57,16 @@ function rateLimit(windowMs: number, maxRequests: number) {
   };
 }
 const expensiveRateLimit = rateLimit(10_000, 10); // 10 requests per 10 seconds
+
+/**
+ * Uploads (POST /api/files and /api/references) carry the file as base64 inside JSON.
+ * Their schemas cap it at 40M characters, about 30 MB of file, and their JSON body
+ * limit is sized from the same number plus room for the small envelope around it, so
+ * the two cannot drift apart again. Every other route keeps the 12 MB limit.
+ */
+export const UPLOAD_BASE64_MAX = 40_000_000;
+export const UPLOAD_BODY_LIMIT_BYTES = UPLOAD_BASE64_MAX + 64 * 1024;
+const UPLOAD_ROUTES = new Set(['/api/files', '/api/references']);
 
 // Only the local renderer needs cross-origin access. The packaged desktop app
 // loads the renderer over http://127.0.0.1 and the server serves the static
@@ -247,7 +257,7 @@ routes.get('/api/agents/cerebras-models', async (req, res) => {
 routes.post('/api/files', async (req, res, next) => {
   try {
     const body = z
-      .object({ name: z.string().min(1).max(255), mime: z.string().max(200).optional(), dataBase64: z.string().max(40_000_000) })
+      .object({ name: z.string().min(1).max(255), mime: z.string().max(200).optional(), dataBase64: z.string().max(UPLOAD_BASE64_MAX) })
       .parse(req.body);
     const dir = path.join(config.dataDir, 'uploads');
     await mkdir(dir, { recursive: true });
@@ -271,7 +281,7 @@ routes.get('/api/references', async (_req, res, next) => {
 });
 routes.post('/api/references', async (req, res, next) => {
   try {
-    const body = z.object({ name: z.string().min(1).max(255), mime: z.string().max(200).optional(), dataBase64: z.string().max(40_000_000) }).parse(req.body);
+    const body = z.object({ name: z.string().min(1).max(255), mime: z.string().max(200).optional(), dataBase64: z.string().max(UPLOAD_BASE64_MAX) }).parse(req.body);
     res.json(await addReference(body));
   } catch (error) {
     next(error);
@@ -431,18 +441,32 @@ routes.get('/api/page/stream', expensiveRateLimit, async (req, res) => {
     return [];
   });
   let full = '';
+  let outcome: PageOutcome | undefined;
+  // Iterated by hand rather than with for-await, which would drop the generator's
+  // return value: the outcome that says whether this was a real answer.
+  const stream = streamAnswerPage(query, controller.signal, sources);
   try {
-    for await (const chunk of streamAnswerPage(query, controller.signal, sources)) {
+    while (!controller.signal.aborted) {
+      const next = await stream.next();
+      if (next.done) {
+        outcome = next.value;
+        break;
+      }
       if (controller.signal.aborted) break;
-      full += chunk;
-      res.write(chunk);
+      full += next.value;
+      res.write(next.value);
     }
   } catch {
     // The browser keeps whatever rendered; nothing more to send.
+  } finally {
+    // Leaving early (the viewer went away) still lets the generator clean up.
+    if (outcome === undefined) await stream.return('partial').catch(() => undefined);
   }
   res.end();
-  // Cache only complete generations (not aborted / not the offline fallback page).
-  if (!controller.signal.aborted && full.length > 0 && !full.includes('Toji · demo render')) {
+  // Cache only a complete answer from the model: never the demo page, the
+  // could-not-generate page (which would otherwise be served for 72 h after the
+  // backend recovered), a page cut short, or a stream the viewer abandoned.
+  if (outcome === 'model' && !controller.signal.aborted && full.length > 0) {
     void putCachedPage(query, full);
   }
 });
@@ -633,9 +657,15 @@ export function createApp(options: AppOptions, security: SecurityOptions) {
   }
   // Checked before bodies are parsed, so an unauthenticated upload is never read.
   app.use(apiAuth(security));
-  // Limit is generous because the web agent's vision step posts a JPEG screenshot
-  // (a base64 data URI) alongside the page's elements.
-  app.use(express.json({ limit: '12mb' }));
+  // JSON bodies: 12 MB is generous because the web agent's vision step posts a JPEG
+  // screenshot (a base64 data URI) alongside the page's elements. The two upload
+  // routes get room for their whole schema cap (see UPLOAD_BASE64_MAX).
+  const defaultJson = express.json({ limit: '12mb' });
+  const uploadJson = express.json({ limit: UPLOAD_BODY_LIMIT_BYTES });
+  app.use((req, res, next) => {
+    const upload = req.method === 'POST' && UPLOAD_ROUTES.has(req.path.replace(/\/+$/, ''));
+    return (upload ? uploadJson : defaultJson)(req, res, next);
+  });
   app.use(routes);
 
   // The packaged desktop app loads the renderer over http:// from this same origin —
@@ -652,6 +682,13 @@ export function createApp(options: AppOptions, security: SecurityOptions) {
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.message });
+    }
+    // body-parser's own refusals (a body over the limit, malformed JSON) are the
+    // client's to fix and carry their status; reporting them as a 500 hid the
+    // "upload too large" case behind "internal server error".
+    const status = (error as { status?: unknown } | null)?.status;
+    if (typeof status === 'number' && status >= 400 && status < 500) {
+      return res.status(status).json({ error: error instanceof Error ? error.message : 'bad request' });
     }
     console.error('[toji] request error:', error);
     return res.status(500).json({ error: 'internal server error' });

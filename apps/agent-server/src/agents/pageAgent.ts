@@ -140,14 +140,24 @@ export function errorPageHtml(query: string, backend: string, reason: string): s
 }
 
 /**
+ * What a page stream turned out to be. Only 'model' is an answer: 'partial' is a model
+ * page cut short by an error, 'error' is the could-not-generate page, and 'demo' is the
+ * no-model placeholder — none of which may be cached and served again later.
+ */
+export type PageOutcome = 'model' | 'partial' | 'error' | 'demo';
+
+/**
  * Stream a monochrome HTML answer page for a query. Yields HTML chunks.
  * Uses the live model when configured; otherwise streams the local fallback page
  * in small chunks so streaming still works offline / in demo mode.
  *
  * The page carries no theme of its own: THEME_PRELUDE is placed at its head and the
  * page follows whichever colour scheme the viewer prefers.
+ *
+ * The generator's return value is the PageOutcome, so a caller can tell a real answer
+ * from a page it must not keep.
  */
-export async function* streamAnswerPage(query: string, signal?: AbortSignal, sources?: PageSource[]): AsyncGenerator<string, void, unknown> {
+export async function* streamAnswerPage(query: string, signal?: AbortSignal, sources?: PageSource[]): AsyncGenerator<string, PageOutcome, unknown> {
   const clean = normalizeWhitespace(query);
   const grounded = Array.isArray(sources) && sources.length > 0;
   const sourceBlock = grounded
@@ -187,23 +197,25 @@ export async function* streamAnswerPage(query: string, signal?: AbortSignal, sou
       }
       const rest = prelude.end();
       if (rest) yield rest;
-      if (produced > 0) return;
+      if (produced > 0) return 'model';
       failure = 'The model returned an empty page.';
     } catch (error) {
       // Half a page followed by an error page would be two documents glued together;
       // stop instead, and leave the partial page on screen.
-      if (produced > 0) return;
+      if (produced > 0) return 'partial';
       failure = error instanceof Error ? error.message : String(error);
     }
     console.warn(`[toji] streamAnswerPage failed on ${backend}: ${failure}`);
   }
 
   // No model at all is the demo case; a model that failed gets told why.
+  const outcome: PageOutcome = failure ? 'error' : 'demo';
   const html = failure ? errorPageHtml(clean, backend, failure) : fallbackPageHtml(clean);
   const step = 120;
   for (let i = 0; i < html.length; i += step) {
-    if (signal?.aborted) return;
+    if (signal?.aborted) return outcome;
     yield html.slice(i, i + step);
     await new Promise((resolve) => setTimeout(resolve, 26));
   }
+  return outcome;
 }
