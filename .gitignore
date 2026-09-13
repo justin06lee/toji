@@ -14,3 +14,6 @@ coverage
 
 # Firefox source, objdir, sccache and test profiles (gecko/build.ts)
 gecko/.work
+
+# Local agent tooling (worktrees for parallel work)
+.claude/

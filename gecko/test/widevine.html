@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Toji Widevine test</title>
+<style>body { font: 14px -apple-system, sans-serif; margin: 24px; } video { width: 640px; background: #000; }</style>
+<h1>Widevine playback</h1>
+<p>Google's Widevine test stream (Angel One) with Shaka's public test license server.</p>
+<video id="v" muted playsinline></video>
+<pre id="out">loading…</pre>
+<script src="https://cdn.jsdelivr.net/npm/shaka-player@4/dist/shaka-player.compiled.js"></script>
+<script>
+(async () => {
+  const out = document.getElementById('out');
+  const video = document.getElementById('v');
+  const state = { error: null, loaded: false };
+  window.__widevine = state;
+  try {
+    shaka.polyfill.installAll();
+    const player = new shaka.Player();
+    await player.attach(video);
+    player.configure({ drm: { servers: { 'com.widevine.alpha': 'https://cwip-shaka-proxy.appspot.com/no_auth' } } });
+    player.addEventListener('error', (e) => { state.error = String(e.detail && e.detail.code); });
+    await player.load('https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine/dash.mpd');
+    state.loaded = true;
+    await video.play();
+  } catch (e) {
+    state.error = String(e && (e.code || e.message || e));
+  }
+  setInterval(() => {
+    state.currentTime = video.currentTime;
+    state.keys = !!video.mediaKeys;
+    state.keySystem = video.mediaKeys && video.mediaKeys.keySystem;
+    out.textContent = JSON.stringify(state, null, 2);
+  }, 500);
+})();
+</script>
