@@ -130,7 +130,7 @@
   },
   "devDependencies": {
     "@fontsource/poppins": "^5.2.7",
-    "@justin06lee/yagami": "0.5.0",
+    "@justin06lee/yagami": "0.8.2",
     "@tailwindcss/vite": "^4.3.1",
     "@types/cors": "2.8.19",
     "@types/express": "5.0.6",
