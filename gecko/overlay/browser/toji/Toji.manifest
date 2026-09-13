@@ -1,0 +1,10 @@
+# Toji's hooks into Firefox's startup and window lifecycle
+# (see browser/components/BrowserComponents.manifest for the categories).
+
+category browser-before-ui-startup resource:///modules/toji/TojiStartup.sys.mjs TojiStartup.init
+
+# Earliest per-window hook that can still choose the first tab's container.
+category browser-window-domcontentloaded-before-tabbrowser resource:///modules/toji/TojiWindows.sys.mjs TojiWindows.beforeTabbrowser
+# gBrowser exists from here: wrap tab creation, draw the picker.
+category browser-window-domcontentloaded resource:///modules/toji/TojiWindows.sys.mjs TojiWindows.init
+category browser-window-unload-begin resource:///modules/toji/TojiWindows.sys.mjs TojiWindows.uninit

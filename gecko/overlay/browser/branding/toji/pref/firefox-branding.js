@@ -20,6 +20,9 @@ pref("app.update.badgeWaitTime", 0);
 // If this is less than 5, then pasting code into the web console is disabled
 pref("devtools.selfxss.count", 5);
 
+// Toji starts light; Settings and the toolbar toggle change it (TojiStartup).
+pref("toji.theme", "light");
+
 // Autoconfig: toji.cfg sits next to the app's resources and locks the prefs
 // that strip Mozilla's services. The sandbox stays on: it only needs prefs.
 pref("general.config.filename", "toji.cfg");

@@ -55,11 +55,18 @@ function pagesAtTop(): Plugin {
     name: 'toji-gecko-pages-at-top',
     enforce: 'post',
     generateBundle(_options, bundle) {
+      // The pages are shown under about: addresses, and a relative URL can't
+      // resolve against about:settings, so the HTML names its assets by their
+      // chrome: URL. Inside the bundle, imports and CSS url()s resolve against
+      // their own chrome: files and stay relative.
+      const assets = 'chrome://toji/content/pages/assets/';
       for (const [fileName, output] of Object.entries(bundle)) {
         const page = /^gecko\/([^/]+\.html)$/.exec(fileName)?.[1];
         if (!page || output.type !== 'asset') continue;
-        const html = String(output.source).replaceAll('"../assets/', '"./assets/');
-        if (/(?:src|href)="(?!\.\/assets\/|data:|#)/.test(html)) this.error(`${page} refers to something outside assets/`);
+        const html = String(output.source).replaceAll('"../assets/', `"${assets}`);
+        if (/(?:src|href)="(?!chrome:\/\/toji\/content\/pages\/assets\/|data:|#)/.test(html)) {
+          this.error(`${page} refers to something outside assets/`);
+        }
         delete bundle[fileName];
         this.emitFile({ type: 'asset', fileName: page, source: html });
       }

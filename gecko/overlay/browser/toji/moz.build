@@ -6,9 +6,63 @@
 # DIST_SUBDIR = "browser", so ".." is the GRE directory
 # (Toji.app/Contents/Resources on macOS).
 
+JAR_MANIFESTS += ["jar.mn"]
+
+# Category hooks into startup and each window's lifecycle.
+EXTRA_COMPONENTS += ["Toji.manifest"]
+
+# resource:///modules/toji/
+EXTRA_JS_MODULES.toji += [
+    "modules/TojiAgent.sys.mjs",
+    "modules/TojiAgentServer.sys.mjs",
+    "modules/TojiAsk.sys.mjs",
+    "modules/TojiBugReport.sys.mjs",
+    "modules/TojiContainers.sys.mjs",
+    "modules/TojiImport.sys.mjs",
+    "modules/TojiPages.sys.mjs",
+    "modules/TojiProxy.sys.mjs",
+    "modules/TojiRecorder.sys.mjs",
+    "modules/TojiStartup.sys.mjs",
+    "modules/TojiTor.sys.mjs",
+    "modules/TojiTorUI.sys.mjs",
+    "modules/TojiVault.sys.mjs",
+    "modules/TojiWindows.sys.mjs",
+]
+
+# resource:///modules/toji/actors/
+EXTRA_JS_MODULES.toji.actors += [
+    "actors/TojiAgentChild.sys.mjs",
+    "actors/TojiAgentParent.sys.mjs",
+    "actors/TojiPageChild.sys.mjs",
+    "actors/TojiPageParent.sys.mjs",
+    "actors/TojiVaultChild.sys.mjs",
+    "actors/TojiVaultParent.sys.mjs",
+]
+
+# resource:///modules/toji/lib/ — gecko/lib/*.ts bundled by gecko/build.ts.
+EXTRA_JS_MODULES.toji.lib += [
+    "modules/lib/agent.sys.mjs",
+    "modules/lib/bugReport.sys.mjs",
+    "modules/lib/containers.sys.mjs",
+    "modules/lib/imports.sys.mjs",
+    "modules/lib/replayBuffer.sys.mjs",
+    "modules/lib/replayMux.sys.mjs",
+    "modules/lib/tor.sys.mjs",
+    "modules/lib/vault.sys.mjs",
+]
+
 # Locked prefs that strip Mozilla's services, read by autoconfig
 # (general.config.filename in the branding prefs).
 FINAL_TARGET_FILES[".."] += ["toji.cfg"]
 
+# The agent server, compiled by gecko/build.ts (bun build --compile).
+FINAL_TARGET_FILES[".."] += ["bin/toji-agent-server"]
+
 # Enterprise policies: the second lock on the same services.
 FINAL_TARGET_FILES[".."].distribution += ["distribution/policies.json"]
+
+# uBlock Origin, AMO-signed and pinned in gecko/addons.json (downloaded and
+# checked by gecko/build.ts); installed into every new profile.
+FINAL_TARGET_FILES[".."].distribution.extensions += [
+    "distribution/extensions/uBlock0@raymondhill.net.xpi",
+]

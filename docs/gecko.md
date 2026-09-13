@@ -290,9 +290,9 @@ bundles into `resource:///modules/toji/lib/*.sys.mjs`. No C++.
 |---|---|---|---|
 | 0 | Prerequisites and decisions | `chore/gecko-prereqs` | done (tag `chore-gecko-prereqs`) |
 | 1 | Stripped, branded browser that `make` builds, installs, launches | `feat/gecko-browser` | done (tag `feat-gecko-browser`) |
-| 2 | Containers, one window = one profile, picker, ephemeral wipe, clear | | |
-| 3 | Tor per container, kill switch, onion routing, Tor UI, `make tor-check` | | |
-| 4 | Styling and extras on native widgets; Settings, Welcome, Plans | | |
+| 2 | Containers, one window = one profile, picker, ephemeral wipe, clear | `feat/gecko-containers` | done (`gecko/test/phase2.ts`; tag `feat-gecko-containers`) |
+| 3 | Tor per container, kill switch, onion routing, Tor UI, `make tor-check` | `feat/gecko-containers` | done in the browser (`gecko/test/tor-browser.ts`; tag `feat-gecko-containers`); Tor UI not yet checked |
+| 4 | Styling and extras on native widgets; Settings, Welcome, Plans | `feat/gecko-containers` | pages done (`gecko/test/phase4.ts`; tag `feat-gecko-containers`); toolbar styling and extras not yet checked |
 | 5 | Agent server as compiled sidecar; AI pages; web agent; spotlight | | |
 | 6 | Passwords, imports, uBlock Origin | | |
 | 7 | Bug reports, shortcuts, default browser, links from other apps | | |
@@ -304,8 +304,8 @@ State per item: — not started · WIP · works · works differently · dropped 
 
 | Area | Item | State |
 |---|---|---|
-| Profiles | Personal, Work, Shopping, Private, Onion, custom; colours, avatars, ephemeral wipe, clear | — |
-| Tor | managed/external tor, bootstrap UI, fail-closed, per-container circuits, NEWNYM, .onion auto-route, hold-to-Tor | — |
+| Profiles | Personal, Work, Shopping, Private, Onion, custom; colours, avatars, ephemeral wipe, clear | WIP — picker, one window = one container (⌘T included), Private window, isolation, wipe on close and Clear verified; custom containers, colours and avatars not yet checked |
+| Tor | managed/external tor, bootstrap UI, fail-closed, per-container circuits, NEWNYM, .onion auto-route, hold-to-Tor | WIP — managed tor, fail-closed (tor off and tor failed), per-container circuits with different exits and .onion verified; external tor, bootstrap UI, NEWNYM, .onion auto-route from a direct window and hold-to-Tor not yet checked |
 | Passwords | encrypted, container-scoped, exact-origin fill, save bubble, autosave, generator, CSV + browser import, agent-safe | — |
 | Agent | screenshot loop, spotlight, Option tap, cursor, tab marks, step limit, dropped files, reference docs, memory/librarian, research sub-agent | — |
 | Agent backends | yagami CLIs, Cerebras, OpenAI-compatible, Toji plan (billing not wired) | — |
@@ -314,7 +314,7 @@ State per item: — not started · WIP · works · works differently · dropped 
 | Bookmarks | ⌘D, pinned or hover bar, imports | — |
 | Tabs | top/side, groups with colours, drag reorder, long-press new-tab menu, background tabs, audio/mute, agent indicator, open/close animation | — |
 | Ad blocking | uBlock Origin, on by default | — |
-| Pages | Settings, Welcome, Plans | — |
+| Pages | Settings, Welcome, Plans | WIP — Settings, Welcome, Plans, start page and bug report render with `window.toji`; web pages get no bridge; ⌘T opens about:start. Plans shows no tiers yet (they come from the agent server, phase 5) |
 | System | default browser, cold-start links from other apps | — |
 | Theme | toggle drives prefers-color-scheme | — |
 | Bug reports | written + images + screenshot; 15 s clip if a Gecko capture path holds up | — |
@@ -414,7 +414,86 @@ State per item: — not started · WIP · works · works differently · dropped 
 
 **Phase 1 is done** (merged to master, tag `feat-gecko-browser`).
 
-**Next:** `bun gecko/build.ts build` with the phase 2–7 layer (prepare copies it and the
-generated pages / server binary; no C++ changes, so the build should be short), then
-verify phase by phase with Marionette (chrome-context scripts) and screenshots,
-committing each phase as it verifies.
+### 2026-09-13 — phase 2 verified
+
+- Build 4 (the phase 2–7 layer on the phase-1 objdir): 42 s, nothing recompiled;
+  `bun gecko/build.ts faster` + `package` (≈30 s together) after each chrome-JS fix.
+- First run of Toji's chrome code. Two bugs:
+  - The `gecko/lib` bundles export plain functions, but the chrome modules imported
+    them with `defineESModuleGetters`, which binds one export *by name* — so
+    `lazy.ContainersLib`, `lazy.TorLib` … were undefined and startup threw. They now
+    use `defineLazyGetter` + `importESModule`, which holds the whole module.
+  - The picker window still loaded about:home. `updateBookmarkToolbarVisibility()`
+    reads and caches `gBrowserInit.uriToLoadPromise` in `onBeforeInitialXULLayout`,
+    before the before-tabbrowser hook nulls `window.arguments[0]`; the hook now
+    resets the cached value to null too.
+- `gecko/test/phase2.ts`: all 12 checks pass — picker shown, nothing loaded until a
+  profile is chosen, Work binds the window and every tab (⌘T included), ⌘⇧N gives
+  Private, cookies stay per container, closing Private's last window wipes it, Clear
+  container empties Work, the five built-ins are stored with Gecko identities.
+- Test harness: `Marionette.execAsync` runs an async body (`await` works, a throw
+  fails the call); the Clear check moves Work's tab off the cookie page first, since
+  a container's tabs reload after a clear.
+- The whole Toji layer is now committed on `feat/gecko-containers`. The modules are
+  too interlinked to split by phase (TojiStartup and TojiWindows wire up Tor, the
+  vault, the agent), so phases 3–7 ride along unverified; the branch merges to master
+  once Tor (phase 3) verifies too.
+
+### 2026-09-13 — phases 3 and 4 under way
+
+- **Phase 3 verified** — `gecko/test/tor-browser.ts`, all 7 checks, against a real
+  tor: with tor stopped a Tor container's request ends on
+  `about:neterror?e=proxyConnectFailure`, never direct; the managed tor bootstraps in
+  the browser (~35 s from a cached consensus); two Tor containers exit through tor from
+  different relays (204.8.96.103 / 5.255.118.218); a direct container does not use tor;
+  DuckDuckGo's .onion loads in the Onion container; each container window holds just
+  its one tab. With tor in an error state (an earlier run), every Tor-container load
+  still ended on `proxyConnectFailure`.
+- Bugs found running the Tor and page code for the first time:
+  - **No timers in system modules.** Firefox's shared module global (`SystemGlobal`)
+    has `fetch`, `Headers`, `crypto`, `OffscreenCanvas`, `WebSocket`, `URL` … but not
+    `setTimeout`/`clearTimeout`/`setInterval`, `createImageBitmap`, `queueMicrotask` or
+    `performance` (checked in the running build). Seven Toji modules called timers bare;
+    they now import them from `resource://gre/modules/Timer.sys.mjs`, as Firefox's own
+    modules do. Code that runs against a window keeps using `win.setTimeout`.
+  - **The control connection hung itself up.** It wrote a bare `\r\n` to find out it
+    was connected; before authentication tor answers anything but
+    PROTOCOLINFO/AUTHENTICATE with `514 Authentication required` and closes the
+    connection (and a SOCKS port hangs up on stray bytes, so `probePort` could never
+    find an external tor either). Connecting now waits for the transport's
+    `STATUS_CONNECTED_TO` (a refused or timed-out connect surfaces as the input
+    stream failing); nothing is sent. `isAlive()` is no substitute: right after
+    connecting it can report a live socket as dead.
+  - **Cookie race.** tor logs "Opened Control listener" before it writes
+    `control_auth_cookie`, so reading the cookie at that moment failed; Toji now waits
+    for it as it does for the port file. Both listener lines matched the trigger, so
+    two attaches raced; it is now once per tor process.
+  - **A failed attach left Tor "bootstrapping" forever** (tor at 100 %, Toji waiting for
+    a SOCKS port no one would report). Now it stops that tor and reports the reason, so
+    `whenReady` answers false and the status bar can say why.
+  - **`window.toji.saveContainers(list)`** handed `[list]` to `replaceAll`: every page
+    API method receives its arguments as an array. `saveContainers` and
+    `clearContainer` now destructure like the rest.
+- **Toji's pages were blank.** Their HTML named its assets `./assets/…`, and a
+  relative URL can't resolve against the `about:settings` address they are shown
+  under. `vite.gecko.config.ts` now writes the HTML's asset URLs as
+  `chrome://toji/content/pages/assets/…` (imports and CSS `url()`s inside the bundle
+  stay relative, resolving against their own chrome: files).
+- **Pages verified** — `gecko/test/phase4.ts`: about:settings, about:welcome,
+  about:plans, about:start and about:report render and get `window.toji`;
+  `saveContainers(containers())` round-trips; ⌘T opens about:start; an ordinary web
+  page has no `window.toji`. Screenshots in `gecko/.work/phase4/`. Two things seen
+  there: Plans shows no plan tiers (they come from the agent server, phase 5's to
+  verify), and Welcome reports Toji as the default browser because the Electron app
+  still shares the bundle id `com.ezzy.toji` (phase 8).
+- Test harness: window handles come from Marionette's `NavigableManager` (UUIDs, not
+  browserIds); `execAsync` errors carry the message as well as the stack;
+  `gecko/test/phase4.ts` (new) covers Toji's pages; `tor-browser.ts` also checks that
+  each container window holds exactly its one tab (an earlier run saw extra tabs appear
+  after tor started).
+- Phases 2–4 merged to master (tag `feat-gecko-containers`). The phase 5–7 code is in
+  the same layer and loads without startup errors, but none of it is verified yet.
+
+**Next:** phase 5 — the agent server sidecar (it should also fill Plans' tiers), AI
+answer pages, the web agent and its spotlight; then the vault, imports and uBlock
+Origin (6), and bug reports, shortcuts, default browser and links from other apps (7).
