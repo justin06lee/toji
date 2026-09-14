@@ -40,6 +40,21 @@ const PAGES = {
   report: "report.html",
 };
 
+// Firefox's pages for what Toji does itself, served by Toji's page instead, under
+// Firefox's name — registered like Toji's own, so nothing is redirected and no load
+// can race another (a new private window's first page, a typed about:preferences).
+const PAGE_ALIASES = {
+  preferences: "settings.html",
+  logins: "settings.html",
+  protections: "settings.html",
+  home: "start.html",
+  newtab: "start.html",
+  privatebrowsing: "start.html",
+  firefoxview: "start.html",
+  welcomeback: "start.html",
+};
+const ALL_PAGES = { ...PAGES, ...PAGE_ALIASES };
+
 // Parent process only; no URI_SAFE_FOR_UNTRUSTED_CONTENT, so web pages can't
 // link to them and they carry the chrome page's (system) principal.
 const ABOUT_FLAGS =
@@ -68,7 +83,7 @@ class AboutPage {
 
 function registerAboutPages() {
   const registrar = Components.manager.QueryInterface(Ci.nsIComponentRegistrar);
-  for (const [name, file] of Object.entries(PAGES)) {
+  for (const [name, file] of Object.entries(ALL_PAGES)) {
     const page = new AboutPage(file);
     const cid = Components.ID(Services.uuid.generateUUID().toString());
     registrar.registerFactory(
@@ -92,7 +107,7 @@ function registerActors() {
       esModuleURI: "resource:///modules/toji/actors/TojiPageChild.sys.mjs",
       events: { DOMDocElementInserted: { capture: true } },
     },
-    matches: Object.keys(PAGES).map(name => `about:${name}*`),
+    matches: Object.keys(ALL_PAGES).map(name => `about:${name}*`),
   });
 }
 
@@ -460,6 +475,22 @@ export const TojiPageAPI = {
 
   torNewCircuit() {
     return lazy.TojiTor.newCircuit();
+  },
+
+  /** The start page's Go button: whether its window is in Tor mode, and whether holding switches it. */
+  torMode(_args, actor) {
+    const win = windowOf(actor);
+    const id = win ? lazy.TojiWindows.containerOf(win) : null;
+    const c = id ? lazy.TojiContainers.byId(id) : null;
+    return { active: c?.egress === "tor", canToggle: !!c && (c.egress !== "tor" || !!c.temporary) };
+  },
+
+  /** Holding the start page's Go button: the window moves to Tor, or back. */
+  toggleTor(_args, actor) {
+    const win = windowOf(actor);
+    if (win) {
+      lazy.TojiWindows.toggleTor(win).catch(e => console.error("[toji:pages] hold-to-Tor", e));
+    }
   },
 
   /** Calls a method by name; anything not defined here is refused. */

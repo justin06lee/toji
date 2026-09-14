@@ -47,6 +47,15 @@ function onionListener(win) {
       if (!c || c.egress === "tor" || !isOnionHost(uri)) {
         return;
       }
+      // Only an address the user went to — typed into the omnibox (the browser's own
+      // load) or a link they clicked — moves the window. A page can't send the whole
+      // window to Tor by itself; its .onion load just fails, as any direct one does.
+      const loadInfo = request.loadInfo;
+      const userMeant =
+        loadInfo?.triggeringPrincipal?.isSystemPrincipal || loadInfo?.hasValidUserGestureActivation;
+      if (!userMeant) {
+        return;
+      }
       // A hidden service only resolves through tor: move the window there.
       browser.stop();
       lazy.TojiWindows.toggleTor(win, { load: uri.spec, from: browser });

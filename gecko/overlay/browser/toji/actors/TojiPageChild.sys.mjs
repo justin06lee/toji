@@ -21,6 +21,8 @@ const METHODS = [
   "finishOnboarding",
   "navigate",
   "askAI",
+  "torMode",
+  "toggleTor",
   "bugReportAccount",
   "captureWindow",
   "submitBugReport",

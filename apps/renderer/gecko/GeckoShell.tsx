@@ -27,31 +27,31 @@ import { fetchPageSources, type Bookmark } from '../src/lib/api';
 import { bridge, type BridgeContainer, type TorStatus, type VaultEntry, type VaultPrompt } from '../src/lib/bridge';
 import { DEFAULT_CONTAINER_ID, findContainer, type Container } from '../src/lib/containers';
 import { geckoLoadFailure } from '../src/lib/loadError';
-import { hostOf, looksLikeUrl, toUrl } from '../src/lib/nav';
+import { hostOf, isBrowserAddress, looksLikeUrl, toUrl } from '../src/lib/nav';
 import { tabTitle } from '../src/lib/tabPresentation';
 import { useBookmarksPeek } from '../src/lib/useBookmarksPeek';
-import type { BrowserTab, PageSource, TabGroup } from '../src/types';
+import type { BrowserTab, PageSource } from '../src/types';
 import { shellHost, type ShellPrefs, type ShellReportTray, type ShellTabInfo, type ViewportRect } from './shellHost';
 import { tabKind, toBrowserTab } from './shellTabs';
 
 const sameRect = (a: ViewportRect | null, b: ViewportRect) => Boolean(a) && a!.x === b.x && a!.y === b.y && a!.width === b.width && a!.height === b.height;
+// Unrounded: the page's edges meet the header's and the sidebar's exactly.
 const rectOf = (el: Element): ViewportRect => {
   const r = el.getBoundingClientRect();
-  return { x: Math.round(r.left), y: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) };
+  return { x: r.left, y: r.top, width: r.width, height: r.height };
 };
-let groupCounter = 0;
 
 /**
  * Firefox's tabs as the Electron app's tab objects, keeping each object as long as
  * nothing about its tab changed. Motion's reordering follows tabs by object identity,
  * so a tab dragged along the strip must stay the same object while Firefox moves it.
  */
-function useStableTabs(infos: ShellTabInfo[], containerId: string, groupOf: Record<string, string>, typed: Record<string, string>): BrowserTab[] {
+function useStableTabs(infos: ShellTabInfo[], containerId: string, typed: Record<string, string>): BrowserTab[] {
   const cache = useRef(new Map<string, { key: string; tab: BrowserTab }>());
   return useMemo(() => {
     const next = new Map<string, { key: string; tab: BrowserTab }>();
     const tabs = infos.map((info) => {
-      const context = { containerId, groupId: groupOf[info.id] ?? null, query: typed[info.id] };
+      const context = { containerId, groupId: info.groupId, query: typed[info.id] };
       const key = JSON.stringify([info, context]);
       const hit = cache.current.get(info.id);
       const entry = hit && hit.key === key ? hit : { key, tab: toBrowserTab(info, context) };
@@ -60,7 +60,7 @@ function useStableTabs(infos: ShellTabInfo[], containerId: string, groupOf: Reco
     });
     cache.current = next;
     return tabs;
-  }, [infos, containerId, groupOf, typed]);
+  }, [infos, containerId, typed]);
 }
 
 export function GeckoShell({ root }: { root: HTMLElement }) {
@@ -82,16 +82,18 @@ export function GeckoShell({ root }: { root: HTMLElement }) {
   const holeRef = useRef<HTMLDivElement>(null);
 
   // Groups are the window's own, as they were in the Electron app: a colour and a name
-  // over some of its tabs, gone with the window.
-  const [groups, setGroups] = useState<TabGroup[]>([]);
-  const [groupOf, setGroupOf] = useState<Record<string, string>>({});
+  // over some of its tabs. The browser keeps them with the session (a duplicated,
+  // reopened or restored tab keeps its group), so they come with the tabs.
+  const groups = state.groups;
   // What is typed into the omnibox, per tab, until that tab goes somewhere.
   const [typed, setTyped] = useState<Record<string, string>>({});
+  // Tabs whose question has been asked and whose answer page hasn't started loading.
+  const [asking, setAsking] = useState<Record<string, true>>({});
   const lastUrl = useRef<Record<string, string>>({});
 
   const containerId = state.containerId;
-  const windowContainer: Container = findContainer(containers as Container[], containerId ?? undefined);
-  const tabs = useStableTabs(state.tabs, containerId ?? DEFAULT_CONTAINER_ID, groupOf, typed);
+  const windowContainer: Container = (state.container as Container | null) ?? findContainer(containers as Container[], containerId ?? undefined);
+  const tabs = useStableTabs(state.tabs, containerId ?? DEFAULT_CONTAINER_ID, typed);
   const activeId = state.selectedId ?? tabs[0]?.id ?? '';
   const activeTab = tabs.find((t) => t.id === activeId);
   const activeInfo = state.tabs.find((t) => t.id === activeId);
@@ -101,7 +103,7 @@ export function GeckoShell({ root }: { root: HTMLElement }) {
   tabsRef.current = tabs;
   // Hold-to-Tor is a Tor container of its own (temporary), so the route is the container's.
   const torMode = windowContainer.egress === 'tor';
-  const canToggleTor = !torMode || Boolean((windowContainer as BridgeContainer & { temporary?: boolean }).temporary);
+  const canToggleTor = !torMode || Boolean(state.container?.temporary);
 
   // A tab that went somewhere shows where it went; what was typed into it is dropped.
   useEffect(() => {
@@ -112,26 +114,21 @@ export function GeckoShell({ root }: { root: HTMLElement }) {
     }
     const alive = new Set(state.tabs.map((t) => t.id));
     for (const id of Object.keys(lastUrl.current)) if (!alive.has(id)) delete lastUrl.current[id];
-    setTyped((current) => {
+    const drop = <T,>(current: Record<string, T>) => {
       const stale = Object.keys(current).filter((id) => gone.includes(id) || !alive.has(id));
       if (!stale.length) return current;
       const next = { ...current };
       for (const id of stale) delete next[id];
       return next;
-    });
-    // Closed tabs leave their groups; a group left with no tabs goes.
-    setGroupOf((current) => {
-      const stale = Object.keys(current).filter((id) => !alive.has(id));
-      if (!stale.length) return current;
-      const next = { ...current };
-      for (const id of stale) delete next[id];
-      return next;
+    };
+    setTyped(drop);
+    // An answer that started loading shows the tab's own loading state from then on.
+    const started = new Set(state.tabs.filter((t) => t.busy).map((t) => t.id));
+    setAsking((current) => {
+      const next = drop(current);
+      return Object.keys(next).some((id) => started.has(id)) ? Object.fromEntries(Object.entries(next).filter(([id]) => !started.has(id))) : next;
     });
   }, [state.tabs]);
-  useEffect(() => {
-    const used = new Set(Object.values(groupOf));
-    setGroups((gs) => (gs.every((g) => used.has(g.id)) ? gs : gs.filter((g) => used.has(g.id))));
-  }, [groupOf]);
 
   // The theme is the whole window's: the shell here, every page through
   // prefers-color-scheme (TojiStartup follows the same pref).
@@ -152,10 +149,12 @@ export function GeckoShell({ root }: { root: HTMLElement }) {
       }
     }
     const input = inputRef.current;
-    if (input) {
-      // Firefox's prompts hang from the left end of the address bar, under its icon.
-      const r = input.getBoundingClientRect();
-      const anchor = { x: Math.round(r.left - 18), y: Math.round(r.bottom + 6), width: 16, height: 1 };
+    const page = holeRef.current?.getBoundingClientRect();
+    if (input || page) {
+      // Firefox's prompts hang from the left end of the address bar, under its icon (in a
+      // popup, which has none, from the top left of the page).
+      const r = input?.getBoundingClientRect();
+      const anchor = r ? { x: Math.round(r.left - 18), y: Math.round(r.bottom + 6), width: 16, height: 1 } : { x: Math.round(page!.left + 12), y: Math.round(page!.top + 4), width: 16, height: 1 };
       if (!sameRect(anchorSent.current, anchor)) {
         anchorSent.current = anchor;
         host.setPromptAnchor(anchor);
@@ -195,13 +194,21 @@ export function GeckoShell({ root }: { root: HTMLElement }) {
     (tabId: string, raw: string, opts: { ai?: boolean } = {}) => {
       const value = raw.trim();
       if (!value) return;
-      if (opts.ai) {
+      // An address opens even with Shift+Enter or the wand, as in the Electron app; the
+      // browser's own (about:settings…) open as typed.
+      if (isBrowserAddress(value)) {
         setQuery(tabId, value);
-        host.ask(tabId, value);
+        host.load(tabId, value);
       } else if (looksLikeUrl(value)) {
         const url = toUrl(value);
         setQuery(tabId, url);
         host.load(tabId, url);
+      } else if (opts.ai) {
+        setQuery(tabId, value);
+        // Loading from now: the browser may first wait for the agent server.
+        setAsking((a) => ({ ...a, [tabId]: true }));
+        window.setTimeout(() => setAsking(({ [tabId]: _done, ...rest }) => rest), 20000);
+        host.ask(tabId, value);
       } else {
         setQuery(tabId, host.search(tabId, value));
       }
@@ -212,16 +219,14 @@ export function GeckoShell({ root }: { root: HTMLElement }) {
   const openTab = useCallback(
     (groupId: string | null = null) => {
       const id = host.newTab();
-      if (groupId) setGroupOf((g) => ({ ...g, [id]: groupId }));
+      if (groupId) host.setTabGroup(id, groupId);
       return id;
     },
     [host]
   );
   const openTabInNewGroup = useCallback(() => {
-    const id = `grp-${Date.now()}-${(groupCounter += 1)}`;
-    setGroups((gs) => [...gs, { id, name: `Group ${gs.length + 1}`, collapsed: false }]);
-    openTab(id);
-  }, [openTab]);
+    host.createGroup([host.newTab()]);
+  }, [host]);
   const [spotlight, setSpotlight] = useState<string | null>(null);
   // The spotlight takes the keys on this one, not the omnibox.
   const openAgentTab = useCallback(() => {
@@ -229,37 +234,26 @@ export function GeckoShell({ root }: { root: HTMLElement }) {
     setSpotlight(id);
   }, [host]);
   const closeTab = useCallback((id: string) => host.close(id), [host]);
-  const createGroup = useCallback((tabId?: string) => {
-    const target = tabId ?? activeRef.current;
-    const id = `grp-${Date.now()}-${(groupCounter += 1)}`;
-    setGroups((gs) => [...gs, { id, name: `Group ${gs.length + 1}`, collapsed: false }]);
-    setGroupOf((g) => ({ ...g, [target]: id }));
-  }, []);
-  const removeGroup = useCallback((id: string) => {
-    setGroupOf((g) => Object.fromEntries(Object.entries(g).filter(([, groupId]) => groupId !== id)));
-    setGroups((gs) => gs.filter((g) => g.id !== id));
-  }, []);
-  const addTabToGroup = useCallback((tabId: string, groupId: string) => setGroupOf((g) => ({ ...g, [tabId]: groupId })), []);
-  const ungroupTab = useCallback((tabId: string) => setGroupOf(({ [tabId]: _gone, ...rest }) => rest), []);
-  const toggleGroup = useCallback((id: string) => setGroups((gs) => gs.map((g) => (g.id === id ? { ...g, collapsed: !g.collapsed } : g))), []);
-  const renameGroup = useCallback((id: string, name: string) => setGroups((gs) => gs.map((g) => (g.id === id ? { ...g, name } : g))), []);
-  const closeOtherTabs = useCallback(
-    (tabId: string) => {
-      host.closeOthers(tabId);
-      const keep = groupOf[tabId];
-      setGroups((gs) => gs.filter((g) => g.id === keep));
-    },
-    [host, groupOf]
-  );
+  const createGroup = useCallback((tabId?: string) => void host.createGroup([tabId ?? activeRef.current]), [host]);
+  const removeGroup = useCallback((id: string) => host.removeGroup(id), [host]);
+  const addTabToGroup = useCallback((tabId: string, groupId: string) => host.setTabGroup(tabId, groupId), [host]);
+  const ungroupTab = useCallback((tabId: string) => host.setTabGroup(tabId, null), [host]);
+  const toggleGroup = useCallback((id: string) => host.toggleGroup(id), [host]);
+  const renameGroup = useCallback((id: string, name: string) => host.renameGroup(id, name), [host]);
+  // The groups of the closed tabs go with them.
+  const closeOtherTabs = useCallback((tabId: string) => host.closeOthers(tabId), [host]);
   const reloadTab = useCallback(
     (tabId: string) => {
       const tab = tabsRef.current.find((t) => t.id === tabId);
       if (!tab) return;
       const info = state.tabs.find((t) => t.id === tabId);
       const kind = info ? tabKind(info.url) : null;
-      // An answer page reloads as a fresh answer, never the cached one.
-      if (kind?.kind === 'answer') host.ask(tabId, kind.query, true);
-      else if (tab.mode === 'web' && tab.url) host.reload(tabId);
+      // An answer page reloads as a fresh answer, never the saved one (the browser
+      // marks the reload), with its sources looked up again.
+      if (kind?.kind === 'answer') {
+        setSources(({ [kind.query]: _stale, ...rest }) => rest);
+        host.reload(tabId);
+      } else if (tab.mode === 'web' && tab.url) host.reload(tabId);
       else if (tab.query.trim()) go(tabId, tab.query);
     },
     [go, host, state.tabs]
@@ -334,16 +328,22 @@ export function GeckoShell({ root }: { root: HTMLElement }) {
   const [sources, setSources] = useState<Record<string, PageSource[]>>({});
   const activeAnswer = activeInfo ? tabKind(activeInfo.url) : null;
   const answerQuery = activeAnswer?.kind === 'answer' ? activeAnswer.query : null;
+  // A failed lookup (the server still starting) is tried again, a few times.
+  const sourceTries = useRef<Record<string, number>>({});
+  const [sourcesRetry, setSourcesRetry] = useState(0);
   useEffect(() => {
     if (!answerQuery || sources[answerQuery]) return;
     let live = true;
     void fetchPageSources(answerQuery)
       .then((res) => live && setSources((s) => ({ ...s, [answerQuery]: res.sources })))
-      .catch(() => undefined);
+      .catch(() => {
+        const tries = (sourceTries.current[answerQuery] = (sourceTries.current[answerQuery] ?? 0) + 1);
+        if (live && tries < 4) window.setTimeout(() => setSourcesRetry((n) => n + 1), 2500 * tries);
+      });
     return () => {
       live = false;
     };
-  }, [answerQuery, sources]);
+  }, [answerQuery, sources, sourcesRetry]);
 
   // ---- Bug reports ----
   const [bugReport, setBugReport] = useState<BugReportRequest | null>(null);
@@ -403,7 +403,47 @@ export function GeckoShell({ root }: { root: HTMLElement }) {
 
   const canReload = Boolean(activeTab && (activeTab.url || activeTab.query.trim()));
   const failure = activeInfo ? geckoLoadFailure(activeInfo.errorPage, activeInfo.url, activeInfo.crashed) : null;
-  const loading = Boolean(activeTab && activeTab.status === 'loading' && !failure);
+  const loading = Boolean(activeTab && (activeTab.status === 'loading' || asking[activeTab.id]) && !failure);
+  // What the Electron app drew over its pages: the loading bar, and Toji's error page in
+  // place of Firefox's.
+  const pageOverlays = (
+    <>
+      {loading && (
+        <div className="absolute inset-x-0 top-0 z-10 h-0.5 overflow-hidden">
+          <div className="h-full w-1/3 animate-[toji-load_1.1s_ease-in-out_infinite] bg-neutral-900/70 dark:bg-white/70" />
+        </div>
+      )}
+      {failure && activeTab && (
+        <div className="pointer-events-auto absolute inset-0">
+          <LoadErrorPage failure={failure} tor={torMode} canBack={Boolean(activeTab.canBack)} onRetry={() => host.reload(activeTab.id)} onBack={() => host.back()} />
+        </div>
+      )}
+    </>
+  );
+
+  // A popup a page opened (a sign-in or payment window): just the page, as the Electron
+  // app's popups were. A login submitted in it still asks to be saved, over its top right.
+  if (state.popup) {
+    return (
+      <div className="pointer-events-none relative flex h-screen flex-col text-neutral-900 dark:text-neutral-100" data-testid="popup-frame">
+        <main className="relative flex min-h-0 flex-1 flex-col" data-testid="viewport">
+          <div ref={holeRef} className="relative min-h-0 flex-1" data-testid="viewport-page">
+            {pageOverlays}
+          </div>
+        </main>
+        {vaultPrompt && (
+          <div className="pointer-events-auto absolute right-3 top-0 h-0 w-[440px] max-w-[80vw]">
+            <VaultPromptBar
+              prompt={vaultPrompt.prompt}
+              container={findContainer(containers as Container[], vaultPrompt.prompt.containerId ?? undefined)}
+              error={vaultPrompt.error}
+              onDone={() => setVaultPrompt(null)}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const addressRow = (
     <AddressRow
@@ -513,16 +553,7 @@ export function GeckoShell({ root }: { root: HTMLElement }) {
   const viewport = (
     <main className="relative flex min-h-0 flex-1 flex-col" data-testid="viewport">
       <div ref={holeRef} className="relative min-h-0 flex-1" data-testid="viewport-page">
-        {loading && (
-          <div className="absolute inset-x-0 top-0 z-10 h-0.5 overflow-hidden">
-            <div className="h-full w-1/3 animate-[toji-load_1.1s_ease-in-out_infinite] bg-neutral-900/70 dark:bg-white/70" />
-          </div>
-        )}
-        {failure && activeTab && (
-          <div className="pointer-events-auto absolute inset-0">
-            <LoadErrorPage failure={failure} tor={torMode} canBack={Boolean(activeTab.canBack)} onRetry={() => host.reload(activeTab.id)} onBack={() => host.back()} />
-          </div>
-        )}
+        {pageOverlays}
       </div>
       {answerQuery && (sources[answerQuery]?.length ?? 0) > 0 && (
         <div className="pointer-events-auto contents">
@@ -624,6 +655,7 @@ export function GeckoShell({ root }: { root: HTMLElement }) {
           onUngroup={ungroupTab}
           onClose={closeTab}
           onCloseOthers={closeOtherTabs}
+          onResetContext={(id) => host.resetContext(id)}
         />
       )}
     </BrowserFrame>

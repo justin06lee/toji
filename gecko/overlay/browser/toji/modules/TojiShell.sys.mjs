@@ -19,6 +19,7 @@
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   SearchService: "moz-src:///toolkit/components/search/SearchService.sys.mjs",
+  SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
   TojiAgent: "resource:///modules/toji/TojiAgent.sys.mjs",
   TojiAsk: "resource:///modules/toji/TojiAsk.sys.mjs",
   TojiBugReport: "resource:///modules/toji/TojiBugReport.sys.mjs",
@@ -34,6 +35,12 @@ ChromeUtils.defineESModuleGetters(lazy, {
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
 const SHELL = "chrome://toji/content/shell/";
 const ANCHOR_ID = "toji-prompt-anchor";
+// Tab groups are the window's own, as in the Electron app, and kept with the session so
+// a duplicated, reopened or restored tab keeps its group: the list on the window, each
+// tab's group on the tab.
+const GROUPS_KEY = "toji-groups";
+const TAB_GROUP_KEY = "toji-group";
+let groupCounter = 0;
 
 /** The shell's own look, and the prefs it is kept in. */
 const PREFS = {
@@ -130,6 +137,10 @@ class Host {
     this.tabsById = new Map();
     this.next = 0;
     this.flushScheduled = false;
+    // Tabs in a throwaway identity of their own (Reset context) -> that identity's id.
+    this.throwaway = new Map();
+    // New tabs whose switch leaves the keyboard where the shell put it.
+    this.keepFocus = new WeakSet();
     this.events = {
       state: new Emitter(),
       prefs: new Emitter(),
@@ -177,7 +188,7 @@ class Host {
     return browser ? this.gBrowser.getTabForBrowser(browser) : null;
   }
 
-  info(tab) {
+  info(tab, groups = null) {
     const browser = tab.linkedBrowser;
     const pending = tab.hasAttribute("pending");
     let url = browser?.currentURI?.spec ?? "";
@@ -188,13 +199,23 @@ class Host {
       url = (url && url !== "about:blank" ? url : store?.getLazyTabValue?.(tab, "url")) || url;
       title = title || store?.getLazyTabValue?.(tab, "title") || tab.label || "";
     }
-    const documentURI = browser?.documentURI?.spec ?? "";
+    // A tab with no browser in the window yet (restored, or moved by hold-to-Tor, and not
+    // chosen since) answers its address and title from the session; asking it for its
+    // history or document would create its browser, waking every such tab at once.
+    const live = !!browser?.isConnected;
+    if (!live && !title) {
+      title = tab.label || "";
+    }
+    const documentURI = live ? browser.documentURI?.spec ?? "" : "";
     let canBack = false;
     let canForward = false;
-    try {
-      canBack = !!browser?.canGoBack;
-      canForward = !!browser?.canGoForward;
-    } catch {}
+    if (live) {
+      try {
+        canBack = !!browser.canGoBack;
+        canForward = !!browser.canGoForward;
+      } catch {}
+    }
+    const groupId = this.groupOf(tab);
     return {
       id: this.idOf(tab),
       url,
@@ -207,16 +228,29 @@ class Host {
       canForward,
       errorPage: ERROR_PAGE.test(documentURI) ? documentURI : null,
       crashed: tab.hasAttribute("crashed"),
+      groupId: groupId && (!groups || groups.has(groupId)) ? groupId : null,
+      throwaway: this.throwaway.has(tab),
     };
   }
 
   state() {
     const tabs = this.gBrowser.tabs.filter(t => !t.closing && !t.hidden);
     const selected = this.gBrowser.selectedTab;
+    const containerId = lazy.TojiWindows.containerOf(this.win);
+    // The window's own container, a hold-to-Tor identity included (the list has only
+    // the profiles).
+    const container = containerId ? lazy.TojiContainers.byId(containerId) : null;
+    const groups = this.groupList();
+    const known = new Set(groups.map(g => g.id));
     return {
-      containerId: lazy.TojiWindows.containerOf(this.win),
-      tabs: tabs.map(t => this.info(t)),
+      containerId,
+      container: container ? { ...container } : null,
+      tabs: tabs.map(t => this.info(t, known)),
       selectedId: selected ? this.idOf(selected) : null,
+      groups,
+      // A popup a page opened (window.open with a size): just the page, as the Electron
+      // app's popups were.
+      popup: !this.win.toolbar.visible,
     };
   }
 
@@ -239,18 +273,125 @@ class Host {
     const tab = this.gBrowser.addTrustedTab(this.win.BROWSER_NEW_TAB_URL, { focusUrlBar: focusOmnibox });
     if (focusOmnibox) {
       this.win.gURLBar.getBrowserState(tab.linkedBrowser).urlbarFocused = true;
+    } else {
+      // Something of the shell's (the agent spotlight) takes the keys: the page doesn't.
+      this.keepFocus.add(tab.linkedBrowser);
     }
     this.gBrowser.selectedTab = tab;
     return this.idOf(tab);
   }
 
   reorder(ids) {
+    // The shell counts the tabs it shows; Firefox counts every tab (hidden and pinned
+    // ones too), so each goes where the shown tab at its position is.
     ids.forEach((id, index) => {
       const tab = this.tab(id);
-      if (tab && tab._tPos !== index) {
-        this.gBrowser.moveTabTo(tab, { tabIndex: index, isUserTriggered: true });
+      const at = (this.gBrowser.visibleTabs ?? this.gBrowser.tabs)[index];
+      if (tab && at && at !== tab) {
+        this.gBrowser.moveTabTo(tab, { tabIndex: at._tPos, isUserTriggered: true });
       }
     });
+  }
+
+  /**
+   * The tab again in a throwaway identity of its own — no cookies, storage or cache
+   * from before — in its place and group, with the same id in the shell (the Electron
+   * app's Reset context). A Tor window's gets a circuit of its own. The identity is
+   * wiped when the tab or its window closes.
+   */
+  resetContext(id) {
+    const tab = this.tab(id);
+    const base = lazy.TojiContainers.byId(lazy.TojiWindows.containerOf(this.win) ?? "");
+    if (!tab || !base) {
+      return;
+    }
+    const temp = lazy.TojiContainers.createTemporary(base, { egress: base.egress, kind: "reset" });
+    const url = tab.linkedBrowser?.currentURI?.spec || this.win.BROWSER_NEW_TAB_URL;
+    const fresh = this.gBrowser.addTrustedTab(url, {
+      tabIndex: tab._tPos + 1,
+      inBackground: !tab.selected,
+      userContextId: temp.userContextId,
+      tojiOwnContext: true,
+    });
+    this.throwaway.set(fresh, temp.id);
+    this.ids.set(fresh, id);
+    this.tabsById.set(id, fresh);
+    const group = this.groupOf(tab);
+    if (group) {
+      this.setGroupOf(fresh, group);
+    }
+    if (tab.selected) {
+      this.gBrowser.selectedTab = fresh;
+    }
+    this.gBrowser.removeTab(tab, { animate: false, skipPermitUnload: true });
+  }
+
+  // --- Tab groups ---------------------------------------------------------------------
+
+  groupList() {
+    try {
+      const list = JSON.parse(lazy.SessionStore.getCustomWindowValue(this.win, GROUPS_KEY) || "[]");
+      return Array.isArray(list)
+        ? list.filter(g => g && typeof g.id === "string").map(g => ({ id: g.id, name: String(g.name ?? ""), collapsed: !!g.collapsed }))
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  writeGroups(list) {
+    try {
+      lazy.SessionStore.setCustomWindowValue(this.win, GROUPS_KEY, JSON.stringify(list));
+    } catch (e) {
+      console.error("[toji:shell] groups", e);
+    }
+    this.scheduleFlush();
+  }
+
+  groupOf(tab) {
+    try {
+      return lazy.SessionStore.getCustomTabValue(tab, TAB_GROUP_KEY) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  setGroupOf(tab, groupId) {
+    try {
+      if (groupId) {
+        lazy.SessionStore.setCustomTabValue(tab, TAB_GROUP_KEY, String(groupId));
+      } else {
+        lazy.SessionStore.deleteCustomTabValue(tab, TAB_GROUP_KEY);
+      }
+    } catch (e) {
+      console.error("[toji:shell] tab group", e);
+    }
+    this.scheduleFlush();
+  }
+
+  /** A group left with no tabs goes, as in the Electron app (`leaving` is on its way out). */
+  pruneGroups(leaving = null) {
+    const list = this.groupList();
+    const used = new Set(
+      this.gBrowser.tabs.filter(t => t !== leaving && !t.closing).map(t => this.groupOf(t)).filter(Boolean)
+    );
+    const kept = list.filter(g => used.has(g.id));
+    if (kept.length !== list.length) {
+      this.writeGroups(kept);
+    }
+  }
+
+  createGroup(tabIds) {
+    const list = this.groupList();
+    const id = `grp-${Date.now()}-${++groupCounter}`;
+    this.writeGroups([...list, { id, name: `Group ${list.length + 1}`, collapsed: false }]);
+    for (const tabId of tabIds) {
+      const tab = this.tab(tabId);
+      if (tab) {
+        this.setGroupOf(tab, id);
+      }
+    }
+    return id;
   }
 
   duplicate(id) {
@@ -310,6 +451,10 @@ class Host {
     if (tab.hasAttribute("crashed")) {
       this.win.SessionStore.reviveCrashedTab(tab);
     } else {
+      // An answer page reloads as a fresh answer, as in the Electron app.
+      if (tab.linkedBrowser?.currentURI?.schemeIs("toji")) {
+        lazy.TojiAsk.markFresh(tab.linkedBrowser);
+      }
       this.gBrowser.reloadTab(tab);
     }
   }
@@ -327,6 +472,11 @@ class Host {
       inBackground: !!options.background,
       relatedToCurrent: true,
     });
+    // Opened from the tab in front (a source, a bookmark): it joins that tab's group.
+    const group = this.groupOf(this.gBrowser.selectedTab);
+    if (group && tab !== this.gBrowser.selectedTab) {
+      this.setGroupOf(tab, group);
+    }
     if (!options.background) {
       this.gBrowser.selectedTab = tab;
     }
@@ -420,7 +570,7 @@ class Host {
       ask(id, query, fresh = false) {
         const browser = host.browserOf(id);
         if (browser) {
-          lazy.TojiAsk.ask(browser, query, { fresh: !!fresh });
+          lazy.TojiAsk.ask(browser, query, { fresh: !!fresh }).catch(e => console.error("[toji:shell] ask", e));
           host.focusContentIfSelected(browser);
         }
       },
@@ -439,6 +589,29 @@ class Host {
       setViewport: rect => host.setViewport(rect),
       setPromptAnchor: rect => host.setPromptAnchor(rect),
       onFocusOmnibox: l => host.events.focus.on(l),
+      resetContext: id => host.resetContext(id),
+      createGroup: ids => host.createGroup(Array.from(ids ?? [], String)),
+      renameGroup(groupId, name) {
+        host.writeGroups(host.groupList().map(g => (g.id === groupId ? { ...g, name: String(name) } : g)));
+      },
+      toggleGroup(groupId) {
+        host.writeGroups(host.groupList().map(g => (g.id === groupId ? { ...g, collapsed: !g.collapsed } : g)));
+      },
+      removeGroup(groupId) {
+        for (const t of host.gBrowser.tabs) {
+          if (host.groupOf(t) === groupId) {
+            host.setGroupOf(t, null);
+          }
+        }
+        host.writeGroups(host.groupList().filter(g => g.id !== groupId));
+      },
+      setTabGroup(tabId, groupId) {
+        const t = tab(tabId);
+        if (t) {
+          host.setGroupOf(t, groupId && host.groupList().some(g => g.id === groupId) ? groupId : null);
+          host.pruneGroups();
+        }
+      },
       chooseContainer: id => lazy.TojiWindows.choose(host.win, String(id)),
       toggleTor: () => lazy.TojiWindows.toggleTor(host.win),
       prefs: () => readPrefs(),
@@ -573,8 +746,12 @@ class Host {
     // waits for the bar to be updated first, and gives up if focus moved meanwhile;
     // the shell's omnibox needs neither, so it takes the keys as soon as the switch ends.
     const adjustFocus = win.gBrowser._adjustFocusAfterTabSwitch;
+    const keepFocus = this.keepFocus;
     win.gBrowser._adjustFocusAfterTabSwitch = function (newTab) {
       const browser = this.getBrowserForTab(newTab);
+      if (keepFocus.delete(browser)) {
+        return;
+      }
       if (!browser.hasAttribute("tabDialogShowing") && win.gURLBar.getBrowserState(browser).urlbarFocused) {
         focusOmnibox(true);
         return;
@@ -595,6 +772,16 @@ class Host {
     }
     // Settings (⌘,, the app menu, a prompt's "Manage settings") are Toji's.
     win.openPreferences = () => this.openPage("settings");
+    // ⌘R on an answer page asks again, as the shell's reload button does.
+    const reloadWithFlags = win.gBrowser.reloadWithFlags;
+    win.gBrowser.reloadWithFlags = function (...args) {
+      for (const tab of this.selectedTabs ?? [this.selectedTab]) {
+        if (tab.linkedBrowser?.currentURI?.schemeIs("toji")) {
+          lazy.TojiAsk.markFresh(tab.linkedBrowser);
+        }
+      }
+      return reloadWithFlags.apply(this, args);
+    };
 
     // Tabs: every change the strip or address bar shows.
     const container = win.gBrowser.tabContainer;
@@ -603,12 +790,28 @@ class Host {
       container.addEventListener(type, flush);
     }
     container.addEventListener("TabClose", e => {
+      const closing = e.target;
       for (const [id, tab] of this.tabsById) {
-        if (tab === e.target) {
+        if (tab === closing) {
           this.tabsById.delete(id);
         }
       }
+      const temp = this.throwaway.get(closing);
+      if (temp) {
+        this.throwaway.delete(closing);
+        lazy.TojiContainers.releaseTemporary(temp).catch(err => console.error("[toji:shell] releasing", temp, err));
+      }
+      this.pruneGroups(closing);
       flush();
+    });
+    // A tab a page opened joins its opener's group, as in the Electron app (a duplicated,
+    // reopened or restored tab brings its own from the session).
+    container.addEventListener("TabOpen", e => {
+      const tab = e.target;
+      const group = tab.openerTab && this.groupOf(tab.openerTab);
+      if (group && !this.groupOf(tab)) {
+        this.setGroupOf(tab, group);
+      }
     });
     // Firefox's prompts (permissions, add-on installs) hang from the address bar. Only a
     // XUL element works here: PopupNotifications takes the property, and an id string in
@@ -743,12 +946,46 @@ export const TojiShell = {
   },
 
   uninitWindow(win) {
+    // Reset-context identities die with their window.
+    for (const id of hosts.get(win)?.throwaway.values() ?? []) {
+      lazy.TojiContainers.releaseTemporary(id).catch(() => {});
+    }
     hosts.delete(win);
   },
 
   /** The window's container changed (chosen, or the picker came back). */
   refresh(win) {
     hosts.get(win)?.scheduleFlush();
+  },
+
+  /** The window's tab groups and which of its tabs are in them, for moving them to another window. */
+  groupsOf(win) {
+    const host = hosts.get(win);
+    if (!host) {
+      return null;
+    }
+    const byTab = new Map();
+    for (const tab of win.gBrowser.tabs) {
+      const groupId = host.groupOf(tab);
+      if (groupId) {
+        byTab.set(tab, groupId);
+      }
+    }
+    return { groups: host.groupList(), byTab };
+  },
+
+  /** Gives a window groups: `groupIds[i]` is the group of its i-th tab (or null). */
+  adoptGroups(win, groups, groupIds) {
+    const host = hosts.get(win);
+    if (!host) {
+      return;
+    }
+    host.writeGroups(groups.map(g => ({ ...g })));
+    win.gBrowser.tabs.forEach((tab, i) => {
+      if (groupIds[i]) {
+        host.setGroupOf(tab, groupIds[i]);
+      }
+    });
   },
 
   focusOmnibox(win, select = true) {

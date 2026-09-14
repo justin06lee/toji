@@ -4,6 +4,14 @@ const URL_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 const DOMAIN_RE = /^[\w-]+(\.[\w-]+)+(:\d+)?(\/\S*)?$/;
 const LOCALHOST_RE = /^localhost(:\d+)?(\/\S*)?$/i;
 
+/**
+ * The browser's own addresses — about:settings, view-source:…, file:… — which open as
+ * typed (the Gecko browser resolves them; the Electron app had none).
+ */
+export function isBrowserAddress(input: string): boolean {
+  return /^(about|view-source|file|data|moz-extension|toji):\S+$/i.test(input.trim());
+}
+
 /** True when the input should be treated as a direct navigation target, not a search. */
 export function looksLikeUrl(input: string): boolean {
   const value = input.trim();

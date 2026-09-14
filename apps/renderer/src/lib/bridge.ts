@@ -229,6 +229,10 @@ export interface TojiBridge {
   navigate?: (input: string) => void;
   /** Shift+Enter or the wand: the browser opens an AI answer page for `query` in this tab. */
   askAI?: (query: string) => void;
+  /** The start page's Go button: whether this window is in Tor mode, and whether holding it switches. */
+  torMode?: () => Promise<{ active: boolean; canToggle: boolean }>;
+  /** Holding the start page's Go button: the window moves to Tor, or back. */
+  toggleTor?: () => Promise<void>;
   /** Opens one of Toji's own pages: 'settings', 'welcome', 'plans' (optionally carrying a question). */
   openPage?: (page: 'settings' | 'welcome' | 'plans', options?: { query?: string; replace?: boolean }) => void;
   /** Firefox's add-ons manager (extensions are Firefox add-ons now). */

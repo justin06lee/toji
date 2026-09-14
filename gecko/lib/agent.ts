@@ -96,7 +96,10 @@ export function clip(text: string, max: number): string {
 /** Whether a URL is one the agent can't act on and must navigate away from. */
 export function isBlankPage(url: string | undefined | null): boolean {
   if (!url) return true;
-  return /^(about:(blank|newtab|home|start|privatebrowsing)|chrome:)/.test(url);
+  // The start page, and every page of the browser's own (Toji's Settings, Plans and
+  // answer pages, Firefox's internals): nothing the agent may drive, as in the Electron
+  // app, where those tabs had no web page at all. The model is asked to open a site.
+  return /^(about:|chrome:|resource:|moz-extension:|view-source:|toji:)/i.test(url);
 }
 
 /** Key names the model may send for "press", mapped to KeyboardEvent key/code. */

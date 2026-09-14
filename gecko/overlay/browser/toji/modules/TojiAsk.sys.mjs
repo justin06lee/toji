@@ -18,7 +18,43 @@ ChromeUtils.defineESModuleGetters(lazy, {
   TojiAgentServer: "resource:///modules/toji/TojiAgentServer.sys.mjs",
 });
 
-// lucide WandSparkles (the wand is the one sparkle-family icon Toji keeps).
+// Browsers (by browserId) whose next answer load skips the saved page: a reload asks
+// the model again. Kept here, never in the address, so Back, Forward, a duplicated tab
+// or a restored session show the saved answer instead of paying for a new one.
+const freshBrowsers = new Set();
+
+function browserIdOf(loadInfo) {
+  try {
+    return (loadInfo.targetBrowsingContext ?? loadInfo.browsingContext)?.top?.browserId ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+// Whether the Toji plan stands between a question and its answer. A "no" is kept for
+// a minute (asking again is instant); a "yes" is checked every time, so choosing a
+// backend on the plans page takes effect at once.
+const CLEAR_FOR_MS = 60000;
+let clearUntil = 0;
+
+async function needsPlan() {
+  if (Date.now() < clearUntil) {
+    return false;
+  }
+  if (!(await lazy.TojiAgentServer.whenReady(10000))) {
+    return false;
+  }
+  try {
+    const agents = await (await lazy.TojiAgentServer.fetch("/api/agents")).json();
+    const needed = agents?.choice === "toji" && !agents?.toji?.active;
+    if (!needed) {
+      clearUntil = Date.now() + CLEAR_FOR_MS;
+    }
+    return needed;
+  } catch {
+    return false;
+  }
+}
 
 function errorChannel(uri, loadInfo, message) {
   const html = `<!doctype html><meta charset="utf-8"><title>Toji</title><body style="font:15px -apple-system,sans-serif;margin:48px;color:#737373">${message}</body>`;
@@ -41,7 +77,7 @@ const SERVER_KEY = "toji:agent-server-url";
  * child it attaches to the parent's (it sends no request of its own, and one
  * that did would be refused for want of the token).
  */
-function channelFor(uri, loadInfo, base, token) {
+function channelFor(uri, loadInfo, base, token, fresh = false) {
   if (uri.host !== "ask") {
     return errorChannel(uri, loadInfo, NOT_FOUND);
   }
@@ -53,7 +89,7 @@ function channelFor(uri, loadInfo, base, token) {
   if (token) {
     stream.set("token", token);
   }
-  if (params.get("fresh") === "1") {
+  if (fresh) {
     stream.set("fresh", "1");
   }
   const target = Services.io.newURI(`${base}/api/page/stream?${stream}`);
@@ -81,7 +117,8 @@ class AskProtocol {
       shared.delete(SERVER_KEY);
     }
     shared.flush();
-    return channelFor(uri, loadInfo, info?.url, info?.token);
+    const fresh = freshBrowsers.delete(browserIdOf(loadInfo));
+    return channelFor(uri, loadInfo, info?.url, info?.token, fresh);
   }
 }
 
@@ -157,8 +194,9 @@ export const TojiAsk = {
   },
 
   /**
-   * Opens an answer page for `query` in `browser`. With the Toji plan and no
-   * subscription, opens the plans page instead, carrying the question.
+   * Opens an answer page for `query` in `browser`; `fresh` asks the model again
+   * rather than showing the saved answer. With the Toji plan and no subscription,
+   * opens the plans page instead, carrying the question.
    */
   async ask(browser, query, { fresh = false } = {}) {
     const q = String(query ?? "").trim();
@@ -166,20 +204,28 @@ export const TojiAsk = {
       return;
     }
     const system = Services.scriptSecurityManager.getSystemPrincipal();
-    const info = await lazy.TojiAgentServer.whenReady(10000);
-    if (info) {
-      try {
-        const res = await lazy.TojiAgentServer.fetch("/api/agents");
-        const agents = await res.json();
-        if (agents?.choice === "toji" && !agents?.toji?.active) {
-          browser.loadURI(Services.io.newURI(`about:plans?q=${encodeURIComponent(q)}`), {
-            triggeringPrincipal: system,
-          });
-          return;
-        }
-      } catch {}
+    if (await needsPlan()) {
+      browser.loadURI(Services.io.newURI(`about:plans?q=${encodeURIComponent(q)}`), {
+        triggeringPrincipal: system,
+      });
+      return;
     }
-    const url = `toji://ask?q=${encodeURIComponent(q)}${fresh ? "&fresh=1" : ""}`;
+    const url = `toji://ask?q=${encodeURIComponent(q)}`;
+    if (fresh) {
+      this.markFresh(browser);
+      // The same question again: a reload, not another entry in the tab's history.
+      if (browser.currentURI?.spec === url) {
+        browser.reload();
+        return;
+      }
+    }
     browser.loadURI(Services.io.newURI(url), { triggeringPrincipal: system });
+  },
+
+  /** The next answer page this browser loads (a reload) is asked of the model again. */
+  markFresh(browser) {
+    if (browser?.browserId) {
+      freshBrowsers.add(browser.browserId);
+    }
   },
 };

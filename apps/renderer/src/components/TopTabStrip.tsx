@@ -141,6 +141,10 @@ export function TopTabStrip({ tabs, groups, activeId, trafficLights, agentTabIds
                   const strip = stripRef.current;
                   if (event.button !== 0 || !strip) return;
                   flushSync(() => setDragBounds({ id: tab.id, bounds: dragBoundsX(event.currentTarget.getBoundingClientRect(), strip.getBoundingClientRect()) }));
+                  // The tab keeps the pointer for the whole drag, even over the page (in the
+                  // Gecko browser a separate process, which would take the moves and the
+                  // release). Not for the tab's own buttons, which need their click.
+                  if (!(event.target as Element).closest('button')) event.currentTarget.setPointerCapture?.(event.pointerId);
                 }}
                 onClick={() => onSelect(tab.id)}
                 onDragStart={() => {

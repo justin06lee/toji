@@ -47,6 +47,23 @@ function isPrivate(win) {
   return lazy.PrivateBrowsingUtils.isWindowPrivate(win);
 }
 
+function isOnion(url) {
+  try {
+    return /\.onion$/i.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** Whether a window's container is `id`, or a throwaway identity standing in for it (hold-to-Tor). */
+function inFamily(win, id) {
+  const own = windows.get(win)?.containerId;
+  if (!own) {
+    return false;
+  }
+  return own === id || lazy.TojiContainers.byId(own)?.baseId === id;
+}
+
 function isStartPage(url, win) {
   if (!url) {
     return true;
@@ -243,7 +260,8 @@ function wrapTabbrowser(win) {
       }
     }
     const bound = windows.get(win);
-    if (bound?.containerId) {
+    // Every tab is in the window's container, but a Reset context tab: an identity of its own.
+    if (bound?.containerId && !params.tojiOwnContext) {
       params = { ...params, userContextId: bound.userContextId };
     }
     return addTab.call(this, uri, params);
@@ -311,6 +329,22 @@ function showPicker(win) {
   lazy.TojiShell.refresh(win);
 }
 
+/**
+ * The window's profile was deleted (its data is already gone): its pages stop, and it
+ * asks "Who's browsing?" again, as the Electron app did.
+ */
+function orphan(win) {
+  windows.set(win, { containerId: null, userContextId: 0, pending: [] });
+  const system = Services.scriptSecurityManager.getSystemPrincipal();
+  for (const tab of win.gBrowser.tabs) {
+    try {
+      tab.linkedBrowser.loadURI(Services.io.newURI("about:blank"), { triggeringPrincipal: system });
+    } catch {}
+  }
+  win.document.documentElement.removeAttribute("toji-container");
+  showPicker(win);
+}
+
 function reloadContainerTabs(containerId) {
   for (const win of lazy.BrowserWindowTracker.orderedWindows) {
     if (windows.get(win)?.containerId !== containerId) {
@@ -335,7 +369,12 @@ function observeOnce() {
   }, CLEARED_TOPIC);
   Services.obs.addObserver(() => {
     for (const win of lazy.BrowserWindowTracker.orderedWindows) {
-      applyContainer(win);
+      const id = windows.get(win)?.containerId;
+      if (id && !lazy.TojiContainers.byId(id)) {
+        orphan(win);
+      } else {
+        applyContainer(win);
+      }
     }
   }, CHANGED_TOPIC);
 }
@@ -448,53 +487,66 @@ export const TojiWindows = {
   },
 
   /**
-   * Hold-to-Tor. A direct window moves to a fresh ephemeral Tor identity (a new
-   * private window in its place, the same pages reloaded through tor); a
+   * Hold-to-Tor. A direct window moves to a fresh ephemeral Tor identity; a
    * hold-to-Tor window moves back to its profile's normal route and its Tor
    * identity is wiped. `load` replaces the page of the tab `from` (a .onion
    * address that sent the window to Tor).
+   *
+   * The Electron app reloaded the window's tabs in place. Gecko decides private
+   * browsing per window, never per tab, and a Tor identity must stay off disk, so
+   * the window is replaced instead — at the same place and size, with every tab in
+   * its place (the one in front still in front, the rest loading when chosen) and
+   * its groups; the old window closes only once the new one is up.
    */
   async toggleTor(win, { load = null, from = null } = {}) {
     const state = windows.get(win);
     const c = state?.containerId ? lazy.TojiContainers.byId(state.containerId) : null;
-    if (!c || (c.egress === "tor" && !c.temporary)) {
+    if (!c || (c.egress === "tor" && !c.temporary) || state.swapping) {
       return;
     }
-    const urls = [];
-    let selected = 0;
-    for (const tab of win.gBrowser.tabs) {
-      let spec = tab.linkedBrowser.currentURI?.spec;
-      if (from && tab.linkedBrowser === from && load) {
-        spec = load;
-      }
-      if (!spec || isStartPage(spec, win)) {
-        continue;
-      }
-      if (tab.selected) {
-        selected = urls.length;
-      }
-      urls.push(spec);
-    }
-    // Keep the selected page first so it opens in front.
-    if (selected > 0) {
-      urls.unshift(...urls.splice(selected, 1));
-    }
-    let target;
-    if (c.temporary) {
-      target = lazy.TojiContainers.byId(c.baseId);
-    } else {
-      target = lazy.TojiContainers.createTorOverlay(c);
-    }
+    const target = c.temporary
+      ? lazy.TojiContainers.byId(c.baseId)
+      : lazy.TojiContainers.createTorOverlay(c);
     if (!target) {
       return;
     }
-    await this.openContainerWindow(target.id, { urls, like: win });
-    win.close();
-    if (c.temporary) {
-      lazy.TojiContainers.releaseTemporary(c.id).catch(e =>
-        console.error("[toji:windows] releasing", c.id, e)
-      );
+    state.swapping = true;
+    const grouped = lazy.TojiShell.groupsOf(win);
+    const tabs = win.gBrowser.tabs
+      .filter(tab => !tab.closing && !tab.hidden)
+      .map(tab => {
+        const browser = tab.linkedBrowser;
+        let url = browser?.currentURI?.spec ?? "";
+        if (tab.hasAttribute("pending") && (!url || url === "about:blank")) {
+          url = win.SessionStore?.getLazyTabValue?.(tab, "url") || url;
+        }
+        if (from && browser === from && load) {
+          url = load;
+        }
+        // Leaving Tor, a .onion page can't come along (it would send the window straight back).
+        const stays = url && !isStartPage(url, win) && !(c.temporary && isOnion(url));
+        return {
+          url: stays ? url : START_PAGE,
+          title: tab.label || "",
+          selected: tab.selected,
+          groupId: grouped?.byTab.get(tab) ?? null,
+        };
+      });
+    try {
+      const next = await this.openContainerWindow(target.id, { tabs, like: win });
+      if (grouped?.groups.length) {
+        lazy.TojiShell.adoptGroups(next, grouped.groups, tabs.map(t => t.groupId));
+      }
+    } catch (e) {
+      state.swapping = false;
+      console.error("[toji:windows] hold-to-Tor", e);
+      if (!c.temporary) {
+        lazy.TojiContainers.releaseTemporary(target.id).catch(() => {});
+      }
+      return;
     }
+    // Its Tor identity is wiped as it goes (uninit).
+    win.close();
   },
 
   // browser-window-unload-begin
@@ -506,19 +558,25 @@ export const TojiWindows = {
       return;
     }
     const c = lazy.TojiContainers.byId(state.containerId);
-    if (!c?.ephemeral) {
+    if (!c) {
+      return;
+    }
+    // A hold-to-Tor identity is its window's alone.
+    if (c.temporary) {
+      lazy.TojiContainers.releaseTemporary(c.id).catch(e => console.error("[toji:windows] releasing", c.id, e));
+    }
+    // An ephemeral profile is wiped once none of its windows is left — counting the
+    // hold-to-Tor window that replaced this one, so Tor and back keeps Private's pages.
+    const base = c.temporary ? lazy.TojiContainers.byId(c.baseId) : c;
+    if (!base?.ephemeral || base.temporary) {
       return;
     }
     const stillOpen = lazy.BrowserWindowTracker.orderedWindows.some(
-      w => w !== win && !w.closed && windows.get(w)?.containerId === c.id
+      w => w !== win && !w.closed && inFamily(w, base.id)
     );
-    if (stillOpen) {
-      return;
+    if (!stillOpen) {
+      lazy.TojiContainers.clear(base.id).catch(e => console.error("[toji:windows] wiping", base.id, e));
     }
-    const wipe = c.temporary
-      ? lazy.TojiContainers.releaseTemporary(c.id)
-      : lazy.TojiContainers.clear(c.id);
-    wipe.catch(e => console.error("[toji:windows] wiping", c.id, e));
   },
 
   /** Binds an unassigned window to a container (no tabs are touched). */
@@ -563,34 +621,45 @@ export const TojiWindows = {
     }
   },
 
-  /** Opens a window in a container, at `like`'s position and size if given. */
-  async openContainerWindow(containerId, { urls = [], like = null } = {}) {
+  /**
+   * Opens a window in a container, at `like`'s place and size if given, and
+   * resolves once it is up. `urls` open in order with the first in front; `tabs`
+   * ({url, title, selected}) keep their order with the selected one in front and
+   * the others loading only when chosen.
+   */
+  async openContainerWindow(containerId, { urls = [], tabs = null, like = null } = {}) {
     const c = lazy.TojiContainers.byId(containerId);
     if (!c) {
       throw new Error(`no container ${containerId}`);
     }
-    const [first, ...rest] = urls;
-    const url = first ?? START_PAGE;
+    const list = tabs ?? urls.map((url, i) => ({ url, title: "", selected: i === 0 }));
+    const front = Math.max(0, list.findIndex(t => t.selected));
+    const maximized = like && like.windowState === like.STATE_MAXIMIZED;
+    // Placed by the window features, so it never shows anywhere else first.
+    const frame =
+      like && !maximized && like.windowState !== like.STATE_FULLSCREEN
+        ? `left=${like.screenX},top=${like.screenY},outerWidth=${like.outerWidth},outerHeight=${like.outerHeight}`
+        : undefined;
     const win = lazy.BrowserWindowTracker.openWindow({
       private: c.ephemeral,
-      args: windowArguments(url, c),
+      features: frame,
+      args: windowArguments(list[front]?.url ?? START_PAGE, c),
     });
-    if (like && like.windowState !== like.STATE_MAXIMIZED) {
-      win.addEventListener(
-        "load",
-        () => {
-          win.resizeTo(like.outerWidth, like.outerHeight);
-          win.moveTo(like.screenX, like.screenY);
-        },
-        { once: true }
-      );
+    if (maximized) {
+      win.addEventListener("load", () => win.maximize(), { once: true });
     }
-    if (rest.length) {
-      await whenDelayedStartup(win);
-      for (const u of rest) {
-        win.gBrowser.addTrustedTab(u, { inBackground: true });
+    await whenDelayedStartup(win);
+    list.forEach((t, i) => {
+      if (i !== front) {
+        // Tabs before the front one go in front of it, the rest after: every tab at its index.
+        win.gBrowser.addTrustedTab(t.url, {
+          tabIndex: i,
+          inBackground: true,
+          createLazyBrowser: true,
+          lazyTabTitle: t.title || undefined,
+        });
       }
-    }
+    });
     return win;
   },
 

@@ -29,6 +29,9 @@ const BOOL_DEFAULTS = {
   "browser.download.always_ask_before_handling_new_types": false,
   // No Firefox dialogs asking whether to close tabs or quit.
   "browser.tabs.warnOnClose": false,
+  // Closing the tab in front selects its neighbour, as in the Electron app, not the tab
+  // that opened it.
+  "browser.tabs.selectOwnerOnClose": false,
   "browser.tabs.warnOnCloseOtherTabs": false,
   "browser.warnOnQuit": false,
   "browser.warnOnQuitShortcut": false,
@@ -42,10 +45,42 @@ const BOOL_DEFAULTS = {
   "browser.tabs.groups.smart.enabled": false,
   "sidebar.revamp": false,
   "sidebar.verticalTabs": false,
+  // Firefox features that come with a UI of their own, which nothing in Toji draws.
+  // Pages work the same without them.
+  "screenshots.browser.component.enabled": false,
+  "reader.parse-on-load.enabled": false,
+  "browser.ml.chat.enabled": false,
+  "browser.ml.linkPreview.enabled": false,
+  "browser.tabs.groups.enabled": false,
+  "browser.smartwindow.enabled": false,
+  "browser.translations.select.enable": false,
+  "browser.translations.quickAction.enabled": false,
+  "media.videocontrols.picture-in-picture.urlbar-button.enabled": false,
+  // DRM keeps playing; Firefox's "this page plays DRM content" bar doesn't show.
+  "browser.eme.ui.enabled": false,
+  // The floating camera/microphone window (macOS shows its own indicator).
+  "privacy.webrtc.hideGlobalIndicator": true,
+  // Firefox's form-history and address dropdowns (the Electron app had neither).
+  "browser.formfill.enable": false,
+  // Typing on a page never opens Firefox's find bar ("/", "'", find-as-you-type).
+  "accessibility.typeaheadfind": false,
+  "accessibility.typeaheadfind.manual": false,
 };
 const INT_DEFAULTS = {
   // Content drawn up into the title bar; the shell's header is the title bar.
   "browser.tabs.inTitlebar": 1,
+  // No "is now full screen" or pointer-lock toasts (the Electron app had none).
+  "full-screen-api.warning.timeout": 0,
+  "full-screen-api.warning.delay": -1,
+  "pointer-lock-api.warning.timeout": 0,
+  // After a crash the session comes back by itself, never through Firefox's
+  // "Restore Session" page.
+  "browser.sessionstore.max_resumed_crashes": -1,
+};
+const STRING_DEFAULTS = {
+  // Full screen without Firefox's fade through black.
+  "full-screen-api.transition-duration.enter": "0 0",
+  "full-screen-api.transition-duration.leave": "0 0",
 };
 
 // The macOS menu bar, as the Electron app's: File, Edit, View, Window, Help.
@@ -165,16 +200,20 @@ function registerPromptSheet() {
 
 function setDefaults() {
   const branch = Services.prefs.getDefaultBranch("");
-  for (const [name, value] of Object.entries(BOOL_DEFAULTS)) {
-    if (!Services.prefs.prefIsLocked(name)) {
-      branch.setBoolPref(name, value);
+  const set = (defaults, setter) => {
+    for (const [name, value] of Object.entries(defaults)) {
+      try {
+        if (!Services.prefs.prefIsLocked(name)) {
+          branch[setter](name, value);
+        }
+      } catch (e) {
+        console.error("[toji:firefox-ui] default", name, e);
+      }
     }
-  }
-  for (const [name, value] of Object.entries(INT_DEFAULTS)) {
-    if (!Services.prefs.prefIsLocked(name)) {
-      branch.setIntPref(name, value);
-    }
-  }
+  };
+  set(BOOL_DEFAULTS, "setBoolPref");
+  set(INT_DEFAULTS, "setIntPref");
+  set(STRING_DEFAULTS, "setStringPref");
 }
 
 /** Separators only between visible items: none first, none last, none doubled. */

@@ -2,16 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// Toji's containers (profiles), kept in <profile>/toji-containers.json and
-// mirrored onto Gecko contextual identities. Firefox's identity records hold the
-// name and a nearest-match colour and icon for Firefox's own surfaces; Toji's
-// file holds the real accent colour, the avatar, the route (direct or Tor) and
-// whether the container is ephemeral.
+// Toji's containers (profiles), kept in <profile>/toji-containers.json: name,
+// accent colour, avatar, route (direct or Tor), whether it is ephemeral, and the
+// userContextId Gecko keeps its data under. Toji numbers them itself; Firefox's
+// identity service is never used (its container menus, settings page and add-on
+// API are locked off in toji.cfg), so nothing but Toji ever shows a container.
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
-  ContextualIdentityService:
-    "resource://gre/modules/ContextualIdentityService.sys.mjs",
   NetUtil: "resource://gre/modules/NetUtil.sys.mjs",
 });
 // gecko/lib bundles export plain functions, so each of these holds the whole module.
@@ -55,9 +53,9 @@ export function clearUserContext(userContextId) {
   });
 }
 
-// Hold-to-Tor gives a window a fresh Tor identity for a while. These live only
-// in memory, in private windows, under userContextIds far above anything
-// ContextualIdentityService hands out; nothing about them reaches disk.
+// Hold-to-Tor gives a window a fresh Tor identity for a while, and Reset context a
+// tab a fresh one of its own. These live only in memory, under userContextIds far
+// above any profile's (gecko/lib/containers.ts); what they held is wiped on release.
 const TEMPORARY_BASE = 1_000_000;
 
 class ContainerStore {
@@ -66,20 +64,31 @@ class ContainerStore {
   #byId = new Map();
   #temporary = new Map();
   #temporaryCount = 0;
+  /** The next userContextId a new container gets. */
+  #next = 0;
 
   /**
    * A fresh, ephemeral Tor container standing in for `base` (hold-to-Tor, or a
    * .onion address typed in a direct window).
    */
   createTorOverlay(base) {
+    return this.createTemporary(base, { egress: "tor", kind: "tor" });
+  }
+
+  /**
+   * A fresh throwaway identity standing in for `base`: hold-to-Tor's (always Tor),
+   * or one tab's "Reset context" (the base's own route, so a Tor profile's reset
+   * tab gets a circuit of its own). Nothing it held survives its release.
+   */
+  createTemporary(base, { egress = base.egress, kind = "reset" } = {}) {
     this.ensureLoaded();
     const n = ++this.#temporaryCount;
     const c = Object.freeze({
-      id: `${base.id}--tor-${n}`,
+      id: `${base.id}--${kind}-${n}`,
       name: base.name,
       color: base.color,
       avatar: base.avatar,
-      egress: "tor",
+      egress,
       ephemeral: true,
       temporary: true,
       baseId: base.id,
@@ -117,63 +126,18 @@ class ContainerStore {
     } catch (e) {
       console.error("[toji:containers] unreadable, starting fresh", e);
     }
-    const firstRun = !data;
-    this.#containers = lazy.ContainersLib.normalizeContainers(
-      data?.containers
-    );
-    this.#syncIdentities(firstRun);
-    if (firstRun || this.#dirty) {
+    const lib = lazy.ContainersLib;
+    this.#containers = lib.normalizeContainers(data?.containers);
+    const ids = JSON.stringify(this.#containers.map(c => c.userContextId));
+    this.#next = lib.assignUserContextIds(this.#containers, data?.nextUserContextId);
+    this.#reindex();
+    if (
+      !data ||
+      data.nextUserContextId !== this.#next ||
+      ids !== JSON.stringify(this.#containers.map(c => c.userContextId))
+    ) {
       this.#save();
     }
-  }
-
-  #dirty = false;
-
-  #syncIdentities(firstRun) {
-    const lib = lazy.ContainersLib;
-    const CIS = lazy.ContextualIdentityService;
-    const identities = CIS.getPublicIdentities();
-    const used = new Set();
-    for (const c of this.#containers) {
-      let ident = c.userContextId
-        ? CIS.getPublicIdentityFromId(c.userContextId)
-        : null;
-      if (!ident && firstRun) {
-        ident =
-          identities.find(
-            i =>
-              !used.has(i.userContextId) &&
-              lib.FIREFOX_DEFAULT_IDENTITIES[i.l10nId] === c.id
-          ) ?? null;
-      }
-      const icon = lib.firefoxIcon(c);
-      const color = lib.firefoxColor(c.color);
-      if (!ident) {
-        ident = CIS.create(c.name, icon, color);
-        this.#dirty = true;
-      } else if (
-        ident.l10nId ||
-        ident.name !== c.name ||
-        ident.icon !== icon ||
-        ident.color !== color
-      ) {
-        CIS.update(ident.userContextId, c.name, icon, color);
-      }
-      if (c.userContextId !== ident.userContextId) {
-        c.userContextId = ident.userContextId;
-        this.#dirty = true;
-      }
-      used.add(ident.userContextId);
-    }
-    if (firstRun) {
-      // Firefox's own defaults that Toji doesn't use (Banking).
-      for (const i of identities) {
-        if (!used.has(i.userContextId)) {
-          CIS.remove(i.userContextId);
-        }
-      }
-    }
-    this.#reindex();
   }
 
   #reindex() {
@@ -189,8 +153,7 @@ class ContainerStore {
   }
 
   #save() {
-    this.#dirty = false;
-    const data = { version: 1, containers: this.#containers };
+    const data = { version: 2, nextUserContextId: this.#next, containers: this.#containers };
     IOUtils.writeJSON(this.path, data, { tmpPath: `${this.path}.tmp` }).catch(
       e => console.error("[toji:containers] save failed", e)
     );
@@ -234,14 +197,12 @@ class ContainerStore {
   async replaceAll(next) {
     this.ensureLoaded();
     const lib = lazy.ContainersLib;
-    const CIS = lazy.ContextualIdentityService;
     const incoming = lib.normalizeContainers(next);
     const wipe = [];
     for (const old of this.#containers) {
       const now = incoming.find(c => c.id === old.id);
       if (!now) {
         if (old.userContextId) {
-          CIS.remove(old.userContextId);
           wipe.push(old.userContextId);
         }
       } else {
@@ -251,8 +212,15 @@ class ContainerStore {
         }
       }
     }
+    // A new container's id is Toji's to hand out, never the caller's.
+    for (const c of incoming) {
+      if (!this.#containers.some(old => old.id === c.id)) {
+        delete c.userContextId;
+      }
+    }
     this.#containers = incoming;
-    this.#syncIdentities(false);
+    this.#next = lib.assignUserContextIds(this.#containers, this.#next);
+    this.#reindex();
     this.#changed();
     await Promise.all(wipe.map(clearUserContext));
     return this.list();

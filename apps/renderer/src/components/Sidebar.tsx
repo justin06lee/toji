@@ -221,6 +221,8 @@ function DraggableTabRow({ ref, tab, active, listRef, agentRunning, onSelect, on
         const list = listRef.current;
         if (event.button !== 0 || !list) return;
         flushSync(() => setBounds(dragBoundsY(event.currentTarget.getBoundingClientRect(), list.getBoundingClientRect())));
+        // The row keeps the pointer for the whole drag, even over the page (see TopTabStrip).
+        if (!(event.target as Element).closest('button')) event.currentTarget.setPointerCapture?.(event.pointerId);
       }}
       onDragStart={() => {
         setDragging(true);

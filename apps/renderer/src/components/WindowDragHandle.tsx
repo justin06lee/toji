@@ -78,6 +78,10 @@ export function WindowDragHandle({ layout, crowded }: { layout: 'top' | 'side'; 
   const hold = useCallback(
     (event: ReactMouseEvent) => {
       if (event.button !== 0) return;
+      // Where the browser can't move the window from script (Gecko), the notch is a native
+      // drag region and the OS moves it; the release may never reach the page, so nothing
+      // is held that only a release could let go of.
+      if (!bridge().startWindowDrag) return;
       event.preventDefault();
       heldRef.current = true;
       setHolding(true);

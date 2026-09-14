@@ -11,6 +11,7 @@
 import type { Bookmark } from '../src/lib/api';
 import type { BridgeContainer, VaultEntry, VaultPrompt } from '../src/lib/bridge';
 import type { AgentLogEntry } from '../src/components/AgentSpotlight';
+import type { TabGroup } from '../src/types';
 
 /** One of gBrowser's tabs, as the shell sees it. */
 export interface ShellTabInfo {
@@ -31,13 +32,29 @@ export interface ShellTabInfo {
   errorPage: string | null;
   /** The tab's content process went away. */
   crashed: boolean;
+  /** The tab's group in this window, if any. */
+  groupId: string | null;
+  /** The tab runs in a throwaway identity of its own (Reset context). */
+  throwaway: boolean;
 }
+
+/** A container as the window has it: one of the profiles, or a hold-to-Tor identity standing in for one. */
+export type ShellContainer = BridgeContainer & { temporary?: boolean; baseId?: string };
 
 export interface ShellState {
   /** The window's container (profile); null while it asks "Who's browsing?". */
   containerId: string | null;
+  /** That container itself, a hold-to-Tor identity included (the containers list has only the profiles). */
+  container: ShellContainer | null;
   tabs: ShellTabInfo[];
   selectedId: string | null;
+  /**
+   * The window's tab groups, in order. They are the window's own, as in the Electron
+   * app, and kept with the session: a duplicated, reopened or restored tab keeps its group.
+   */
+  groups: TabGroup[];
+  /** A popup a page opened (a sign-in window): just the page, as the Electron app's were. */
+  popup: boolean;
 }
 
 export interface ShellAgentState {
@@ -133,6 +150,18 @@ export interface ShellHost {
   openTab(url: string, options?: { background?: boolean }): void;
   /** Hand the keyboard to the page in front. */
   focusContent(): void;
+  /** The tab again in a throwaway identity of its own: no cookies, storage or cache from before. */
+  resetContext(tabId: string): void;
+
+  // --- Tab groups -------------------------------------------------------------
+  /** A new group ("Group N") holding these tabs; returns its id. */
+  createGroup(tabIds: string[]): string;
+  renameGroup(groupId: string, name: string): void;
+  /** Collapse or expand. */
+  toggleGroup(groupId: string): void;
+  /** The group goes; its tabs stay, ungrouped. */
+  removeGroup(groupId: string): void;
+  setTabGroup(tabId: string, groupId: string | null): void;
 
   // --- The window -------------------------------------------------------------
   /** Where the pages go: the viewport's box in the window, in CSS pixels. */
