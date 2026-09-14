@@ -119,6 +119,29 @@ const filter = {
         callback.onProxyFilterResult(proxy);
       }
     };
+    // Every request of every page comes through here. Outside a Tor container the
+    // answer is known at once, so it is given at once: no promise, no deferred start.
+    try {
+      const userContextId = channel.loadInfo?.originAttributes?.userContextId ?? 0;
+      if (!userContextId) {
+        answer(defaultProxy);
+        return;
+      }
+      const container = lazy.TojiContainers.byUserContextId(userContextId);
+      if (!container) {
+        answer(deadProxy(userContextId));
+        return;
+      }
+      if (container.egress !== "tor") {
+        answer(defaultProxy);
+        return;
+      }
+    } catch (e) {
+      console.error("[toji:proxy]", e);
+      const uc = channel.loadInfo?.originAttributes?.userContextId ?? 0;
+      answer(uc ? deadProxy(uc) : defaultProxy);
+      return;
+    }
     decide(channel, defaultProxy).then(answer, e => {
       console.error("[toji:proxy]", e);
       const uc = channel.loadInfo?.originAttributes?.userContextId ?? 0;

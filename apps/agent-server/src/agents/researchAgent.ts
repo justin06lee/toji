@@ -105,8 +105,14 @@ export class ResearchOrchestrator {
   private abortControllers = new Map<string, AbortController>();
   private saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private static readonly SAVE_DEBOUNCE_MS = 400;
+  private hydrated: Promise<void> | null = null;
 
-  async hydrate() {
+  /** Saved sessions are read once, when something first asks for them, never at boot. */
+  hydrate() {
+    return (this.hydrated ??= this.load());
+  }
+
+  private async load() {
     const saved = await loadSessions();
     for (const session of saved) {
       if (ACTIVE_STATUSES.has(session.status)) {
@@ -481,7 +487,8 @@ export class ResearchOrchestrator {
       // screenshot to hand the model; the note comes from the page text alone.
       const note = await summarizeSource(session.query, extracted, result, tab.id);
       session.sources.push(note);
-      await putCachedSource(session.queryFingerprint, result.url, note).catch(() => undefined);
+      // In memory at once, on disk a moment later: the run never waits for the write.
+      void putCachedSource(session.queryFingerprint, result.url, note).catch(() => undefined);
       tab.summary = note.summary;
       tab.evidenceCount = Math.max(tab.evidenceCount, note.keyFacts.length + note.quotes.length);
       tab.credibility = note.credibility;

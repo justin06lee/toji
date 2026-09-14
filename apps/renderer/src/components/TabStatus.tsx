@@ -3,7 +3,8 @@ import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { publicAsset } from '../lib/publicAsset';
 import type { BrowserTab } from '../types';
 
-const ICON = publicAsset('toji-round.png');
+// The 32px copy: the slot is 16px, and the 256px mark is only for the pages that show it large.
+const ICON = publicAsset('toji-round-32.png');
 
 /**
  * A tab's leading slot: the site's favicon (or its group colour), with a spinner while

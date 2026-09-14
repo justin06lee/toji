@@ -49,24 +49,44 @@ export async function getCachedPage(query: string): Promise<string | undefined> 
   return entry && isFresh(entry.savedAt) ? entry.html : undefined;
 }
 
-/** Store a fully generated page. Serialized via a write chain; pruned to the newest MAX_ENTRIES. */
-export function putCachedPage(query: string, html: string) {
-  writeChain = writeChain
-    .then(async () => {
-      const state = await loadCache();
-      state.entries[cacheKey(query)] = { savedAt: new Date().toISOString(), html };
-      const entries = Object.entries(state.entries);
-      if (entries.length > MAX_ENTRIES) {
-        entries.sort(([, a], [, b]) => Date.parse(b.savedAt) - Date.parse(a.savedAt));
-        state.entries = Object.fromEntries(entries.slice(0, MAX_ENTRIES));
-      }
-      await fs.mkdir(config.dataDir, { recursive: true });
-      const temp = `${cachePath}.tmp`;
-      await fs.writeFile(temp, JSON.stringify(state));
-      await fs.rename(temp, cachePath);
-    })
-    .catch((error) => {
-      console.error('[toji] putCachedPage write failed:', error instanceof Error ? error.message : error);
-    });
-  return writeChain;
+const FLUSH_DELAY_MS = 1000;
+let flushTimer: ReturnType<typeof setTimeout> | undefined;
+let flushWaiters: Array<() => void> = [];
+
+/** Writes the whole cache once, a moment after the last put; pruned to the newest MAX_ENTRIES. */
+function scheduleFlush(): Promise<void> {
+  return new Promise((resolve) => {
+    flushWaiters.push(resolve);
+    if (flushTimer) return;
+    flushTimer = setTimeout(() => {
+      flushTimer = undefined;
+      const waiters = flushWaiters;
+      flushWaiters = [];
+      writeChain = writeChain
+        .then(async () => {
+          const state = await loadCache();
+          const entries = Object.entries(state.entries);
+          if (entries.length > MAX_ENTRIES) {
+            entries.sort(([, a], [, b]) => Date.parse(b.savedAt) - Date.parse(a.savedAt));
+            state.entries = Object.fromEntries(entries.slice(0, MAX_ENTRIES));
+          }
+          await fs.mkdir(config.dataDir, { recursive: true });
+          const temp = `${cachePath}.tmp`;
+          await fs.writeFile(temp, JSON.stringify(state));
+          await fs.rename(temp, cachePath);
+        })
+        .catch((error) => {
+          console.error('[toji] page cache write failed:', error instanceof Error ? error.message : error);
+        })
+        .then(() => waiters.forEach((w) => w()));
+    }, FLUSH_DELAY_MS);
+    flushTimer.unref?.();
+  });
+}
+
+/** Store a fully generated page: in memory at once, on disk a moment later. */
+export async function putCachedPage(query: string, html: string) {
+  const state = await loadCache();
+  state.entries[cacheKey(query)] = { savedAt: new Date().toISOString(), html };
+  return scheduleFlush();
 }

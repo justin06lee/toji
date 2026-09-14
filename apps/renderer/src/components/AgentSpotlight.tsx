@@ -55,7 +55,7 @@ export function AgentSpotlight({ target, insetLeft = 0, running, pendingAsk, log
     // Fast in AND out: the fade runs both directions (exit needs an AnimatePresence
     // around the caller's conditional render).
     <motion.div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/25 p-6 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/25 p-6"
       style={{ paddingLeft: 24 + insetLeft }}
       onMouseDown={onClose}
       initial={{ opacity: 0 }}
@@ -64,7 +64,7 @@ export function AgentSpotlight({ target, insetLeft = 0, running, pendingAsk, log
       transition={{ duration: 0.1, ease: 'easeOut' }}
     >
       <motion.div
-        className={`no-drag w-[min(640px,92vw)] overflow-hidden rounded-2xl border bg-white/95 shadow-2xl backdrop-blur-xl transition-colors dark:bg-neutral-900/95 ${dragOver ? 'border-neutral-900/40 dark:border-white/40' : 'border-black/10 dark:border-white/12'}`}
+        className={`no-drag w-[min(640px,92vw)] overflow-hidden rounded-2xl border bg-white shadow-2xl transition-colors dark:bg-neutral-900 ${dragOver ? 'border-neutral-900/40 dark:border-white/40' : 'border-black/10 dark:border-white/12'}`}
         onMouseDown={(e) => e.stopPropagation()}
         onDragOver={(e) => {
           e.preventDefault();

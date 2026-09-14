@@ -64,7 +64,7 @@ export function BugReportTray({ report, onForm, onRetry, onDismiss }: { report: 
 
   return createPortal(
     <motion.div
-      className="no-drag fixed bottom-4 right-4 z-[110] w-[330px] rounded-2xl border border-black/10 bg-white/95 p-3.5 shadow-xl backdrop-blur-xl dark:border-white/12 dark:bg-neutral-900/95"
+      className="no-drag fixed bottom-4 right-4 z-[110] w-[330px] rounded-2xl border border-black/10 bg-white p-3.5 shadow-xl dark:border-white/12 dark:bg-neutral-900"
       data-testid="bug-report-tray"
       data-status={status}
       initial={{ opacity: 0, y: 8 }}

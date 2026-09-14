@@ -56,7 +56,7 @@ export default defineConfig({
   // Anything not inlined would be looked for beside the script.
   base: 'chrome://toji/content/shell/',
   publicDir: false,
-  plugins: [bundledPublicAssets(), react(), tailwindcss(), shadowRootCss()],
+  plugins: [bundledPublicAssets(resolve(root, 'gecko/publicAsset.shell.ts')), react(), tailwindcss(), shadowRootCss()],
   // Library builds leave process.env alone; React picks its build from it.
   define: { 'process.env.NODE_ENV': JSON.stringify('production') },
   build: {

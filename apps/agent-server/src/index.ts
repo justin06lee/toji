@@ -5,7 +5,6 @@ import { ensureDataDirs, loadSettings } from './lib/storage.js';
 import { researchOrchestrator } from './agents/researchAgent.js';
 import { agentAvailable, liveModelName } from './agents/model.js';
 import { refreshDetection, setAgentChoice, setApiConfig } from './agents/agentRuntime.js';
-import { warmCatalog } from './agents/yagamiCatalog.js';
 import { startServer } from './server.js';
 
 // The agent server's entry point, for every way it runs: from source (tsx), as the
@@ -17,7 +16,7 @@ import { startServer } from './server.js';
 //                      (human-readable status goes to stderr)
 //   PORT               the port on 127.0.0.1; 0, or unset in the compiled binary, picks a free one
 //   TOJI_DATA_DIR      where state lives; required by the compiled binary
-//   TOJI_PARENT_PID    exit once this process is gone (polled every 2 s)
+//   TOJI_PARENT_PID    exit once this process is gone (stdin closing, or a 15 s poll)
 //   TOJI_RENDERER_DIR  a built renderer to serve as static files (optional)
 //   TOJI_ENV_FILE      a .env file to load instead of ./.env.local and ./.env (optional)
 //   TOJI_SERVER_TOKEN  when set, /api/* and /ws require "Authorization: Bearer <token>";
@@ -56,14 +55,24 @@ function watchParent(pid: number) {
   const check = () => {
     try {
       process.kill(pid, 0);
+      return false;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EPERM') return;
+      if ((error as NodeJS.ErrnoException).code === 'EPERM') return false;
       console.error(`[toji] parent process ${pid} is gone; exiting.`);
       process.exit(0);
     }
   };
   check();
-  setInterval(check, 2_000).unref();
+  // The browser holds our stdin pipe: it closes the moment the browser dies, crash or
+  // force-quit included, so the exit is immediate. The poll behind it is only for a
+  // spawner that gave no pipe, and at this cadence it is a rounding error.
+  if (!process.stdin.isTTY) {
+    process.stdin.on('end', check);
+    process.stdin.on('close', check);
+    process.stdin.on('error', () => undefined);
+    process.stdin.resume();
+  }
+  setInterval(check, 15_000).unref();
 }
 
 /**
@@ -78,38 +87,44 @@ function rendererDir(): string | undefined {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../renderer');
 }
 
-if (config.parentPid) watchParent(config.parentPid);
+// No top-level await: the compiled sidecar ships as bytecode (scripts/build-server.ts),
+// which needs a module that finishes synchronously.
+async function main() {
+  if (config.parentPid) watchParent(config.parentPid);
 
-await ensureDataDirs();
-await researchOrchestrator.hydrate();
+  await ensureDataDirs();
 
-// Seed the effective agent from persisted settings (falls back to env-derived
-// defaults on first run), and detect installed yagami harnesses once at boot.
-refreshDetection();
-try {
-  const settings = await loadSettings();
-  setAgentChoice({ agent: settings.agent, agentModel: settings.agentModel, agentThinking: settings.agentThinking });
-  setApiConfig(settings);
-} catch (error) {
-  // Defaults (env-seeded) apply if settings can't be read.
-  console.warn('[toji] Failed to load settings at boot, using env defaults:', error instanceof Error ? error.message : error);
+  // Seed the effective agent from persisted settings (falls back to env-derived
+  // defaults on first run), and detect installed yagami harnesses once at boot.
+  refreshDetection();
+  try {
+    const settings = await loadSettings();
+    setAgentChoice({ agent: settings.agent, agentModel: settings.agentModel, agentThinking: settings.agentThinking });
+    setApiConfig(settings);
+  } catch (error) {
+    // Defaults (env-seeded) apply if settings can't be read.
+    console.warn('[toji] Failed to load settings at boot, using env defaults:', error instanceof Error ? error.message : error);
+  }
+  // The model catalog (a process spawned per harness) is built on first use, not at boot.
+
+  const running = await startServer({ port: config.port, rendererDir: rendererDir(), token: config.serverToken }).catch((error: unknown) => {
+    if (isAddrInUse(error)) reportPortConflict();
+    throw error;
+  });
+  // A later server error (after listening) is as fatal as it always was.
+  running.server.on('error', (err: NodeJS.ErrnoException) => {
+    console.error('[toji] server error:', err);
+    process.exit(1);
+  });
+
+  // The handshake: the only thing this process writes to stdout.
+  process.stdout.write(`TOJI_SERVER_READY ${JSON.stringify({ port: running.port })}\n`);
+  console.error(`[toji] agent server running at http://127.0.0.1:${running.port}`);
+  console.error(`[toji] inference mode: ${agentAvailable() ? liveModelName() : 'demo fallback (no agent)'}`);
+  console.error(`[toji] API auth: ${config.serverToken ? 'bearer token required' : 'off (no TOJI_SERVER_TOKEN)'}`);
 }
-// Probe the harnesses for their models in the background: a saved bare model id can
-// only be routed to its owning provider once the catalog knows who owns it.
-warmCatalog();
 
-const running = await startServer({ port: config.port, rendererDir: rendererDir(), token: config.serverToken }).catch((error: unknown) => {
-  if (isAddrInUse(error)) reportPortConflict();
-  throw error;
-});
-// A later server error (after listening) is as fatal as it always was.
-running.server.on('error', (err: NodeJS.ErrnoException) => {
-  console.error('[toji] server error:', err);
+main().catch((error) => {
+  console.error('[toji] failed to start:', error);
   process.exit(1);
 });
-
-// The handshake: the only thing this process writes to stdout.
-process.stdout.write(`TOJI_SERVER_READY ${JSON.stringify({ port: running.port })}\n`);
-console.error(`[toji] agent server running at http://127.0.0.1:${running.port}`);
-console.error(`[toji] inference mode: ${agentAvailable() ? liveModelName() : 'demo fallback (no agent)'}`);
-console.error(`[toji] API auth: ${config.serverToken ? 'bearer token required' : 'off (no TOJI_SERVER_TOKEN)'}`);

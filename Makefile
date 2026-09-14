@@ -81,7 +81,7 @@ clean: ## Remove the objdir (keeps the source tree and the download cache)
 ELECTRON_UNPACKED = release/mac-arm64/$(APP).app
 
 electron: deps ## Build the Electron app bundle (legacy)
-	@$(PM) run build
+	@$(PM) run build:electron
 	@bunx electron-builder --dir
 
 electron-dev: deps ## Run the Electron app from source (legacy)

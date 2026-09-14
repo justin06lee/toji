@@ -384,6 +384,9 @@ export function initVault() {
       },
     },
     allFrames: false,
+    // Only web pages: the parent keeps nothing for other schemes, so the child
+    // needn't watch them.
+    matches: ["http://*/*", "https://*/*"],
     messageManagerGroups: ["browsers"],
   });
 }
