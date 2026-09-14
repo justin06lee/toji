@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 // Builds Toji's browser from Firefox ESR source.
 //
-//   bun gecko/build.ts prepare   download + verify source, apply patches, copy overlay
+//   bun gecko/build.ts prepare   download + verify source, apply patches, strip
+//                                Firefox's UI (gecko/strip.txt), copy overlay
 //   bun gecko/build.ts build     prepare, then ./mach build
 //   bun gecko/build.ts faster    prepare, then ./mach build faster (JS/CSS/prefs only)
 //   bun gecko/build.ts package   ./mach package (stages Toji.app and a .dmg)
@@ -111,6 +112,7 @@ async function extractSource() {
   writeFileSync(stamp, `${version.sha256}\n`);
   rmSync(APPLIED, { recursive: true, force: true });
   rmSync(OVERLAY_LOG, { force: true });
+  rmSync(STRIPPED, { force: true });
 }
 
 // Patches are applied once and remembered in APPLIED, so re-running never
@@ -140,6 +142,111 @@ async function applyPatches() {
     await run(['patch', '-p1', '--forward', '--silent', '--no-backup-if-mismatch', '-d', SRC, '-i', join(GECKO, 'patches', f)]);
     copyFileSync(join(GECKO, 'patches', f), join(APPLIED, f));
   }
+}
+
+// ---- Stripping Firefox's UI out of the tree ---------------------------------
+//
+// gecko/strip.txt lists paths (relative to the tree; globs allowed) that are
+// deleted from the source tree before the build, so Firefox's own UI never
+// exists in what Toji is built from. The expansion of each pattern is recorded
+// in .work/stripped.json; a pattern removed from the list has its files put
+// back from the tarball (bsdtar extracts a directory member with everything
+// under it), and any applied patch touching a restored path is re-applied.
+
+const STRIP_LIST = join(GECKO, 'strip.txt');
+const STRIPPED = join(WORK, 'stripped.json');
+const TARBALL_INDEX = join(CACHE, `firefox-${version.version}.source.files`);
+const TREE_PREFIX = `firefox-${version.version.replace(/esr$/, '')}/`;
+
+function readStripList(): string[] {
+  if (!existsSync(STRIP_LIST)) return [];
+  return readFileSync(STRIP_LIST, 'utf8')
+    .split('\n')
+    .map((l) => l.replace(/#.*$/, '').trim())
+    .filter(Boolean)
+    .map((l) => l.replace(/\/+$/, ''));
+}
+
+function readStripped(): Record<string, string[]> {
+  return existsSync(STRIPPED) ? JSON.parse(readFileSync(STRIPPED, 'utf8')) : {};
+}
+
+// The tarball's member list (paths relative to the tree), built once.
+async function tarballIndex(): Promise<Set<string>> {
+  if (!existsSync(TARBALL_INDEX)) {
+    log('indexing the source tarball (once)');
+    const proc = Bun.spawn(['sh', '-c', `xz -dc "${TARBALL}" | tar -t > "${TARBALL_INDEX}.part"`]);
+    if ((await proc.exited) !== 0) die('could not list the source tarball');
+    renameSync(`${TARBALL_INDEX}.part`, TARBALL_INDEX);
+  }
+  const out = new Set<string>();
+  for (const line of readFileSync(TARBALL_INDEX, 'utf8').split('\n')) {
+    if (!line.startsWith(TREE_PREFIX)) continue;
+    out.add(line.slice(TREE_PREFIX.length).replace(/\/+$/, ''));
+  }
+  return out;
+}
+
+async function restoreFromTarball(paths: string[]) {
+  if (!paths.length) return;
+  log(`restoring ${paths.length} path(s) from the tarball`);
+  await run(['tar', '-xJf', TARBALL, '-C', SRC_PARENT, ...paths.map((p) => TREE_PREFIX + p)]);
+  // A patch that touched a restored (now pristine) file must apply again.
+  if (!existsSync(APPLIED)) return;
+  for (const f of readdirSync(APPLIED)) {
+    if (!f.endsWith('.patch')) continue;
+    const text = readFileSync(join(APPLIED, f), 'utf8');
+    const touched = [...text.matchAll(/^\+\+\+ b\/(\S+)/gm)].map((m) => m[1]);
+    if (touched.some((t) => paths.some((p) => t === p || t.startsWith(`${p}/`)))) {
+      log(`${f} touches a restored file; it will be applied again`);
+      unlinkSync(join(APPLIED, f));
+    }
+  }
+}
+
+function expandPattern(pattern: string): string[] {
+  if (!/[*?[]/.test(pattern)) return existsSync(join(SRC, pattern)) ? [pattern] : [];
+  const out: string[] = [];
+  for (const m of new Bun.Glob(pattern).scanSync({ cwd: SRC, onlyFiles: false, dot: true })) out.push(m);
+  return out.sort();
+}
+
+// Before patches: put back what an edited strip.txt no longer strips.
+async function stripRestore() {
+  const wanted = new Set(readStripList());
+  const stripped = readStripped();
+  const restore: string[] = [];
+  for (const [pattern, paths] of Object.entries(stripped)) {
+    if (wanted.has(pattern)) continue;
+    restore.push(...paths);
+    delete stripped[pattern];
+  }
+  if (!restore.length) return;
+  await restoreFromTarball(restore);
+  writeFileSync(STRIPPED, JSON.stringify(stripped, null, 2));
+}
+
+// After patches: delete what strip.txt lists and is still in the tree.
+function stripDelete() {
+  const stripped = readStripped();
+  let removed = 0;
+  let unknown = 0;
+  for (const pattern of readStripList()) {
+    if (pattern in stripped) continue;
+    const paths = expandPattern(pattern);
+    if (!paths.length) {
+      log(`strip: nothing matches ${pattern}`);
+      unknown++;
+    }
+    for (const p of paths) {
+      rmSync(join(SRC, p), { recursive: true, force: true });
+      removed++;
+    }
+    stripped[pattern] = paths;
+  }
+  writeFileSync(STRIPPED, JSON.stringify(stripped, null, 2));
+  const total = Object.values(stripped).reduce((n, p) => n + p.length, 0);
+  log(`strip: ${total} path(s) out of the tree${removed ? `, ${removed} removed now` : ''}${unknown ? `, ${unknown} pattern(s) matched nothing` : ''}`);
 }
 
 function walk(dir: string, out: string[] = []): string[] {
@@ -236,7 +343,7 @@ async function bundleAddons() {
 
 // Copies gecko/overlay/** and the generated files into the tree, touching only
 // files whose bytes changed so the build system rebuilds as little as possible.
-function copyOverlay() {
+async function copyOverlay() {
   const sources = new Map<string, string>();
   for (const root of [OVERLAY, GENERATED]) {
     if (!existsSync(root)) continue;
@@ -253,10 +360,17 @@ function copyOverlay() {
     changed++;
   }
   const previous: string[] = existsSync(OVERLAY_LOG) ? JSON.parse(readFileSync(OVERLAY_LOG, 'utf8')) : [];
-  for (const rel of previous) {
-    if (files.includes(rel)) continue;
-    rmSync(join(SRC, rel), { force: true });
-    log(`removed ${rel} (no longer in the overlay)`);
+  const gone = previous.filter((rel) => !files.includes(rel));
+  if (gone.length) {
+    // An overlay file that replaced one of Firefox's goes back to Firefox's;
+    // one that was Toji's alone is removed.
+    const index = await tarballIndex();
+    const restore = gone.filter((rel) => index.has(rel));
+    for (const rel of gone) {
+      rmSync(join(SRC, rel), { force: true });
+      log(`removed ${rel} (no longer in the overlay)`);
+    }
+    await restoreFromTarball(restore);
   }
   writeFileSync(OVERLAY_LOG, JSON.stringify(files, null, 2));
   log(`overlay: ${files.length} files, ${changed} updated`);
@@ -286,9 +400,11 @@ function machEnv(): Record<string, string> {
 async function prepare() {
   await fetchSource();
   await extractSource();
+  await stripRestore();
   await applyPatches();
+  stripDelete();
   await generate();
-  copyOverlay();
+  await copyOverlay();
 }
 
 async function mach(...args: string[]) {
