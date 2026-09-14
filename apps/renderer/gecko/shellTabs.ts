@@ -4,11 +4,18 @@
 import type { BrowserTab, InternalPage } from '../src/types';
 import type { ShellTabInfo } from './shellHost';
 
-/** Addresses that mean "a new tab": the start page and the pages Firefox opens before one. */
-const START_PAGES = new Set(['about:start', 'about:newtab', 'about:home', 'about:privatebrowsing', 'about:blank', '']);
+/**
+ * Addresses that mean "a new tab": the start page, the pages Firefox opens before one, and
+ * Firefox's home pages, which the browser serves as Toji's start page.
+ */
+const START_PAGES = new Set(['about:start', 'about:newtab', 'about:home', 'about:privatebrowsing', 'about:firefoxview', 'about:welcomeback', 'about:blank', '']);
 
 const INTERNAL: Record<string, InternalPage> = {
   'about:settings': 'settings',
+  // Firefox's names for its settings, which the browser serves as Toji's Settings.
+  'about:preferences': 'settings',
+  'about:logins': 'settings',
+  'about:protections': 'settings',
   'about:welcome': 'welcome',
   'about:plans': 'plans'
 };
@@ -32,6 +39,8 @@ export function omniboxText(info: Pick<ShellTabInfo, 'url'>): string {
   const kind = tabKind(info.url);
   if (kind.kind === 'web') return info.url;
   if (kind.kind === 'answer') return kind.query;
+  // The plans page, sent there by a question: the question stays in the omnibox.
+  if (kind.kind === 'internal' && kind.page === 'plans') return new URLSearchParams(info.url.split(/[?#]/)[1] ?? '').get('q') ?? '';
   return '';
 }
 

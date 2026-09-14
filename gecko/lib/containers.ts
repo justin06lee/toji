@@ -1,6 +1,8 @@
-// Containers are Toji's unit of identity: each one is a Gecko contextual
-// identity (userContextId), so cookies, storage, caches and HTTP auth never cross
-// between them. One window belongs to one container for its whole life.
+// Containers are Toji's unit of identity: each one has its own userContextId, the
+// origin attribute Gecko partitions everything by, so cookies, storage, caches and
+// HTTP auth never cross between them. One window belongs to one container for its
+// whole life. The containers are Toji's alone: Toji numbers them itself and keeps
+// no Firefox identity records (Firefox's container UI and add-on API see nothing).
 //
 // This module is the pure model, shared by the chrome module
 // (resource:///modules/toji/lib/containers.sys.mjs) and Toji's pages and tests.
@@ -21,7 +23,7 @@ export interface Container {
   ephemeral: boolean;
   /** Built-in containers can be edited but not deleted. */
   builtin?: boolean;
-  /** The Gecko contextual identity backing this container. */
+  /** The userContextId Gecko keeps this container's data under (Toji's own numbering). */
   userContextId?: number;
 }
 
@@ -55,12 +57,37 @@ export const DEFAULT_CONTAINERS: Container[] = [
 
 export const DEFAULT_CONTAINER_ID = 'personal';
 
-/** Firefox's own default identities, by their l10n id, mapped to Toji's. */
-export const FIREFOX_DEFAULT_IDENTITIES: Record<string, string> = {
-  'user-context-personal': 'personal',
-  'user-context-work': 'work',
-  'user-context-shopping': 'shopping'
-};
+/**
+ * The first userContextId Toji hands out. Containers made while Toji still mirrored
+ * Firefox's identity service keep theirs (Firefox numbered from 1), so their data
+ * stays where it is. Throwaway identities (hold-to-Tor, Reset context) live from
+ * TEMPORARY_USER_CONTEXT_ID up, in memory only.
+ */
+export const FIRST_USER_CONTEXT_ID = 10_000;
+export const TEMPORARY_USER_CONTEXT_ID = 1_000_000;
+
+/**
+ * Gives every container without a usable userContextId the next free one, and returns
+ * the next one after that (kept with the containers, so an id is never handed out
+ * twice — not even after its container was deleted). A duplicate keeps only its first.
+ */
+export function assignUserContextIds(containers: Container[], next = FIRST_USER_CONTEXT_ID): number {
+  const taken = new Set<number>();
+  let n = Math.max(Number.isInteger(next) ? next : FIRST_USER_CONTEXT_ID, FIRST_USER_CONTEXT_ID);
+  for (const c of containers) {
+    const id = c.userContextId;
+    if (id && id < TEMPORARY_USER_CONTEXT_ID && !taken.has(id)) {
+      taken.add(id);
+      if (id >= n) n = id + 1;
+    } else {
+      delete c.userContextId;
+    }
+  }
+  for (const c of containers) {
+    if (!c.userContextId) c.userContextId = n++;
+  }
+  return n;
+}
 
 const HEX = /^#[0-9a-f]{6}$/i;
 
@@ -130,54 +157,6 @@ export function routeLabel(c: Pick<Container, 'egress' | 'ephemeral'>): string {
   if (c.egress === 'tor') return 'Tor';
   if (c.ephemeral) return 'Private';
   return 'Standard';
-}
-
-function hexToHsl(hex: string): { h: number; s: number; l: number } {
-  const n = parseInt(hex.slice(1), 16);
-  const r = ((n >> 16) & 255) / 255;
-  const g = ((n >> 8) & 255) / 255;
-  const b = (n & 255) / 255;
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const l = (max + min) / 2;
-  if (max === min) return { h: 0, s: 0, l };
-  const d = max - min;
-  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-  let h: number;
-  if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
-  else if (max === g) h = (b - r) / d + 2;
-  else h = (r - g) / d + 4;
-  return { h: h * 60, s, l };
-}
-
-/**
- * The nearest of Firefox's identity colour names, for the few Firefox surfaces
- * Toji doesn't restyle. Toji draws the real hex itself. Purple and violet are
- * never chosen.
- */
-export function firefoxColor(hex: string): string {
-  if (!HEX.test(hex)) return 'gray';
-  const { h, s } = hexToHsl(hex);
-  if (s < 0.2) return 'gray';
-  if (h < 15 || h >= 345) return 'red';
-  if (h < 40) return 'orange';
-  if (h < 70) return 'yellow';
-  if (h < 165) return 'green';
-  if (h < 195) return 'cyan';
-  if (h < 290) return 'blue';
-  return 'pink';
-}
-
-/** Firefox identity icon for a container (only used by Firefox's own surfaces). */
-export function firefoxIcon(c: Pick<Container, 'id' | 'egress' | 'ephemeral'>): string {
-  const byId: Record<string, string> = {
-    personal: 'fingerprint',
-    work: 'briefcase',
-    shopping: 'cart',
-    private: 'fence',
-    onion: 'circle'
-  };
-  return byId[c.id] ?? (c.ephemeral ? 'fence' : 'circle');
 }
 
 /** The container a new private window gets when nothing chose one (⌘⇧N). */

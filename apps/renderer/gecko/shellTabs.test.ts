@@ -15,6 +15,8 @@ const info = (over: Partial<ShellTabInfo>): ShellTabInfo => ({
   canForward: false,
   errorPage: null,
   crashed: false,
+  groupId: null,
+  throwaway: false,
   ...over
 });
 const ctx = { containerId: 'work', groupId: null };
@@ -45,6 +47,17 @@ describe('omniboxText', () => {
     expect(omniboxText({ url: 'toji://ask?q=hello' })).toBe('hello');
     expect(omniboxText({ url: 'about:start' })).toBe('');
     expect(omniboxText({ url: 'about:settings' })).toBe('');
+  });
+
+  it("treats Firefox's names for its settings and home pages as Toji's", () => {
+    expect(tabKind('about:preferences#privacy')).toEqual({ kind: 'internal', page: 'settings' });
+    expect(tabKind('about:home')).toEqual({ kind: 'start' });
+    expect(tabKind('about:firefoxview')).toEqual({ kind: 'start' });
+  });
+
+  it('keeps the question on the plans page a question was sent to', () => {
+    expect(omniboxText({ url: 'about:plans?q=why%20is%20the%20sky%20blue' })).toBe('why is the sky blue');
+    expect(omniboxText({ url: 'about:plans' })).toBe('');
   });
 });
 

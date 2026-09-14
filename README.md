@@ -12,45 +12,38 @@
 ---
 
 Toji is a browser built around one idea: the sites you visit should not be able to join up
-who you are. (It is moving from Electron to its own Firefox-engine browser; see
-[Running it](#running-it).) Each window uses a **profile** (internally, a container) — a
+who you are. It is built on Firefox's engine (Gecko), with none of Firefox's interface —
+see [Running it](#running-it). Each window uses a **profile** (internally, a container) — a
 named identity with its own cookies, storage, cache and network route. Signing into a site
 as Work leaves Personal signed out, and a tracker embedded in both sees two unrelated
 browsers.
 
 It also carries the agent work it started as: a local model can drive any page directly,
-working from screenshots of what Chromium actually painted rather than scraping the DOM.
+working from screenshots of what the page actually painted rather than scraping the DOM.
 
 ## Profiles and containers
 
-A container is an identity. It owns a Chromium session partition, so nothing crosses
-between them — not cookies, not localStorage, not IndexedDB, not the HTTP auth cache.
+A container is an identity. Gecko keeps everything a site stores under the container's own
+id — cookies, localStorage, IndexedDB, caches, the HTTP auth cache — so nothing crosses
+between them. The containers are Toji's alone: Toji numbers them itself, and Firefox's own
+container feature (its menus, settings page and add-on API) is switched off.
 
-Five ship by default: **Personal**, **Work**, **Shopping**, **Private** (discarded when its
-last tab closes) and **Onion** (routed over Tor). You can add your own, recolor them,
-switch any of them between a direct connection and Tor, and make any of them ephemeral.
+Five ship by default: **Personal**, **Work**, **Shopping**, **Private** (in a private
+window, wiped when its last window closes) and **Onion** (routed over Tor). You can add your
+own, recolor them, switch any of them between a direct connection and Tor, and make any of
+them ephemeral. Switching a container between direct and Tor wipes it, so no cookie survives
+the change.
 
 Opening a normal window shows a Chrome-style profile chooser, and the window keeps that
 identity for its whole life — one window, one profile. **Cmd/Ctrl+N** opens another
 profile window and **Cmd/Ctrl+Shift+N** opens Private directly. Profiles have editable
-names, colors and avatars.
-
-Each container's egress is encoded in its partition name:
-
-```
-[persist:]toji-c-<id>-<direct|tor>
-```
-
-The main process reads the policy back out of that name and applies the proxy when
-Chromium creates the session — before the guest exists, so there is no window in which a
-container can issue a request before its policy is in place. It also means switching a
-container between direct and Tor moves it to a different partition, so no cookie survives
-the change.
+names, colors and avatars. A tab's **Reset context** reloads it in a throwaway identity of
+its own, wiped when the tab closes.
 
 ## Tor
 
-Toji drives the real Tor client; it does not implement onion routing itself. It looks for a
-`tor` binary in the app bundle and the usual install locations, then for a Tor already
+Toji drives the real Tor client; it does not implement onion routing itself. It starts its
+own `tor` (from the app bundle or the usual install locations), or uses a Tor already
 running on port 9050 or 9150.
 
 ```bash
@@ -59,36 +52,34 @@ brew install tor          # macOS; starting Tor Browser also works
 
 Tor starts on demand — the first time you use a container that wants it — and containers
 using it stay **offline until it connects**. While Tor is unavailable their traffic is
-cancelled outright rather than falling back to the direct connection, and the UI says so
-instead of showing a broken page.
+refused outright rather than falling back to the direct connection (the build compiles out
+Firefox's proxy failover), and the UI says so instead of showing a broken page.
 
-**Per-container circuits.** Tor keeps streams arriving on different SocksPorts on separate
-circuits, so Toji's managed instance opens a pool of them and assigns one per container.
-Two containers therefore cannot be correlated by sharing an exit. If you point Toji at a Tor
-you were already running, it only offers one port — Chromium cannot send SOCKS credentials,
-so per-container isolation is unavailable in that mode, and Toji tells you rather than
-implying protection it isn't providing.
+**Per-container circuits.** Each Tor container sends its own SOCKS credentials, and Tor puts
+streams with different credentials on separate circuits — so two containers cannot be
+correlated by sharing an exit, on Toji's own Tor or one you were already running.
 
-`.onion` addresses typed in the omnibox enable Tor for the window automatically, since a
-hidden service resolves only through Tor's own resolver. You can also hold the circular Go
-button until its outline completes; it becomes an onion and all tabs in that window use a
-fresh ephemeral Tor partition. Hold it again to return to the profile's normal route.
+Hold the circular Go button (in the address bar or on the new tab page) until its outline
+completes: it becomes an onion and the window moves to a fresh, in-memory Tor identity —
+same place on screen, same tabs, the same tab in front. Hold it again to return to the
+profile's normal route; the Tor identity is wiped. Going to a `.onion` address yourself does
+the same, since a hidden service resolves only through Tor; a page can't do it for you.
 
-WebRTC never volunteers local interface addresses; Tor containers disable non-proxied UDP
+WebRTC never volunteers local interface addresses, and Tor containers refuse WebRTC
 outright.
 
 ## Passwords
 
-Logins are encrypted with your operating system's keychain (via Electron's `safeStorage`)
-and are **scoped to the container** they were saved in — a Work credential is never offered
-in Personal.
+Logins are encrypted with your operating system's keychain and are **scoped to the
+container** they were saved in — a Work credential is never offered in Personal. Firefox's
+own password manager is off.
 
-Filling a password goes main process → page directly; capturing one goes page → main
-process directly. There is no IPC method that returns a secret, and the agent has only two
+Filling a password goes browser → page directly; capturing one goes page → browser directly.
+Nothing a page or Toji's interface can call returns a secret, and the agent has only two
 credential tools: find accounts matching the current site/profile, then ask the vault to
 fill one by opaque id. Credentials are released only for the exact origin they were saved
-against — no subdomain widening, no https→http downgrade — and both origin and owning
-window are re-checked at fill time. A filled password stays secret from the model for the
+against — no subdomain widening, no https→http downgrade — and the origin and container are
+re-checked in the page at fill time. A filled password stays secret from the model for the
 same reason it does from anyone watching your screen: the agent sees a screenshot, and the
 page renders the field as dots. Everything else that is *visible* on the page, though, is
 visible to the model — so treat an agent run as showing that screen to your model provider.

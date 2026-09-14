@@ -79,6 +79,11 @@ describe('small rules', () => {
   it('knows pages the agent must leave', () => {
     expect(isBlankPage('about:start')).toBe(true);
     expect(isBlankPage('https://example.com')).toBe(false);
+    // Toji's own privileged pages and answer pages are never driven.
+    for (const url of ['about:settings', 'about:plans?q=x', 'about:report', 'toji://ask?q=hi', 'chrome://toji/content/shell/', 'view-source:https://a.test/']) {
+      expect(isBlankPage(url)).toBe(true);
+    }
+    expect(isBlankPage('http://localhost:3000/about:settings')).toBe(false);
   });
 
   it('maps key names', () => {

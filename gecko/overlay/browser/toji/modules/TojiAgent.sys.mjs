@@ -41,11 +41,12 @@ function hostOf(url) {
   }
 }
 
-async function serverJSON(path, body) {
+async function serverJSON(path, body, signal) {
   const res = await lazy.TojiAgentServer.fetch(path, {
     method: body === undefined ? "GET" : "POST",
     headers: body === undefined ? {} : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -63,6 +64,10 @@ class Run {
   askResolve = null;
   files = [];
   pointer = null;
+  /** Aborts the model call in flight when the run is stopped. */
+  abort = null;
+  /** Settles when the run has wound down. */
+  done = Promise.resolve();
   constructor(tab) {
     this.tab = tab;
   }
@@ -185,6 +190,22 @@ async function typeText(run, actor, text) {
 
 // --- The loop ---------------------------------------------------------------
 
+/**
+ * A driven tab behind another stays awake — its page keeps painting, animating and
+ * running its timers — as the Electron app's hidden webview did. Firefox puts a
+ * background tab to sleep (and does again after each tab switch), so every step
+ * wakes it; the run's end hands it back.
+ */
+function keepAwake(run, on) {
+  const { tab } = run;
+  if (tab.selected || tab.closing || !tab.linkedBrowser) {
+    return;
+  }
+  try {
+    tab.linkedBrowser.docShellIsActive = on;
+  } catch {}
+}
+
 function logTo(run, role, text) {
   run.log.push({ role, text });
   TojiAgent._render(run.tab.ownerDocument.defaultView);
@@ -200,6 +221,9 @@ async function runAgent(run, goal) {
   const browser = tab.linkedBrowser;
   run.cancelled = false;
   run.running = true;
+  run.abort = new AbortController();
+  const signal = run.abort.signal;
+  const server = (path, body) => serverJSON(path, body, signal);
   setMark(run, true);
   logTo(run, "you", goal);
   const lib = lazy.AgentLib;
@@ -208,12 +232,12 @@ async function runAgent(run, goal) {
 
   let memory = "";
   try {
-    const l = await serverJSON("/api/agent/librarian", { goal, sessionId });
+    const l = await server("/api/agent/librarian", { goal, sessionId });
     memory = [l.pinned, l.digest].filter(s => s && s.trim()).join("\n\n").slice(0, 1400);
   } catch {}
   let references = [];
   try {
-    const r = await serverJSON("/api/references");
+    const r = await server("/api/references");
     references = (r.references ?? []).map((d, i) => ({
       index: 100000 + i,
       name: d.name,
@@ -248,11 +272,12 @@ async function runAgent(run, goal) {
     if (run.cancelled) {
       break;
     }
+    keepAwake(run, true);
     const url = browser.currentURI?.spec ?? "";
     if (lib.isBlankPage(url)) {
       let nav;
       try {
-        nav = await serverJSON("/api/agent/step", {
+        nav = await server("/api/agent/step", {
           goal,
           url: "about:blank",
           title: "New Tab",
@@ -261,10 +286,13 @@ async function runAgent(run, goal) {
             { action: "note", reason: 'No website is open yet. Use "navigate" with the URL the goal needs to begin.' },
           ],
         });
-      } catch {
+      } catch (e) {
+        if (run.cancelled) {
+          break;
+        }
         stepFailures++;
         if (stepFailures >= 5) {
-          logTo(run, "system", "The model kept failing to respond — stopping.");
+          logTo(run, "system", `The model kept failing to respond (${e.message}) — stopping.`);
           break;
         }
         await delay(1000 * stepFailures);
@@ -322,7 +350,7 @@ async function runAgent(run, goal) {
 
     let action;
     try {
-      action = await serverJSON("/api/agent/step", {
+      action = await server("/api/agent/step", {
         goal,
         url,
         title: browser.contentTitle,
@@ -334,13 +362,16 @@ async function runAgent(run, goal) {
         memory,
       });
       stepFailures = 0;
-    } catch {
-      stepFailures++;
-      if (stepFailures >= 5) {
-        logTo(run, "system", "The model kept failing to respond (rate-limit or network?) — stopping.");
+    } catch (e) {
+      if (run.cancelled) {
         break;
       }
-      logTo(run, "system", `Model didn't respond — retrying (${stepFailures}/5)…`);
+      stepFailures++;
+      if (stepFailures >= 5) {
+        logTo(run, "system", `The model kept failing to respond (${e.message}) — stopping.`);
+        break;
+      }
+      logTo(run, "system", `Model didn't respond (${e.message}) — retrying (${stepFailures}/5)…`);
       await delay(1000 * stepFailures);
       step--;
       continue;
@@ -378,7 +409,7 @@ async function runAgent(run, goal) {
       logTo(run, "agent", `Researching: ${action.query}`);
       let answer = "";
       try {
-        answer = (await serverJSON("/api/agent/research", { question: action.query, goal, url })).answer || "";
+        answer = (await server("/api/agent/research", { question: action.query, goal, url })).answer || "";
       } catch {}
       const text = answer || "No useful guidance found.";
       history.push({ action: "researched", reason: `${action.query} → ${text}` });
@@ -450,7 +481,7 @@ async function runAgent(run, goal) {
 
     if (action.action === "remember" && typeof action.text === "string" && action.text.trim()) {
       const note = action.text.trim().slice(0, 500);
-      serverJSON("/api/memory", { text: note, sessionId }).catch(() => {});
+      server("/api/memory", { text: note, sessionId }).catch(() => {});
       memory = `${memory}\n- ${note}`.slice(-1400);
       logTo(run, "agent", `Remembered: ${note.slice(0, 120)}`);
       history.push({ action: "remembered", reason: note.slice(0, 80) });
@@ -610,6 +641,7 @@ async function runAgent(run, goal) {
 
   run.pointer = null;
   drawCursor(run, null);
+  keepAwake(run, false);
   if (!run.cancelled) {
     if (completed) {
       logTo(run, "system", "Done.");
@@ -736,10 +768,7 @@ export const TojiAgent = {
 
   /** Starts a run from outside the spotlight (e.g. a new AI tab). */
   run(tab, goal) {
-    const run = runFor(tab);
-    if (!run.running) {
-      runAgent(run, goal);
-    }
+    this.submit(tab, goal);
   },
 
   /**
@@ -754,11 +783,18 @@ export const TojiAgent = {
       return "answered";
     }
     if (run.running) {
-      return "busy";
+      if (!run.cancelled) {
+        return "busy";
+      }
+      // Stopped, and still winding down (its model call being aborted): the new goal
+      // starts the moment it has.
+      run.done.then(() => this.submit(tab, text));
+      return "started";
     }
-    runAgent(run, text).catch(e => {
+    run.done = runAgent(run, text).catch(e => {
       logTo(run, "system", `The agent stopped: ${e.message}`);
       run.running = false;
+      keepAwake(run, false);
       setMark(run, false);
     });
     return "started";
@@ -770,6 +806,7 @@ export const TojiAgent = {
       return;
     }
     run.cancelled = true;
+    run.abort?.abort();
     run.askResolve?.(null);
     run.ask = null;
     drawCursor(run, null);
@@ -780,11 +817,11 @@ export const TojiAgent = {
     return !!runs.get(tab)?.running;
   },
 
-  /** A tab's run as the shell shows it: no paths, no internals. */
+  /** A tab's run as the shell shows it: no paths, no internals. A stopped run is over at once. */
   stateOf(tab) {
     const run = tab ? runs.get(tab) : null;
     return {
-      running: !!run?.running,
+      running: !!run?.running && !run.cancelled,
       log: run ? run.log.map(l => ({ role: l.role, text: l.text })) : [],
       ask: run?.ask ?? null,
       files: run ? run.files.map(f => ({ index: f.index, name: f.name })) : [],

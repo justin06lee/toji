@@ -151,7 +151,8 @@ to contact; phase 1 verifies nothing else is contacted, with a proxy log.
 
 **Toji behaviour set in `toji.cfg`**: WebRTC never exposes local addresses in any
 container (`ice.no_host`, `default_address_only`, obfuscated host candidates);
-contextual identities on; search suggestions off by default; SOCKS remote DNS.
+Firefox's container feature off (`privacy.userContext.enabled` — Toji's containers are
+its own, see below); search suggestions off by default; SOCKS remote DNS.
 
 ### How to rebase to the next ESR
 
@@ -183,12 +184,20 @@ bundles into `resource:///modules/toji/lib/*.sys.mjs`. No C++.
   and three per-window categories: `browser-window-domcontentloaded-before-tabbrowser`
   (the only point where the first tab's container can still be chosen),
   `browser-window-domcontentloaded` (gBrowser exists) and `browser-window-unload-begin`.
-- **Containers** (`TojiContainers`, `gecko/lib/containers.ts`). Toji's list lives in
-  `<profile>/toji-containers.json` and is mirrored onto Firefox contextual identities
-  (name, nearest Firefox colour name, an icon) — Toji draws the real hex colours and
-  avatars itself. First run adopts Firefox's Personal/Work/Shopping identities and
-  removes Banking. Loaded synchronously on first use, because the proxy filter and the
-  first window need answers before async startup work could finish.
+- **Containers** (`TojiContainers`, `gecko/lib/containers.ts`) are Toji's own. The list
+  lives in `<profile>/toji-containers.json` with the `userContextId` each container's
+  data is kept under — the origin attribute Gecko partitions cookies, storage, caches and
+  auth by, which needs no Firefox feature switched on. Toji numbers them itself
+  (`assignUserContextIds`: new ones from 10,000, a persisted counter so an id is never
+  reused; throwaway identities from 1,000,000) and never touches Firefox's
+  `ContextualIdentityService`. Firefox's container feature is locked off
+  (`privacy.userContext.enabled` false): its per-tab menus, its containers settings pane
+  and the add-on `contextualIdentities` API have nothing to show or change. (Until
+  2026-09-13 the list was mirrored onto Firefox identities; containers made then keep
+  their ids 1–6, so their data stays put, and the old records are left alone — removing
+  one through Firefox would wipe its data.) Loaded synchronously on first use, because
+  the proxy filter and the first window need answers before async startup work could
+  finish.
 - **One window = one container** (`TojiWindows`). A window's container comes from
   `window.arguments[1]` (`toji-container` in the property bag, Toji-opened windows), an
   adopted tab, a popup's opener, `arguments[5]`, the opening window ("Open Link in New
@@ -205,8 +214,8 @@ bundles into `resource:///modules/toji/lib/*.sys.mjs`. No C++.
   entirely; on top of that the container is wiped with
   `Services.clearData.deleteDataFromOriginAttributesPattern({userContextId})` when its
   last window closes and at every startup. Clear container does the same on demand and
-  reloads the container's tabs. Firefox's own container menus are hidden
-  (`privacy.userContext.ui.enabled` locked off): they contradict one window, one profile.
+  reloads the container's tabs. A window whose profile is deleted stops its pages and
+  asks "Who's browsing?" again, as the Electron app did.
 - **Tor** (`TojiTor`, `TojiProxy`, `TojiTorUI`, `gecko/lib/tor.ts`). One managed tor
   (`SocksPort auto IsolateSOCKSAuth`, `ControlPort auto` + `ControlPortWriteToFile`,
   cookie auth, `__OwningControllerProcess` + `TAKEOWNERSHIP` so it dies with the browser)
@@ -220,12 +229,22 @@ bundles into `resource:///modules/toji/lib/*.sys.mjs`. No C++.
   are listed under Build options and in `toji.cfg`. **WebRTC** is refused outright in
   Tor containers (a `webrtcUI` peer-connection blocker; tor carries no UDP and Firefox
   can't send ICE through a per-container SOCKS proxy); local IPs are never exposed in any
-  container. **Hold-to-Tor** (900 ms on the Go button at the end of the address bar)
-  swaps the window for a private window in a fresh in-memory Tor identity
-  (`userContextId` ≥ 1,000,000, no Firefox identity record, wiped on release); holding
-  again goes back. A **.onion** load in a direct window does the same, via a tabs
-  progress listener. The status bar under the toolbar shows bootstrap progress, or
-  "offline" with Retry, in Tor windows only.
+  container. **Hold-to-Tor** (900 ms on the Go button, in the address bar or on the
+  start page) moves the window to a fresh in-memory Tor identity (`userContextId` ≥
+  1,000,000, wiped on release); holding again goes back. The Electron app reloaded the
+  window's tabs in place; Gecko decides private browsing per window, never per tab
+  (`nsFrameLoader.cpp` takes it from the window), and a Tor identity must stay off disk,
+  so the window is replaced — opened at the old one's place and size (window features,
+  so it never shows elsewhere first), every tab in its place with the one in front still
+  in front and the rest lazy until chosen, groups kept, and the old window closed only
+  once the new one is up. The shell shows Tor mode from the window's own container
+  (`state().container`), since the saved list holds only the profiles. A **.onion**
+  address the user went to (typed, or a link they clicked) in a direct window does the
+  same; a page can't send the window to Tor by itself, and leaving Tor leaves .onion
+  tabs behind as start pages (they would send it straight back). An ephemeral profile
+  is wiped only when neither its window nor the Tor window standing in for it is left,
+  so Private → Tor → back keeps Private's pages. The status bar under the toolbar shows
+  bootstrap progress, or "offline" with Retry, in Tor windows only.
 - **Toji's pages** (`TojiPages`, `TojiPage` actor). React builds shipped at
   `chrome://toji/content/pages/*.html`, registered at runtime as `about:settings`,
   `about:welcome`, `about:plans`, `about:start` (the new tab page, set through
@@ -278,15 +297,18 @@ bundles into `resource:///modules/toji/lib/*.sys.mjs`. No C++.
   of real `File`s onto GitHub's editor with the file input as fallback. The window still is
   `drawSnapshot` of the chrome window's own WindowGlobal, which stitches in the page:
   no Screen Recording permission. Help › Report a Bug… and ⌥⇧I open `about:report`.
-- **AI answer pages — decided, not built yet.** Firefox refuses to load http content into
-  parent-process pages, so the answer can't be an iframe inside a Toji page. Plan: a
-  `toji:` protocol handler registered at runtime in the parent (`Services.io
-  .registerProtocolHandler`), `DANGEROUS_TO_LOAD` so web pages can't link to it, whose
-  `newChannel` returns an HTTP channel to the agent server's stream (token included) with
-  `originalURI` = `toji://ask?q=…`. The tab is an ordinary content process in the window's
-  container, the address bar shows the question's URL, and the token never reaches history.
-  Sources get appended to the streamed page by the server. Plan gating (Toji plan without a
-  subscription → `about:plans?q=`) happens before loading.
+- **AI answer pages** (`TojiAsk`). A `toji:` protocol handler, registered at runtime in
+  the parent and (by a process script) in every content process, `DANGEROUS_TO_LOAD` so
+  web pages can't link to it; its channel is an HTTP channel to the agent server's stream
+  (token included, parent side only) with `originalURI` = `toji://ask?q=…`. The tab is an
+  ordinary content process in the window's container and the address bar shows the
+  question. Answers are real history entries: Back and a restored session show the saved
+  answer. A reload — the shell's button, the tab menu, or ⌘R — asks the model again: a
+  one-shot per-browser "fresh" flag the channel reads, never a `fresh=1` in the address
+  (which would regenerate on every Back or restore). Sources are the shell's
+  (`PageSources`), looked up again on a reload. Plan gating (the Toji plan without a
+  subscription → `about:plans?q=`) happens before loading; a "no" is kept a minute. An
+  address typed with Shift+Enter or the wand opens, as in the Electron app.
 
 ## The shell: Toji's UI in every window
 
@@ -309,8 +331,16 @@ from Firefox's own popups and panels, which live in the same document.
 - **Tabs are gBrowser's.** `window.tojiShell` (contract: `apps/renderer/gecko/shellHost.ts`)
   pushes a snapshot of the tabs on every tab event and top-level location/state change;
   `shellTabs.ts` maps them onto the Electron app's `BrowserTab`, cached per tab so Motion's
-  reordering keeps object identity while `moveTabTo` moves the real tabs. Groups are the
-  window's own, as in the Electron app. `window.toji` is the pages' bridge
+  reordering keeps object identity while `moveTabTo` moves the real tabs. A tab with no
+  browser yet (restored, or moved by hold-to-Tor, and not chosen since) is described from
+  the session without being woken. **Groups** are the window's own, as in the Electron
+  app, and kept with the session: the list as a SessionStore window value, each tab's
+  group as a tab value, so a duplicated, reopened (⌘⇧T) or restored tab keeps its group,
+  a tab a page opens joins its opener's, and a group left empty goes. **Reset context**
+  reloads a tab in a throwaway identity of its own (the window's route; a Tor window's
+  gets its own circuit), wiped when the tab or window closes. A **popup** a page opens
+  (`window.open` with a size, `toolbar.visible` false) is just the page, as the
+  Electron app's popups were; a login submitted in it still asks to be saved. `window.toji` is the pages' bridge
   (`TojiPageAPI`), so the shared components that call `bridge()` work unchanged.
 - **Firefox's paths into its hidden UI** are redirected: `gURLBar.select/focus` (⌘L, new
   windows) and `_adjustFocusAfterTabSwitch` (a new tab) focus the shell's omnibox;
@@ -342,7 +372,57 @@ from Firefox's own popups and panels, which live in the same document.
 
 `gecko/test/shell.ts` drives it headless with real input — `win.synthesizeMouseEvent`
 through the window's own hit testing and `nsITextInputProcessor` keys (Marionette's
-element commands are content-only) — 32 checks.
+element commands are content-only) — 32 checks. `gecko/test/experience.ts` checks the
+Electron app's experience on top: containers, the zero-Firefox-UI audit, hold-to-Tor,
+groups, Reset context, the agent's limits, the start page, the sidebar peek, popups.
+
+## Firefox contributes nothing: how its UI is stripped
+
+The goal (the user's, 2026-09-13): a Firefox with no UI of its own at all — only the
+engine and what the open pages need. Two ways were weighed, with the ESR 153 source:
+
+1. **A window of Toji's own instead of `browser.xhtml`** (no `browser.js`, no tabbrowser).
+   The chrome URL is compiled in (`BROWSER_CHROME_URL`, `browser/moz.configure:20`; no
+   pref), and Firefox assumes every `navigator:browser` window has a tabbrowser
+   `gBrowser`: 111 references in 58 files under `browser/`, 1,267 uses of `gBrowser`
+   outside tabbrowser. SessionStore, prompts (`getTabDialogBox`), printing, permission
+   prompts (`PopupNotifications` throws without a tabbrowser), `window.open`
+   (`ContentParent` forces a new window without a `browserDOMWindow`), crash handling,
+   Picture-in-Picture and the WebExtension tab/window trackers — which uBlock Origin's
+   `webRequest` needs for tab ids — all run through it. Estimated 5,000–10,000 lines to
+   reimplement, each a place for the Electron era's bugs to come back, and a rebase
+   hazard every ESR. **Not taken.**
+2. **Keep `browser.xhtml` and gBrowser as the engine's tab model; make sure nothing of
+   Firefox's is ever drawn.** Taken. Its toolbars, tab strip, sidebar and panels are
+   `display: none` (toji.css) — no frames, no layout, no painting; deleting the markup
+   would change nothing on screen and would need stubs for every script that touches it.
+   What could still *appear* is handled one by one:
+   - **Features with a UI of their own are off** (`TojiFirefoxUI`, default prefs):
+     screenshots, reader view, Firefox's AI chat and link preview, its tab groups and
+     smart window, translations, the DRM bar, the WebRTC indicator window, form history
+     and address/card autofill, find-as-you-type and quick find ("/"), the full-screen and
+     pointer-lock toasts and the fade, the crash "Restore Session" page (the session
+     comes back by itself), downloads panel, status bubble, close/quit warnings, hover
+     previews, the sidebar.
+   - **Firefox's pages for what Toji does itself are Toji's**: about:preferences,
+     about:logins and about:protections serve Settings; about:home, about:newtab,
+     about:privatebrowsing, about:firefoxview and about:welcomeback serve the start page —
+     under Firefox's names, registered like Toji's own pages (`TojiPages`), so no load is
+     redirected. (A redirect on load was tried first: stopping a new private window's
+     first page could stop whatever the user had started loading meanwhile — `phase2.ts`
+     caught it.)
+   - **What a page needs stays, in Toji's look**: a page's alert/confirm/prompt and
+     leave-page prompts, permission requests (hung from the shell's address bar — a
+     doorhanger with no visible anchor would open at the window's corner), `<select>`
+     and date pickers, the blocked-popup and slow-script bars, the right-click menu
+     (trimmed to the Electron app's items), macOS's own print, save and file dialogs.
+   - **Still Firefox's**: Picture-in-Picture's hover toggle and player window (kept: it
+     is the Electron app's hover PiP button's counterpart), about:addons (Welcome's
+     "Browse add-ons"; Toji's Settings has no extensions page yet), and the developer
+     tools and developer pages (about:config, about:support, devtools), which no Toji UI
+     leads to.
+   `experience.ts` walks the whole window after a page loads and fails if any element
+   outside the shell and the pages paints anything with a box on screen.
 
 ## Phases
 
@@ -364,15 +444,15 @@ State per item: — not started · WIP · works · works differently · dropped 
 
 | Area | Item | State |
 |---|---|---|
-| Profiles | Personal, Work, Shopping, Private, Onion, custom; colours, avatars, ephemeral wipe, clear | WIP — picker, one window = one container (⌘T included), Private window, isolation, wipe on close and Clear verified; custom containers, colours and avatars not yet checked |
-| Tor | managed/external tor, bootstrap UI, fail-closed, per-container circuits, NEWNYM, .onion auto-route, hold-to-Tor | WIP — managed tor, fail-closed (tor off and tor failed), per-container circuits with different exits and .onion verified; external tor, bootstrap UI, NEWNYM, .onion auto-route from a direct window and hold-to-Tor not yet checked |
+| Profiles | Personal, Work, Shopping, Private, Onion, custom; colours, avatars, ephemeral wipe, clear | works — Toji-numbered containers with Firefox's container feature off (`experience.ts`); picker, one window = one container, Private window, isolation, wipe on close and Clear (`phase2.ts`); a deleted profile's windows go back to the picker. Custom colours and avatars not separately checked |
+| Tor | managed/external tor, bootstrap UI, fail-closed, per-container circuits, NEWNYM, .onion auto-route, hold-to-Tor | works differently — hold-to-Tor replaces the window in place (Gecko is private per window) with its tabs, tab in front and groups, and shows Tor mode; holding again comes back and wipes the identity (`experience.ts`); the start page's Go button holds too; only a user's .onion navigation switches. Managed tor, fail-closed, per-container circuits and .onion verified (`tor-browser.ts`); external tor, bootstrap UI and NEWNYM not yet checked |
 | Passwords | encrypted, container-scoped, exact-origin fill, save bubble, autosave, generator, CSV + browser import, agent-safe | WIP — encrypted (OSKeyStore; only ciphertext on disk), container-scoped, exact-origin fill (`phase8.ts`); the Electron vault moves in; save bubble, autosave, generator and CSV import not yet checked |
-| Agent | screenshot loop, spotlight, Option tap, cursor, tab marks, step limit, dropped files, reference docs, memory/librarian, research sub-agent | WIP — a run presses a button on a page end to end (screenshot, model through the agent server, synthesized input), with the spotlight and cursor; dropped files, reference docs, memory/librarian, research sub-agent, Option tap and step limit not yet checked |
+| Agent | screenshot loop, spotlight, Option tap, cursor, tab marks, step limit, dropped files, reference docs, memory/librarian, research sub-agent | WIP — a run presses a button on a page end to end (`phase5.ts --live`); the agent never drives Toji's own pages (`experience.ts`); Stop aborts the model call at once and a goal typed meanwhile starts after; a driven background tab stays awake. Dropped files, reference docs, memory/librarian and the step limit not yet checked |
 | Agent backends | yagami CLIs, Cerebras, OpenAI-compatible, Toji plan (billing not wired) | — |
-| AI answer pages | Shift+Enter / wand, streamed with sources, cached, follows theme | WIP — a question streams back with its sources under `toji://ask?q=…`, token kept in the parent (`phase5.ts --live`); Shift+Enter, the wand, caching and theme not yet checked |
+| AI answer pages | Shift+Enter / wand, streamed with sources, cached, follows theme | works — a question streams back with its sources under `toji://ask?q=…` (`phase5.ts --live`); reload (button, menu, ⌘R) asks again without a `fresh` in the address; an address with Shift+Enter opens (`experience.ts`); the question stays in the omnibox on the plans page |
 | Omnibox | engine choice, long-URL fade, star, vault fill, Go/Tor button | works — the Electron app's AddressRow in the shell; typing and Enter load, Shift+Enter/wand ask, ⌘L focuses it, a new tab focuses it (`shell.ts`) |
 | Bookmarks | ⌘D, pinned or hover bar, imports | works — the shell's bar over the bookmarks toolbar (flattened); star and ⌘D toggle; hover mode comes down from the page's top edge (`TojiEdge` actor) |
-| Tabs | top/side, groups with colours, drag reorder, long-press new-tab menu, background tabs, audio/mute, agent indicator, open/close animation | works — the Electron app's strip and sidebar over gBrowser; drag reorder moves the real tabs; groups are per window as in Electron. Reset context (a per-tab throwaway session) is not offered: a Gecko window is one container |
+| Tabs | top/side, groups with colours, drag reorder, long-press new-tab menu, background tabs, audio/mute, agent indicator, open/close animation | works — the Electron app's strip and sidebar over gBrowser; drag reorder moves the real tabs (and keeps the pointer over the page); groups kept with the session (a duplicate keeps its group, `experience.ts`); Reset context in a throwaway identity (`experience.ts`); the sidebar peek (`experience.ts`); popups are just the page (`experience.ts`) |
 | Ad blocking | uBlock Origin, on by default | works — the pinned 1.74.0, active in new profiles and private windows; blocks a tracker a page requests; the Settings switch turns it off and on (`phase6.ts`) |
 | Pages | Settings, Welcome, Plans | WIP — Settings, Welcome, Plans, start page and bug report render with `window.toji`; web pages get no bridge; ⌘T opens about:start. Plans shows no tiers yet (they come from the agent server, phase 5) |
 | System | default browser, cold-start links from other apps | WIP — a link handed over at launch waits for "Who's browsing?" and opens in the container chosen; an external link lands in its window's container; `isDefaultBrowser()` answers (it reads true while the Electron app shares the bundle id). Setting the default browser not exercised |
@@ -734,4 +814,31 @@ all. Built as described in "The shell" above, on `feat/gecko-shell`.
   Phase 8 not rerun (it prompts the Keychain); its layout check now reads `toji.layout`.
 - Known gaps: ⌘F does nothing (the Electron app had no find bar; Firefox's is hidden);
   Firefox's own Picture-in-Picture toggle and player remain; about:addons (from Welcome's
-  "Browse add-ons") is Firefox's page; Reset context is not offered.
+  "Browse add-ons") is Firefox's page; Reset context is not offered (offered since, see
+  the next entry).
+
+### 2026-09-13 — the Electron app's experience, and Firefox stripped of its UI
+
+The user found the experience not yet the Electron app's — AI, hold-to-Tor, containers,
+the sidebar — and asked for a Firefox with no UI of its own at all. Four read-only audits
+(AI, Tor and containers, tabs and sidebar, the ESR source for stripping) and a headless
+walk-through of the built app found, and this round fixed:
+
+- Hold-to-Tor opened a new window elsewhere, dropped start pages and groups, reordered
+  the tabs, and the Tor window didn't look like one (the shell looked the temporary
+  identity up in the profiles list). A .onion tab bounced the window back into Tor; any
+  page could force the switch; Private → Tor wiped Private. See "Tor" above.
+- Containers were mirrored onto Firefox identities, visible in about:preferences and to
+  add-ons. Now Toji's alone (see "Containers").
+- The agent could screenshot and drive Settings (system principal). Stop waited out a
+  whole model call and lost a goal typed meanwhile. A background tab it drove was asleep.
+- Answer reloads put `fresh=1` into history (paid regeneration on every Back), ⌘R served
+  the cached answer, Shift+Enter on an address asked the AI, the start page couldn't
+  hold for Tor, and asking right after launch showed nothing for seconds.
+- Groups lived in React state: lost on duplicate, ⌘⇧T, restore and hold-to-Tor. Every
+  restored tab was woken by the shell reading its history. Reset context was missing;
+  popups got the whole tab strip; the tab picked after a close differed; tab drags could
+  lose the pointer over the page; the drag notch could stay stuck after a native drag.
+- Typing about:settings (or any about: address) searched for it.
+
+`experience.ts` (new, in `make check`) checks it; `shell.ts` still passes 32/32.

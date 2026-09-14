@@ -3,7 +3,7 @@
 // can be clicked through during development without the Gecko browser.
 
 import { bridge } from '../src/lib/bridge';
-import { looksLikeUrl, toUrl, webSearchUrl } from '../src/lib/nav';
+import { isBrowserAddress, looksLikeUrl, toUrl, webSearchUrl } from '../src/lib/nav';
 
 type TojiPage = 'settings' | 'welcome' | 'plans';
 
@@ -37,5 +37,7 @@ export function navigate(input: string) {
 /** Opens an AI answer page for a query; undefined when the browser cannot, so callers hide the wand. */
 export function askAI(): ((query: string) => void) | undefined {
   const toji = bridge();
-  return toji.askAI ? (query: string) => toji.askAI?.(query) : undefined;
+  if (!toji.askAI) return undefined;
+  // An address with Shift+Enter or the wand still just opens, as in the omnibox.
+  return (query: string) => (looksLikeUrl(query) || isBrowserAddress(query) ? navigate(query) : toji.askAI?.(query));
 }

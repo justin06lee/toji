@@ -51,6 +51,11 @@ export class TojiAgentChild extends JSWindowActorChild {
     if (!win) {
       throw new Error("the page is gone");
     }
+    // Toji's own pages (Settings, Plans…) run with the browser's privileges: the agent
+    // never reads or drives them, whatever the loop above decides.
+    if (this.document.nodePrincipal.isSystemPrincipal) {
+      throw new Error("the browser's own pages can't be driven");
+    }
     switch (name) {
       case "info":
         return {

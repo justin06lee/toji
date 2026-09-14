@@ -130,6 +130,11 @@ svg {
 .drag-notch-holding {
   cursor: grabbing;
 }
+/* On its way out the notch drags nothing: a native drag region ignores pointer-events
+   and opacity, so a click on the tab under a fading notch would move the window. */
+.drag-strip[data-state='hiding'] .drag-notch {
+  -moz-window-dragging: no-drag;
+}
 .dark .drag-notch {
   background: #171717;
   border-color: rgba(255, 255, 255, 0.14);

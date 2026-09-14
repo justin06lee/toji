@@ -4,8 +4,9 @@ import {
   DEFAULT_CONTAINERS,
   containerId,
   defaultPrivateContainer,
-  firefoxColor,
-  firefoxIcon,
+  FIRST_USER_CONTEXT_ID,
+  TEMPORARY_USER_CONTEXT_ID,
+  assignUserContextIds,
   newContainer,
   normalizeContainers,
   routeLabel
@@ -21,8 +22,18 @@ describe('defaults', () => {
   });
 
   it('never use purple or violet', () => {
+    const hue = (hex: string) => {
+      const n = parseInt(hex.slice(1), 16);
+      const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => v / 255);
+      const max = Math.max(r, g, b);
+      const d = max - Math.min(r, g, b);
+      if (!d) return -1;
+      const h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      return h * 60;
+    };
     for (const hex of [...CONTAINER_COLORS, ...DEFAULT_CONTAINERS.map((c) => c.color)]) {
-      expect(['purple', 'violet']).not.toContain(firefoxColor(hex));
+      const h = hue(hex);
+      expect(h >= 255 && h < 300).toBe(false);
     }
   });
 });
@@ -79,21 +90,35 @@ describe('ids and new containers', () => {
   });
 });
 
-describe('Firefox mapping', () => {
-  it('picks the nearest identity colour', () => {
-    expect(firefoxColor('#0ea5e9')).toBe('blue');
-    expect(firefoxColor('#10b981')).toBe('green');
-    expect(firefoxColor('#f59e0b')).toBe('orange');
-    expect(firefoxColor('#f43f5e')).toBe('red');
-    expect(firefoxColor('#06b6d4')).toBe('cyan');
-    expect(firefoxColor('#64748b')).toBe('gray');
-    expect(firefoxColor('#8b5cf6')).toBe('blue');
-    expect(firefoxColor('nope')).toBe('gray');
+describe('userContextIds', () => {
+  it('numbers new containers from Toji\'s own range and keeps existing ones', () => {
+    const list = normalizeContainers([{ id: 'personal', name: 'Personal', userContextId: 1 }, { id: 'work', name: 'Work', userContextId: 2 }]);
+    const next = assignUserContextIds(list);
+    expect(list.find((c) => c.id === 'personal')!.userContextId).toBe(1);
+    expect(list.find((c) => c.id === 'work')!.userContextId).toBe(2);
+    const fresh = list.filter((c) => !['personal', 'work'].includes(c.id)).map((c) => c.userContextId!);
+    expect(fresh).toEqual([FIRST_USER_CONTEXT_ID, FIRST_USER_CONTEXT_ID + 1, FIRST_USER_CONTEXT_ID + 2]);
+    expect(next).toBe(FIRST_USER_CONTEXT_ID + 3);
   });
 
-  it('maps icons', () => {
-    expect(firefoxIcon({ id: 'work', egress: 'direct', ephemeral: false })).toBe('briefcase');
-    expect(firefoxIcon({ id: 'x', egress: 'direct', ephemeral: true })).toBe('fence');
+  it('never hands an id out twice, even after its container is gone', () => {
+    const list = normalizeContainers(null);
+    const next = assignUserContextIds(list, 10_050);
+    expect(Math.min(...list.map((c) => c.userContextId!))).toBe(10_050);
+    const later = [...list.slice(1), newContainer('Club', list)];
+    expect(assignUserContextIds(later, next)).toBe(next + 1);
+    expect(later.at(-1)!.userContextId).toBe(next);
+  });
+
+  it('re-numbers a duplicate or a throwaway-range id', () => {
+    const list = [
+      { ...DEFAULT_CONTAINERS[0], userContextId: 10_000 },
+      { ...DEFAULT_CONTAINERS[1], userContextId: 10_000 },
+      { ...DEFAULT_CONTAINERS[2], userContextId: TEMPORARY_USER_CONTEXT_ID + 3 }
+    ];
+    assignUserContextIds(list);
+    expect(new Set(list.map((c) => c.userContextId)).size).toBe(3);
+    expect(list.every((c) => c.userContextId! < TEMPORARY_USER_CONTEXT_ID)).toBe(true);
   });
 });
 
