@@ -73,14 +73,20 @@ export function AddressRow({
   // longer than the box (and not being edited) its tail fades out just before the
   // buttons instead of stopping dead against them.
   const [overflows, setOverflows] = useState(false);
+  // One observer for the box's size, kept for the input's life; the text's width is
+  // re-read when the value changes, not by tearing the observer down per keystroke.
   useEffect(() => {
     const input = inputRef.current;
     if (!input) return;
-    const measure = () => setOverflows(input.scrollWidth > input.clientWidth + 1);
-    measure();
-    const observer = new ResizeObserver(measure);
+    const observer = new ResizeObserver(() => setOverflows(input.scrollWidth > input.clientWidth + 1));
     observer.observe(input);
     return () => observer.disconnect();
+  }, [inputRef]);
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    const frame = requestAnimationFrame(() => setOverflows(input.scrollWidth > input.clientWidth + 1));
+    return () => cancelAnimationFrame(frame);
   }, [inputRef, value, layout, sidebarOpen]);
 
   const onSubmit = (event: FormEvent) => {

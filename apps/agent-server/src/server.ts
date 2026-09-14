@@ -67,6 +67,7 @@ const expensiveRateLimit = rateLimit(10_000, 10); // 10 requests per 10 seconds
 export const UPLOAD_BASE64_MAX = 40_000_000;
 export const UPLOAD_BODY_LIMIT_BYTES = UPLOAD_BASE64_MAX + 64 * 1024;
 const UPLOAD_ROUTES = new Set(['/api/files', '/api/references']);
+const SCREENSHOT_ROUTES = new Set(['/api/agent/step']);
 
 // Only the local renderer needs cross-origin access. The packaged desktop app
 // loads the renderer over http://127.0.0.1 and the server serves the static
@@ -132,6 +133,14 @@ function maskSettings(settings: UserSettings): UserSettings {
   return masked;
 }
 
+// The sessions directory is scanned at most once every few seconds, not per request.
+let sessionCount: { at: number; value: Promise<number> } | null = null;
+function countSessionsCached() {
+  const now = Date.now();
+  if (!sessionCount || now - sessionCount.at > 5000) sessionCount = { at: now, value: countSessions() };
+  return sessionCount.value;
+}
+
 async function buildStatusPayload() {
   return {
     ok: true,
@@ -144,7 +153,7 @@ async function buildStatusPayload() {
     maxSearchQueries: config.maxSearchQueries,
     searchProvider: isBraveSearchEnabled ? 'brave' : config.searchProvider === 'brave' ? 'brave-disabled' : 'duckduckgo',
     visualAnalysisEnabled: config.enableVisualAnalysis,
-    sessionsStored: await countSessions()
+    sessionsStored: await countSessionsCached()
   };
 }
 
@@ -520,6 +529,11 @@ routes.get('/api/page/sources', async (req, res, next) => {
   }
 });
 
+// The saved sessions are read from disk the first time the research API is used.
+routes.use('/api/research', (_req, _res, next) => {
+  researchOrchestrator.hydrate().then(() => next(), next);
+});
+
 routes.post('/api/research/start', expensiveRateLimit, async (req, res, next) => {
   try {
     const body = z
@@ -657,14 +671,17 @@ export function createApp(options: AppOptions, security: SecurityOptions) {
   }
   // Checked before bodies are parsed, so an unauthenticated upload is never read.
   app.use(apiAuth(security));
-  // JSON bodies: 12 MB is generous because the web agent's vision step posts a JPEG
-  // screenshot (a base64 data URI) alongside the page's elements. The two upload
-  // routes get room for their whole schema cap (see UPLOAD_BASE64_MAX).
-  const defaultJson = express.json({ limit: '12mb' });
+  // JSON bodies: the web agent's step posts a JPEG screenshot (a base64 data URI)
+  // alongside the page's elements, so it gets 12 MB; the two upload routes get room
+  // for their whole schema cap (see UPLOAD_BASE64_MAX); everything else is small.
+  const defaultJson = express.json({ limit: '4mb' });
+  const screenshotJson = express.json({ limit: '12mb' });
   const uploadJson = express.json({ limit: UPLOAD_BODY_LIMIT_BYTES });
   app.use((req, res, next) => {
-    const upload = req.method === 'POST' && UPLOAD_ROUTES.has(req.path.replace(/\/+$/, ''));
-    return (upload ? uploadJson : defaultJson)(req, res, next);
+    if (req.method !== 'POST') return defaultJson(req, res, next);
+    const route = req.path.replace(/\/+$/, '');
+    const parser = UPLOAD_ROUTES.has(route) ? uploadJson : SCREENSHOT_ROUTES.has(route) ? screenshotJson : defaultJson;
+    return parser(req, res, next);
   });
   app.use(routes);
 

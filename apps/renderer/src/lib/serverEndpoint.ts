@@ -29,6 +29,8 @@ export interface ResolverOptions {
   /** The first wait between attempts; each one after doubles it. */
   delayMs?: number;
   sleep?: (ms: number) => Promise<void>;
+  /** How long a failed lookup is answered from memory before the server is asked again. */
+  failureMemoryMs?: number;
 }
 
 export const SERVER_ATTEMPTS = 6;
@@ -54,6 +56,10 @@ export function createEndpointResolver(source: () => EndpointSource, options: Re
   const sleep = options.sleep ?? defaultSleep;
   let pending: Promise<ServerEndpoint> | null = null;
   let known: ServerEndpoint | null = null;
+  // A failed lookup is remembered briefly: a burst of callers shares one answer instead
+  // of each running the whole retry ladder.
+  let failed: { at: number; error: unknown } | null = null;
+  const failureMemoryMs = options.failureMemoryMs ?? 0;
 
   const lookup = async (): Promise<ServerEndpoint> => {
     const { server, fallbackBase } = source();
@@ -70,14 +76,17 @@ export function createEndpointResolver(source: () => EndpointSource, options: Re
 
   return {
     get() {
+      if (!pending && failed && Date.now() - failed.at < failureMemoryMs) return Promise.reject(failed.error);
       pending ??= lookup().then(
         (endpoint) => {
           known = endpoint;
+          failed = null;
           return endpoint;
         },
         (error: unknown) => {
-          // Not cached: the server may come up later, and the next request should find it.
+          // Not cached for long: the server may come up later, and a later request should find it.
           pending = null;
+          failed = { at: Date.now(), error };
           throw error;
         }
       );

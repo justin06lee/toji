@@ -214,7 +214,7 @@ export function BugReportSheet({ request, insetLeft = 0, onOpenUrl, onOpenSettin
 
   return createPortal(
     <motion.div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/25 p-6 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/25 p-6"
       style={{ paddingLeft: 24 + insetLeft }}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}

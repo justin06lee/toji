@@ -14,7 +14,11 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   AsyncShutdown: "resource://gre/modules/AsyncShutdown.sys.mjs",
   Subprocess: "resource://gre/modules/Subprocess.sys.mjs",
+  TojiMigrate: "resource:///modules/toji/TojiMigrate.sys.mjs",
 });
+
+const PATH_PREF = "toji.agent.loginPath";
+const RC_FILES = [".zshenv", ".zprofile", ".zshrc", ".profile", ".bash_profile", ".bashrc"];
 
 const BINARY_NAME = "toji-agent-server";
 const READY_PREFIX = "TOJI_SERVER_READY ";
@@ -42,12 +46,45 @@ async function isExecutable(path) {
 }
 
 /**
+ * What the login shell's PATH depends on: the shell, and when its rc files last
+ * changed. While that is the same, the PATH remembered from last time is used
+ * and no shell is spawned (sourcing a user's rc files can take most of a second).
+ */
+async function pathKey(shell, home) {
+  const parts = [shell];
+  for (const name of RC_FILES) {
+    try {
+      const info = await IOUtils.stat(PathUtils.join(home, name));
+      parts.push(`${name}=${info.lastModified}`);
+    } catch {
+      parts.push(`${name}=-`);
+    }
+  }
+  return parts.join("|");
+}
+
+/**
  * A GUI-launched app gets a bare PATH, and the coding-agent CLIs the server
  * drives (claude, codex, opencode…) live in the user's shell PATH. Ask the
- * login shell once; fall back to the usual install locations.
+ * login shell once per change of its rc files; fall back to the usual install
+ * locations.
  */
 async function loginPath() {
   const home = Services.env.get("HOME");
+  const shell = Services.env.get("SHELL") || "/bin/zsh";
+  const key = await pathKey(shell, home);
+  try {
+    const cached = JSON.parse(Services.prefs.getStringPref(PATH_PREF, ""));
+    if (cached?.key === key && typeof cached.path === "string" && cached.path) {
+      return cached.path;
+    }
+  } catch {}
+  const path = await askLoginShell(shell, home);
+  Services.prefs.setStringPref(PATH_PREF, JSON.stringify({ key, path }));
+  return path;
+}
+
+async function askLoginShell(shell, home) {
   const fallback = [
     `${home}/.local/bin`,
     `${home}/.bun/bin`,
@@ -60,7 +97,6 @@ async function loginPath() {
     "/usr/sbin",
     "/sbin",
   ].join(":");
-  const shell = Services.env.get("SHELL") || "/bin/zsh";
   try {
     const proc = await lazy.Subprocess.call({
       command: shell,
@@ -152,6 +188,8 @@ class AgentServer {
   }
 
   async #spawn() {
+    // After the Electron app, its agent server data moves in first (TojiMigrate).
+    await lazy.TojiMigrate.run();
     const binary = await this.#findBinary();
     if (!binary) {
       log("no agent server binary in the app; AI features are off");

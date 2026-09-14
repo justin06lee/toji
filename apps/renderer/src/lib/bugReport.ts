@@ -11,12 +11,15 @@ const REPLAY_KEY = 'toji.replay';
 /** Fired on this window when the setting changes; other windows hear 'storage'. */
 export const REPLAY_EVENT = 'toji-replay-change';
 
-/** The rolling recording is on unless it was switched off in Settings. */
+/**
+ * The rolling recording is off unless it was switched on in Settings: capturing a
+ * window at 15 frames a second is the costliest thing it can do while a page sits still.
+ */
 export function replayEnabled(): boolean {
   try {
-    return localStorage.getItem(REPLAY_KEY) !== 'off';
+    return localStorage.getItem(REPLAY_KEY) === 'on';
   } catch {
-    return true;
+    return false;
   }
 }
 

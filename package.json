@@ -2,7 +2,7 @@
   "name": "toji-agent-browser",
   "version": "0.3.0",
   "private": true,
-  "description": "Toji: a Chromium-based agent-first browser powered by a local CLI coding agent (Claude Code, Codex, opencode).",
+  "description": "Toji: an agent-first browser on Firefox's engine, with its own UI and a local CLI coding agent (Claude Code, Codex, opencode).",
   "type": "module",
   "main": "apps/desktop/main.cjs",
   "packageManager": "bun@1.3.13",
@@ -21,7 +21,8 @@
     "dev:web": "vite --host 127.0.0.1 --port 5173",
     "dev:server": "tsx watch apps/agent-server/src/index.ts",
     "dev:electron": "wait-on tcp:5173 tcp:8788 && cross-env ELECTRON_START_URL=http://127.0.0.1:5173 electron apps/desktop/main.cjs",
-    "build": "bun run typecheck && bun run build:server && bun run build:web",
+    "build": "bun run typecheck && bun run build:server:bin && bun run build:pages && bun run build:shell",
+    "build:electron": "bun run typecheck && bun run build:server && bun run build:web",
     "build:server": "bun scripts/build-server.ts",
     "build:server:bin": "bun scripts/build-server.ts --compile",
     "build:web": "vite build",
@@ -39,9 +40,9 @@
     "tor:check:electron": "node scripts/tor-live-check.cjs",
     "e2e:demo": "tsx scripts/e2e-demo.ts",
     "start:app": "concurrently -k -n server,desktop -c auto \"bun run start:server\" \"wait-on tcp:8788 && electron apps/desktop/main.cjs\"",
-    "package": "bun run build && electron-builder",
-    "package:dir": "bun run build && electron-builder --dir",
-    "check": "bun run typecheck && bun run smoke && bun run build && bun run e2e:demo"
+    "package": "bun run build:electron && electron-builder",
+    "package:dir": "bun run build:electron && electron-builder --dir",
+    "check": "bun run typecheck && bun run smoke && bun run build:electron && bun run e2e:demo"
   },
   "build": {
     "appId": "com.ezzy.toji",

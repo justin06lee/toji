@@ -206,8 +206,14 @@ function keepAwake(run, on) {
   } catch {}
 }
 
+const LOG_LIMIT = 200;
+
 function logTo(run, role, text) {
   run.log.push({ role, text });
+  // The spotlight copies the log on every render; an unlimited run keeps the tail.
+  if (run.log.length > LOG_LIMIT) {
+    run.log.splice(0, run.log.length - LOG_LIMIT);
+  }
   TojiAgent._render(run.tab.ownerDocument.defaultView);
 }
 

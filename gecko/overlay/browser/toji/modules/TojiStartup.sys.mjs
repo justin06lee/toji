@@ -72,11 +72,20 @@ export const TojiStartup = {
     // The proxy filter goes in first: nothing may load in a Tor container
     // before its route is enforced.
     lazy.TojiProxy.init();
-    lazy.webrtcUI.addPeerConnectionBlocker(blockPeerConnections);
     lazy.TojiContainers.ensureLoaded();
-    lazy.TojiContainers.wipeEphemeral().catch(e =>
-      console.error("[toji] wiping ephemeral containers failed", e)
-    );
+    // Nothing can load in an ephemeral container before a window exists, and the
+    // wipe (cookies, cache, quota storage) is a safety net for a crash: off the
+    // startup path, like the WebRTC blocker (webrtcUI is not a small module).
+    Services.tm.idleDispatchToMainThread(() => {
+      try {
+        lazy.webrtcUI.addPeerConnectionBlocker(blockPeerConnections);
+      } catch (e) {
+        console.error("[toji] webrtc blocker", e);
+      }
+      lazy.TojiContainers.wipeEphemeral().catch(e =>
+        console.error("[toji] wiping ephemeral containers failed", e)
+      );
+    }, 2000);
     try {
       lazy.TojiPages.init();
       lazy.TojiAsk.init();
@@ -97,12 +106,17 @@ export const TojiStartup = {
     } catch (e) {
       console.error("[toji] shell", e);
     }
-    // The agent server isn't needed for the first paint; start it when idle.
-    // After the Electron app, its agent server data moves in before the server
-    // starts (TojiMigrate); the rest of the move carries on in the background.
-    lazy.TojiMigrate.run().then(() =>
-      Services.tm.idleDispatchToMainThread(() => lazy.TojiAgentServer.start(), 3000)
-    );
+    // The agent server starts on first use (every consumer goes through
+    // whenReady), not at launch: a session that never asks the AI anything keeps
+    // no second process. toji.agent.autostart brings the warm start back. After
+    // the Electron app, its agent server data moves in before the server can
+    // start (TojiMigrate; the server waits for it); the rest of the move carries
+    // on in the background.
+    lazy.TojiMigrate.run().then(() => {
+      if (Services.prefs.getBoolPref("toji.agent.autostart", false)) {
+        Services.tm.idleDispatchToMainThread(() => lazy.TojiAgentServer.start(), 3000);
+      }
+    });
     Services.tm.idleDispatchToMainThread(() => lazy.TojiBugReport.prune(), 10000);
   },
 };

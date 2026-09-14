@@ -74,6 +74,9 @@ async function pruneSnapshots() {
   }
 }
 
+let savesSincePrune = 0;
+const PRUNE_EVERY = 20;
+
 export async function saveSession(session: ResearchSessionState) {
   const id = session.id;
   return enqueueForSession(id, async () => {
@@ -82,13 +85,15 @@ export async function saveSession(session: ResearchSessionState) {
     // Unique temp name so overlapping writers never share a temp path.
     const tmp = `${file}.${randomUUID()}.tmp`;
     try {
-      await fs.writeFile(tmp, JSON.stringify(session, null, 2));
+      // Compact: a session carries screenshots, and a run saves it every few hundred ms.
+      await fs.writeFile(tmp, JSON.stringify(session));
       await fs.rename(tmp, file);
     } catch (error) {
       await fs.unlink(tmp).catch(() => undefined);
       throw error;
     }
-    await pruneSnapshots();
+    // The retention cap is checked now and then, not with a directory scan per save.
+    if (savesSincePrune++ % PRUNE_EVERY === 0) await pruneSnapshots();
   });
 }
 

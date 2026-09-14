@@ -30,6 +30,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   TojiTor: "resource:///modules/toji/TojiTor.sys.mjs",
   TojiVault: "resource:///modules/toji/TojiVault.sys.mjs",
   TojiWindows: "resource:///modules/toji/TojiWindows.sys.mjs",
+  setTimeout: "resource://gre/modules/Timer.sys.mjs",
 });
 
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
@@ -43,6 +44,9 @@ const TAB_GROUP_KEY = "toji-group";
 let groupCounter = 0;
 
 /** The shell's own look, and the prefs it is kept in. */
+/** Tab attributes whose change the shell can show; the rest ("progress", "sharing"…) never trigger a snapshot. */
+const WATCHED_TAB_ATTRIBUTES = new Set(["label", "image", "busy", "soundplaying", "muted", "crashed", "pending", "selected", "usercontextid"]);
+
 const PREFS = {
   theme: "toji.theme",
   layout: "toji.layout",
@@ -111,14 +115,51 @@ const everyWindow = {
       }
     }, "toji-containers-changed");
     const PlacesUtils = ChromeUtils.importESModule("resource://gre/modules/PlacesUtils.sys.mjs").PlacesUtils;
+    // An import adds hundreds of bookmarks in a burst; the windows hear about it once,
+    // a moment later, and read one shared copy of the toolbar (see bookmarks()).
+    let bookmarksTimer = null;
     PlacesUtils.observers.addListener(
       ["bookmark-added", "bookmark-removed", "bookmark-moved", "bookmark-title-changed", "bookmark-url-changed"],
       () => {
-        for (const host of this.hosts()) {
-          host.events.bookmarks.emit();
+        bookmarksTree = null;
+        if (bookmarksTimer) {
+          return;
         }
+        bookmarksTimer = lazy.setTimeout(() => {
+          bookmarksTimer = null;
+          for (const host of this.hosts()) {
+            host.events.bookmarks.emit();
+          }
+        }, 150);
       }
     );
+    this.syncEdgeActor();
+    Services.prefs.addObserver(PREFS.bookmarksBar, () => this.syncEdgeActor());
+  },
+
+  /**
+   * The page-top-edge actor listens to every mouse move in every page, so it exists
+   * only while the bookmarks bar is unpinned — the one time the edge means anything.
+   */
+  syncEdgeActor() {
+    const wanted = Services.prefs.getStringPref(PREFS.bookmarksBar, "always") === "never";
+    if (wanted === edgeActorRegistered) {
+      return;
+    }
+    edgeActorRegistered = wanted;
+    if (!wanted) {
+      ChromeUtils.unregisterWindowActor("TojiEdge");
+      return;
+    }
+    ChromeUtils.registerWindowActor("TojiEdge", {
+      parent: { esModuleURI: "resource:///modules/toji/actors/TojiEdgeParent.sys.mjs" },
+      child: {
+        esModuleURI: "resource:///modules/toji/actors/TojiEdgeChild.sys.mjs",
+        events: { mousemove: { passive: true }, mouseout: { passive: true } },
+      },
+      matches: ["http://*/*", "https://*/*"],
+      messageManagerGroups: ["browsers"],
+    });
   },
   *hosts() {
     for (const win of Services.wm.getEnumerator("navigator:browser")) {
@@ -130,6 +171,29 @@ const everyWindow = {
   },
 };
 
+/** Everything in a snapshot the shell draws from, as one string to compare against the last one sent. */
+function stateKey(state) {
+  const parts = [state.containerId, state.selectedId, state.popup ? 1 : 0, JSON.stringify(state.container), JSON.stringify(state.groups)];
+  for (const t of state.tabs) {
+    parts.push(
+      t.id,
+      t.url,
+      t.title,
+      t.favicon,
+      t.busy ? 1 : 0,
+      t.audible ? 1 : 0,
+      t.muted ? 1 : 0,
+      t.canBack ? 1 : 0,
+      t.canForward ? 1 : 0,
+      t.errorPage,
+      t.crashed ? 1 : 0,
+      t.groupId,
+      t.throwaway ? 1 : 0
+    );
+  }
+  return parts.join("\u0001");
+}
+
 class Host {
   constructor(win) {
     this.win = win;
@@ -137,6 +201,7 @@ class Host {
     this.tabsById = new Map();
     this.next = 0;
     this.flushScheduled = false;
+    this.lastStateKey = null;
     // Tabs in a throwaway identity of their own (Reset context) -> that identity's id.
     this.throwaway = new Map();
     // New tabs whose switch leaves the keyboard where the shell put it.
@@ -254,17 +319,31 @@ class Host {
     };
   }
 
-  /** Coalesces a burst of tab events into one update for the shell. */
+  /**
+   * Coalesces a burst of tab events into one update for the shell, and sends nothing
+   * when nothing the shell shows has changed: a page load fires TabAttrModified and
+   * progress events many times a second, and each snapshot re-renders the whole shell.
+   */
   scheduleFlush() {
     if (this.flushScheduled) {
       return;
     }
     this.flushScheduled = true;
-    Promise.resolve().then(() => {
+    // Frame-aligned: a burst of events across several tasks (a page load) becomes one
+    // snapshot per frame at most, and the shell never draws more often than it is shown.
+    const later = this.win.closed ? cb => Promise.resolve().then(cb) : cb => this.win.requestAnimationFrame(cb);
+    later(() => {
       this.flushScheduled = false;
-      if (!this.win.closed) {
-        this.events.state.emit(this.state());
+      if (this.win.closed) {
+        return;
       }
+      const state = this.state();
+      const key = stateKey(state);
+      if (key === this.lastStateKey) {
+        return;
+      }
+      this.lastStateKey = key;
+      this.events.state.emit(state);
     });
   }
 
@@ -486,7 +565,9 @@ class Host {
 
   async bookmarks() {
     const P = this.win.PlacesUtils;
-    const tree = await P.promiseBookmarksTree(P.bookmarks.toolbarGuid);
+    // One Places query serves every window until a bookmark changes.
+    bookmarksTree ??= P.promiseBookmarksTree(P.bookmarks.toolbarGuid);
+    const tree = await bookmarksTree;
     const out = [];
     const walk = node => {
       for (const child of node?.children ?? []) {
@@ -786,9 +867,18 @@ class Host {
     // Tabs: every change the strip or address bar shows.
     const container = win.gBrowser.tabContainer;
     const flush = () => this.scheduleFlush();
-    for (const type of ["TabOpen", "TabSelect", "TabMove", "TabAttrModified", "TabShow", "TabHide", "TabPinned", "TabUnpinned", "TabBrowserInserted", "TabBrowserDiscarded"]) {
+    for (const type of ["TabOpen", "TabSelect", "TabMove", "TabShow", "TabHide", "TabPinned", "TabUnpinned", "TabBrowserInserted", "TabBrowserDiscarded"]) {
       container.addEventListener(type, flush);
     }
+    // Firefox fires TabAttrModified for "progress" on every network progress tick of a
+    // loading page (tens to hundreds of times a load); only the attributes the strip
+    // draws are worth a snapshot.
+    container.addEventListener("TabAttrModified", e => {
+      const changed = e.detail?.changed;
+      if (!changed || changed.some(a => WATCHED_TAB_ATTRIBUTES.has(a))) {
+        flush();
+      }
+    });
     container.addEventListener("TabClose", e => {
       const closing = e.target;
       for (const [id, tab] of this.tabsById) {
@@ -840,9 +930,29 @@ class Host {
       },
     });
 
-    // The pointer over the window's own chrome, for the drag notch and the bookmarks bar.
-    const cursor = (x, y, inside) => this.events.cursor.emit({ x, y, width: win.innerWidth, height: win.innerHeight, inside });
-    win.addEventListener("mousemove", e => cursor(e.clientX, e.clientY, true), { capture: true, passive: true });
+    // The pointer over the window's own chrome, for the drag notch and the bookmarks bar:
+    // one sample per frame at most, with the window's size read once per resize.
+    let size = { width: win.innerWidth, height: win.innerHeight };
+    win.addEventListener("resize", () => (size = { width: win.innerWidth, height: win.innerHeight }));
+    const cursor = (x, y, inside) => this.events.cursor.emit({ x, y, width: size.width, height: size.height, inside });
+    let pointerFrame = 0;
+    let pointer = null;
+    win.addEventListener(
+      "mousemove",
+      e => {
+        pointer = { x: e.clientX, y: e.clientY };
+        if (pointerFrame) {
+          return;
+        }
+        pointerFrame = win.requestAnimationFrame(() => {
+          pointerFrame = 0;
+          if (pointer) {
+            cursor(pointer.x, pointer.y, true);
+          }
+        });
+      },
+      { capture: true, passive: true }
+    );
     win.addEventListener("mouseout", e => {
       if (!e.relatedTarget || e.relatedTarget.localName === "browser") {
         cursor(e.clientX, e.clientY, false);
@@ -906,6 +1016,9 @@ class Host {
 }
 
 let registered = false;
+let edgeActorRegistered = false;
+/** The bookmarks toolbar's tree, shared by every window until a bookmark changes. */
+let bookmarksTree = null;
 
 export const TojiShell = {
   init() {
@@ -913,14 +1026,6 @@ export const TojiShell = {
       return;
     }
     registered = true;
-    ChromeUtils.registerWindowActor("TojiEdge", {
-      parent: { esModuleURI: "resource:///modules/toji/actors/TojiEdgeParent.sys.mjs" },
-      child: {
-        esModuleURI: "resource:///modules/toji/actors/TojiEdgeChild.sys.mjs",
-        events: { mousemove: { passive: true }, mouseout: { passive: true } },
-      },
-      messageManagerGroups: ["browsers"],
-    });
   },
 
   /** browser-window-domcontentloaded, from TojiWindows.init. */

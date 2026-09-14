@@ -24,15 +24,18 @@ export function outputDir(variable: string, fallback: string): string {
   return out;
 }
 
-/** Swap src/lib/publicAsset.ts for gecko/publicAsset.ts, which bundles public/ into assets/. */
-export function bundledPublicAssets(): Plugin {
+/**
+ * Swap src/lib/publicAsset.ts for a Gecko stand-in: gecko/publicAsset.ts (the pages, which
+ * bundle public/ into assets/) or the one given (the shell, which inlines only what it draws).
+ */
+export function bundledPublicAssets(replacement = BUNDLED_ASSETS): Plugin {
   return {
     name: 'toji-gecko-public-assets',
     enforce: 'pre',
     async resolveId(source, importer) {
       if (!importer || !/(^|\/)publicAsset$/.test(source)) return null;
       const resolved = await this.resolve(source, importer, { skipSelf: true });
-      return resolved?.id === SHARED_ASSETS ? BUNDLED_ASSETS : null;
+      return resolved?.id === SHARED_ASSETS ? replacement : null;
     }
   };
 }

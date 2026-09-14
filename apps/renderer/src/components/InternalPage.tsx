@@ -1657,7 +1657,7 @@ function BugReportSettings({ onReportBug }: { onReportBug?: () => void }) {
   // Under Gecko the switch only means something when the browser keeps a recording to
   // hand to the report page (replayClip); the Electron app records in this renderer.
   const showReplay = !viaBrowser || Boolean(toji.replayClip);
-  const [localOn, setLocalOn] = useState(() => (viaBrowser ? true : replayEnabled()));
+  const [localOn, setLocalOn] = useState(() => (viaBrowser ? false : replayEnabled()));
   const [account, setAccount] = useState<BugReportAccount | null>(null);
   const hasAccount = Boolean(bridge().bugReportAccount);
   useEffect(() => {
@@ -1670,7 +1670,7 @@ function BugReportSettings({ onReportBug }: { onReportBug?: () => void }) {
     window.addEventListener(REPLAY_EVENT, sync);
     return () => window.removeEventListener(REPLAY_EVENT, sync);
   }, [viaBrowser]);
-  const on = viaBrowser ? (settings?.replay ?? true) : localOn;
+  const on = viaBrowser ? (settings?.replay ?? false) : localOn;
   const canRecord = viaBrowser ? Boolean(settings) : isElectron();
   const setOn = (next: boolean) => {
     if (viaBrowser) void setBrowserSetting('replay', next);
@@ -1701,7 +1701,7 @@ function BugReportSettings({ onReportBug }: { onReportBug?: () => void }) {
                   : notHere()
                 : on
                   ? `Each window keeps a rolling ${REPLAY_SECONDS}-second recording of itself in memory, so a report can show what just happened. It is never saved, and only sent in a report you send. Private and Tor windows are not recorded.`
-                  : 'Off. Reports can still be written, with screenshots.'}
+                  : 'Off, so the window costs nothing while you read. Reports can still be written, with screenshots; switch this on to attach a clip of what just happened.'}
             </p>
           </div>
           <Switch checked={on && canRecord} disabled={!canRecord} onChange={setOn} label={`Keep the last ${REPLAY_SECONDS} seconds`} />

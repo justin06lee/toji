@@ -322,11 +322,13 @@ function applyContainer(win) {
 function hidePicker(win) {
   win.document.documentElement.removeAttribute("toji-picking");
   lazy.TojiShell.refresh(win);
+  lazy.TojiRecorder.refresh(win);
 }
 
 function showPicker(win) {
   win.document.documentElement.setAttribute("toji-picking", "true");
   lazy.TojiShell.refresh(win);
+  lazy.TojiRecorder.refresh(win);
 }
 
 /**
@@ -676,7 +678,7 @@ export const TojiWindows = {
     const pageUrl = browser.currentURI?.spec ?? "";
     const c = lazy.TojiContainers.byId(windows.get(win)?.containerId ?? "");
     const recordable = !!c && !c.ephemeral && c.egress !== "tor";
-    const replayOn = Services.prefs.getBoolPref("toji.replay", true);
+    const replayOn = Services.prefs.getBoolPref("toji.replay", false);
     const clip = replayOn && recordable ? lazy.TojiRecorder.clip(win).catch(() => null) : null;
     const screenshot = await lazy.TojiBugReport.captureWindow(win).catch(() => null);
     const unavailable = !replayOn ? "off" : !recordable ? "private" : clip ? null : "unsupported";
