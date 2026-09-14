@@ -149,7 +149,7 @@ async function readSettings() {
     searchEngine: current,
     searchEngines: engines,
     vaultAutosave: Services.prefs.getBoolPref(PREF_VAULT_AUTOSAVE, true),
-    replay: Services.prefs.getBoolPref(PREF_REPLAY, true),
+    replay: Services.prefs.getBoolPref(PREF_REPLAY, false),
     adblock: Services.prefs.getBoolPref(PREF_ADBLOCK, true),
   };
 }

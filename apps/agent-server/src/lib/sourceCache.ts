@@ -69,22 +69,42 @@ export async function getCachedSource(queryFingerprint: string, url: string): Pr
   return { ...entry.note, cacheHit: true };
 }
 
-export function putCachedSource(queryFingerprint: string, url: string, note: SourceNote) {
-  writeChain = writeChain
-    .then(async () => {
-      const state = await loadCache();
-      state.entries[cacheKey(queryFingerprint, url)] = {
-        savedAt: new Date().toISOString(),
-        note: { ...note, cacheHit: false }
-      };
-      state.entries = pruneEntries(state.entries);
-      await ensureDir();
-      const temp = `${cachePath}.tmp`;
-      await fs.writeFile(temp, JSON.stringify(state, null, 2));
-      await fs.rename(temp, cachePath);
-    })
-    .catch((error) => {
-      console.error('[toji] putCachedSource write failed:', error instanceof Error ? error.message : error);
-    });
-  return writeChain;
+const FLUSH_DELAY_MS = 1000;
+let flushTimer: ReturnType<typeof setTimeout> | undefined;
+let flushWaiters: Array<() => void> = [];
+
+/** Writes the whole cache once, a moment after the last put of a burst (a research run puts dozens). */
+function scheduleFlush(): Promise<void> {
+  return new Promise((resolve) => {
+    flushWaiters.push(resolve);
+    if (flushTimer) return;
+    flushTimer = setTimeout(() => {
+      flushTimer = undefined;
+      const waiters = flushWaiters;
+      flushWaiters = [];
+      writeChain = writeChain
+        .then(async () => {
+          const state = await loadCache();
+          state.entries = pruneEntries(state.entries);
+          await ensureDir();
+          const temp = `${cachePath}.tmp`;
+          await fs.writeFile(temp, JSON.stringify(state));
+          await fs.rename(temp, cachePath);
+        })
+        .catch((error) => {
+          console.error('[toji] source cache write failed:', error instanceof Error ? error.message : error);
+        })
+        .then(() => waiters.forEach((w) => w()));
+    }, FLUSH_DELAY_MS);
+    flushTimer.unref?.();
+  });
+}
+
+export async function putCachedSource(queryFingerprint: string, url: string, note: SourceNote) {
+  const state = await loadCache();
+  state.entries[cacheKey(queryFingerprint, url)] = {
+    savedAt: new Date().toISOString(),
+    note: { ...note, cacheHit: false }
+  };
+  return scheduleFlush();
 }

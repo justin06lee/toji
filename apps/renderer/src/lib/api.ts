@@ -9,10 +9,15 @@ export const API_BASE = import.meta.env.VITE_AGENT_SERVER_URL || DEFAULT_BASE;
 
 // In the Gecko browser the bridge says where the server is and hands over its token;
 // elsewhere this settles at once on API_BASE with no token, exactly as before.
-const endpoint = createEndpointResolver(() => {
-  const toji = bridge();
-  return { server: toji.server ? () => toji.server!() : undefined, fallbackBase: API_BASE };
-});
+const endpoint = createEndpointResolver(
+  () => {
+    const toji = bridge();
+    return { server: toji.server ? () => toji.server!() : undefined, fallbackBase: API_BASE };
+  },
+  // A server that isn't running is not asked again for a few seconds: one retry ladder
+  // per burst of callers, not one per caller.
+  { failureMemoryMs: 5000 }
+);
 
 /** The server's base URL and token, once the bridge has answered. */
 export function serverEndpoint(): Promise<ServerEndpoint> {
@@ -252,43 +257,3 @@ export function exportUrl(id: string, format: 'markdown' | 'json' = 'markdown') 
   return withToken(`${base}/api/research/${id}/export?format=${format}`, token);
 }
 
-export function connectEvents(onEvent: (event: ServerEvent) => void, onState?: (connected: boolean) => void) {
-  let closedByClient = false;
-  let socket: WebSocket | null = null;
-  let reconnectTimer: number | undefined;
-
-  const retry = () => {
-    if (!closedByClient) reconnectTimer = window.setTimeout(connect, 1200);
-  };
-
-  function connect() {
-    void endpoint.get().then((resolved) => {
-      if (closedByClient) return;
-      socket = new WebSocket(eventsUrl(resolved));
-      socket.onopen = () => onState?.(true);
-      socket.onclose = () => {
-        onState?.(false);
-        retry();
-      };
-      socket.onerror = () => onState?.(false);
-      socket.onmessage = (message) => {
-        try {
-          onEvent(JSON.parse(message.data) as ServerEvent);
-        } catch {
-          // Ignore malformed events.
-        }
-      };
-    }, () => {
-      onState?.(false);
-      retry();
-    });
-  }
-
-  connect();
-
-  return () => {
-    closedByClient = true;
-    if (reconnectTimer) window.clearTimeout(reconnectTimer);
-    socket?.close();
-  };
-}

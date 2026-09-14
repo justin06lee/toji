@@ -185,8 +185,8 @@ svg {
    peripheral vision without the twitch of a blinking dot. */
 .agent-tab-cursor { animation: toji-agent-cursor 1.6s ease-in-out infinite; }
 @keyframes toji-agent-cursor {
-  0%, 100% { opacity: 1; transform: translate(0, 0); }
-  50% { opacity: 0.45; transform: translate(0.5px, 0.5px); }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 @media (prefers-reduced-motion: reduce) {
   .agent-tab-cursor { animation: none; }

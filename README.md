@@ -107,10 +107,12 @@ make test       # unit tests (Vitest)
 
 The first build is long (about three hours on an 8 GB M1); later ones reuse the objdir and
 sccache. `gecko/build.ts` downloads and verifies the pinned source release, applies
-`gecko/patches`, copies `gecko/overlay` into the tree and drives `./mach`.
+`gecko/patches`, deletes Firefox's own UI from the tree (`gecko/strip.txt`), copies
+`gecko/overlay` into the tree and drives `./mach`. `bun run build` builds what the browser
+ships from this repository: the agent server binary, Toji's pages and the window shell.
 
-The Electron app still builds while the migration finishes: `make electron`,
-`make electron-dev`, `make electron-install`.
+The Electron app is legacy: `make electron`, `make electron-dev`, `make electron-install`
+(`bun run build:electron`) still build it, and `apps/desktop` stays until it is retired.
 
 `make tor-check` is the one that proves the isolation claim rather than asserting it: it
 boots an actual Tor, sends traffic for two containers through their assigned SocksPorts, and
@@ -185,13 +187,15 @@ browser works — profiles, Tor, the vault, the agent — for as long as you lik
 **Help › Report a Bug…** (⌥⇧I on macOS, Alt+Shift+I elsewhere, or the button in Settings)
 files an issue on this repository, in one of two forms:
 
-- **The last 15 seconds.** Each window keeps a rolling recording of itself in memory. It is
-  Chromium's own capture of the window, so it needs no screen-recording permission, and it
-  is encoded as it goes (hardware H.264 where the machine has it) and trimmed to what a
-  15-second clip needs. Opening the report freezes it, and the sheet plays back exactly
-  what would be sent. Nothing is written to disk or sent anywhere unless you submit it.
-  Private and Tor windows are never recorded: while a window is private or on Tor it is not
-  captured at all, and what it held before is dropped. Settings can switch the recording off.
+- **The last 15 seconds** (off by default; the switch is in Settings › Bug reports). With it
+  on, the focused window keeps a rolling recording of itself in memory: the browser's own
+  capture of the window, so it needs no screen-recording permission, encoded as it goes
+  (hardware H.264 where the machine has it) and trimmed to what a 15-second clip needs.
+  Opening the report freezes it, and the sheet plays back exactly what would be sent.
+  Nothing is written to disk or sent anywhere unless you submit it. Only the focused window
+  records, and never a private or Tor window: while a window is private or on Tor it is not
+  captured at all, and what it held before is dropped. It is off by default because a
+  capture at 15 frames a second is the costliest thing a window can do while a page sits still.
 - **A written report**: a title, what happened, and images, whether pasted, dropped,
   picked, or a screenshot of the window taken just before the sheet opened.
 
@@ -229,19 +233,20 @@ Worth being clear, because privacy tools invite assumptions:
 ## Layout
 
 ```
-apps/desktop/       Electron main process
-  policy.cjs        per-container egress, applied from the partition name
-  tor.cjs           Tor lifecycle, SocksPort pool, control port
-  vault.cjs         OS-keychain-backed encrypted credential storage
-  page-redaction.cjs strips form values from agent observations
-  context-menu.cjs  the page right-click menu (View Page Source gets its own
-                    window — a <webview> refuses to navigate to view-source:)
-  guest-preload.cjs runs in every page: login detection and fill
-  browser-promos.cjs removes "switch to our browser" promos (Web Store, search engines)
-  browser-import.cjs bookmarks, passwords and profiles from other browsers
-  bug-report.cjs    files bug reports as GitHub issues; the token stays in main
-apps/renderer/      React UI (tabs, containers, settings)
-apps/agent-server/  local HTTP server: inference, page generation, memory
+gecko/              Toji's browser, built from Firefox ESR source (docs/gecko.md)
+  build.ts          download, verify, patch, strip, overlay, ./mach build, package, install
+  strip.txt         Firefox's UI, deleted from the tree before the build
+  patches/          build-config and front-end edits to what stays
+  overlay/browser/toji/
+    modules/        Toji's chrome code: containers, Tor, vault, agent, pages, the shell host
+    actors/         the page side of the vault, the agent, the page-top edge
+    content/        toji.css (the window), prompts.css, fonts, profile avatars
+    toji.cfg        locked prefs: Mozilla's services off, Tor fail-closed, battery
+  lib/              pure logic the modules import (Vitest-tested)
+  test/             the checks make check runs against a built app
+apps/renderer/      React UI: the window shell (gecko/), the pages, shared components
+apps/agent-server/  the sidecar: inference, page generation, memory (bun build --compile)
+apps/desktop/       the legacy Electron main process
 ```
 
 ## License

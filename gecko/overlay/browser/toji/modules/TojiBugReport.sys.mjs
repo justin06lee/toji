@@ -259,9 +259,12 @@ class BugReports {
       }
     };
     win.gBrowser.tabContainer.addEventListener("TabClose", onClose);
+    const onUnload = () => this.#closeTray(win, reportId);
+    win.addEventListener("unload", onUnload, { once: true });
     pending.cleanup = () => {
       win.gBrowser.removeTabsProgressListener(listener);
       win.gBrowser.tabContainer.removeEventListener("TabClose", onClose);
+      win.removeEventListener("unload", onUnload);
     };
     update();
   }

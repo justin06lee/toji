@@ -26,11 +26,38 @@ export class TojiVaultChild extends JSWindowActorChild {
   #observer = null;
   #lastReport = null;
   #lastCapture = { account: "", at: 0 };
+  #scanFrame = 0;
+  #lastCandidates = null;
+  #lastVisible = [];
 
   #passwordFields() {
-    return Array.from(this.document.querySelectorAll(PASSWORD_SELECTOR)).filter(
-      isVisible
-    );
+    // The visibility check flushes layout; it runs again only when the page's set of
+    // password inputs changed since the last look, not on every mutation.
+    const candidates = Array.from(this.document.querySelectorAll(PASSWORD_SELECTOR));
+    const same =
+      this.#lastCandidates &&
+      candidates.length === this.#lastCandidates.length &&
+      candidates.every((el, i) => el === this.#lastCandidates[i]);
+    if (!same) {
+      this.#lastCandidates = candidates;
+      this.#lastVisible = candidates.filter(isVisible);
+    }
+    return this.#lastVisible;
+  }
+
+  /** One scan per frame, however many mutations a page makes. */
+  #scheduleReport() {
+    if (this.#scanFrame) {
+      return;
+    }
+    const win = this.contentWindow;
+    if (!win) {
+      return;
+    }
+    this.#scanFrame = win.requestAnimationFrame(() => {
+      this.#scanFrame = 0;
+      this.#report();
+    });
   }
 
   #usernameFor(passwordField) {
@@ -69,6 +96,8 @@ export class TojiVaultChild extends JSWindowActorChild {
   }
 
   #capture() {
+    // A submit needs the page as it is now, not the last frame's answer.
+    this.#lastCandidates = null;
     const field = this.#passwordFields()[0];
     if (!field?.value) {
       return;
@@ -95,7 +124,7 @@ export class TojiVaultChild extends JSWindowActorChild {
         this.#report();
         if (!this.#observer && this.document.documentElement) {
           this.#observer = new this.contentWindow.MutationObserver(() =>
-            this.#report()
+            this.#scheduleReport()
           );
           this.#observer.observe(this.document.documentElement, {
             childList: true,

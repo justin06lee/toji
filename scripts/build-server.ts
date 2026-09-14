@@ -118,6 +118,8 @@ async function compileBinary(args: string[]) {
       outfile,
       '--minify-syntax',
       '--minify-whitespace',
+      // Precompiled bytecode: the sidecar starts without parsing its bundle.
+      '--bytecode',
       // A compiled Bun binary otherwise reads .env and bunfig.toml from whatever
       // directory it is started in, before any of our code runs: config would depend on
       // where the browser spawned us, and a stray bunfig.toml could preload code.

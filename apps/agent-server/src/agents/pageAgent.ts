@@ -211,11 +211,11 @@ export async function* streamAnswerPage(query: string, signal?: AbortSignal, sou
   // No model at all is the demo case; a model that failed gets told why.
   const outcome: PageOutcome = failure ? 'error' : 'demo';
   const html = failure ? errorPageHtml(clean, backend, failure) : fallbackPageHtml(clean);
-  const step = 120;
+  // Not model output: nothing to pace. A few large chunks keep the stream's shape.
+  const step = 16 * 1024;
   for (let i = 0; i < html.length; i += step) {
     if (signal?.aborted) return outcome;
     yield html.slice(i, i + step);
-    await new Promise((resolve) => setTimeout(resolve, 26));
   }
   return outcome;
 }

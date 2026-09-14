@@ -144,7 +144,12 @@ export class ReplayRecorder {
       this.width = width;
       this.height = height;
       stream.getVideoTracks()[0]?.addEventListener('ended', () => this.fail(new Error('the window capture ended')));
-      this.timer = window.setInterval(() => this.tick(), Math.round(1000 / FPS));
+      // The frame timer runs only while this window is focused and visible; a window in
+      // the background has no timer at all rather than a timer that skips.
+      window.addEventListener('focus', this.arm);
+      window.addEventListener('blur', this.arm);
+      document.addEventListener('visibilitychange', this.arm);
+      this.arm();
       this.setState('recording');
     } catch (error) {
       this.fail(error);
@@ -186,10 +191,22 @@ export class ReplayRecorder {
     return { blob, type: blob.type, seconds: (last.timestamp + last.duration) / 1_000_000, width: this.width, height: this.height, poster: await poster };
   }
 
+  /** Arms the frame timer while the window is focused and visible, and drops it otherwise. */
+  private arm = (): void => {
+    const live = document.visibilityState !== 'hidden' && document.hasFocus() && !this.stopped;
+    if (live && this.timer === null) {
+      this.needKey = true;
+      this.timer = window.setInterval(() => this.tick(), Math.round(1000 / FPS));
+    } else if (!live && this.timer !== null) {
+      window.clearInterval(this.timer);
+      this.timer = null;
+    }
+  };
+
   private tick(): void {
     const { video, encoder } = this;
     if (!video || !encoder || encoder.state !== 'configured') return;
-    if (this.pauses.size || document.visibilityState === 'hidden' || video.readyState < 2) {
+    if (this.pauses.size || document.visibilityState === 'hidden' || !document.hasFocus() || video.readyState < 2) {
       this.needKey = true;
       return;
     }

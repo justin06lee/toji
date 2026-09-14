@@ -6,9 +6,10 @@
 // place (see TojiShell.sys.mjs, which lays them out where the viewport reports it is).
 
 import { AnimatePresence } from 'motion/react';
+import { useMotionValue } from 'motion/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AddressRow } from '../src/components/AddressRow';
-import { AgentCursor, type AgentCursorAt } from '../src/components/AgentCursor';
+import { AgentCursor } from '../src/components/AgentCursor';
 import { AgentSpotlight } from '../src/components/AgentSpotlight';
 import { BookmarksBar } from '../src/components/BookmarksBar';
 import { BrowserFrame } from '../src/components/BrowserFrame';
@@ -46,15 +47,34 @@ const rectOf = (el: Element): ViewportRect => {
  * nothing about its tab changed. Motion's reordering follows tabs by object identity,
  * so a tab dragged along the strip must stay the same object while Firefox moves it.
  */
+const sameInfo = (a: ShellTabInfo, b: ShellTabInfo) =>
+  a.id === b.id &&
+  a.url === b.url &&
+  a.title === b.title &&
+  a.favicon === b.favicon &&
+  a.busy === b.busy &&
+  a.audible === b.audible &&
+  a.muted === b.muted &&
+  a.canBack === b.canBack &&
+  a.canForward === b.canForward &&
+  a.errorPage === b.errorPage &&
+  a.crashed === b.crashed &&
+  a.groupId === b.groupId &&
+  a.throwaway === b.throwaway;
+
 function useStableTabs(infos: ShellTabInfo[], containerId: string, typed: Record<string, string>): BrowserTab[] {
-  const cache = useRef(new Map<string, { key: string; tab: BrowserTab }>());
+  const cache = useRef(new Map<string, { info: ShellTabInfo; containerId: string; query: string | undefined; tab: BrowserTab }>());
   return useMemo(() => {
-    const next = new Map<string, { key: string; tab: BrowserTab }>();
+    const next = new Map<string, { info: ShellTabInfo; containerId: string; query: string | undefined; tab: BrowserTab }>();
     const tabs = infos.map((info) => {
-      const context = { containerId, groupId: info.groupId, query: typed[info.id] };
-      const key = JSON.stringify([info, context]);
+      const query = typed[info.id];
       const hit = cache.current.get(info.id);
-      const entry = hit && hit.key === key ? hit : { key, tab: toBrowserTab(info, context) };
+      // Compared field by field: a snapshot arrives on every tab event, and serialising
+      // every tab each time would cost more than the render it saves.
+      const entry =
+        hit && hit.containerId === containerId && hit.query === query && sameInfo(hit.info, info)
+          ? hit
+          : { info, containerId, query, tab: toBrowserTab(info, { containerId, groupId: info.groupId, query }) };
       next.set(info.id, entry);
       return entry.tab;
     });
@@ -161,14 +181,28 @@ export function GeckoShell({ root }: { root: HTMLElement }) {
       }
     }
   }, [host]);
-  useLayoutEffect(measure);
+  // Measured after the renders that can move the hole (the layout, the sidebar, the bars,
+  // a popup) rather than after every one: each measurement is a forced layout of the
+  // window's document, and the shell re-renders on every tab event.
+  useLayoutEffect(measure, [measure, layout, sidebarOpen, bookmarksPinned, state.popup, containerId, torMode]);
   useEffect(() => {
-    const observer = new ResizeObserver(measure);
+    // A live resize reports the hole once per frame, never once per observer callback:
+    // every report moves the page's box, and moving it relays out the page.
+    let frame = 0;
+    const schedule = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        measure();
+      });
+    };
+    const observer = new ResizeObserver(schedule);
     if (holeRef.current) observer.observe(holeRef.current);
-    window.addEventListener('resize', measure);
+    window.addEventListener('resize', schedule);
     return () => {
+      if (frame) cancelAnimationFrame(frame);
       observer.disconnect();
-      window.removeEventListener('resize', measure);
+      window.removeEventListener('resize', schedule);
     };
   }, [measure, containerId]);
 
@@ -299,15 +333,25 @@ export function GeckoShell({ root }: { root: HTMLElement }) {
   useEffect(() => host.onVaultPrompt((prompt, error) => setVaultPrompt(prompt ? { prompt, error } : null)), [host]);
 
   // ---- The web agent ----
-  const [, setAgentTick] = useState(0);
+  const [agentTick, setAgentTick] = useState(0);
   useEffect(() => host.onAgent(() => setAgentTick((n) => n + 1)), [host]);
-  const [agentCursor, setAgentCursor] = useState<AgentCursorAt | null>(null);
+  // The pointer glides through motion values, so its every step moves the cursor without
+  // a render of the shell; only appearing, leaving and a press go through state.
+  const agentX = useMotionValue(0);
+  const agentY = useMotionValue(0);
+  const [agentCursor, setAgentCursor] = useState<{ tick: number } | null>(null);
   useEffect(
     () =>
-      host.onAgentPointer((pointer) =>
-        setAgentCursor((c) => (pointer ? { x: pointer.x, y: pointer.y, tick: (c?.tick ?? 0) + (pointer.pressed ? 1 : 0) } : null))
-      ),
-    [host]
+      host.onAgentPointer((pointer) => {
+        if (!pointer) {
+          setAgentCursor(null);
+          return;
+        }
+        agentX.set(pointer.x);
+        agentY.set(pointer.y);
+        setAgentCursor((c) => (c && !pointer.pressed ? c : { tick: (c?.tick ?? 0) + (pointer.pressed ? 1 : 0) }));
+      }),
+    [host, agentX, agentY]
   );
   useEffect(
     () =>
@@ -322,7 +366,9 @@ export function GeckoShell({ root }: { root: HTMLElement }) {
     setAgentLimitsState(next);
     host.setAgentLimits(next);
   };
-  const agentTabIds = new Set(tabs.filter((t) => host.agentState(t.id).running).map((t) => t.id));
+  // Asked of the browser once per agent event, not once per tab per render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const agentTabIds = useMemo(() => new Set(tabs.filter((t) => host.agentState(t.id).running).map((t) => t.id)), [host, tabs, agentTick]);
 
   // ---- Answer pages: the sources under them ----
   const [sources, setSources] = useState<Record<string, PageSource[]>>({});
@@ -640,7 +686,7 @@ export function GeckoShell({ root }: { root: HTMLElement }) {
           />
         )}
       </AnimatePresence>
-      <AgentCursor cursor={agentCursor} />
+      <AgentCursor cursor={agentCursor ? { tick: agentCursor.tick, x: agentX, y: agentY } : null} />
       {tabMenu && (
         <TabContextMenu
           menu={tabMenu}

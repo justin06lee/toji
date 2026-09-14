@@ -226,6 +226,11 @@ export const TojiAsk = {
   markFresh(browser) {
     if (browser?.browserId) {
       freshBrowsers.add(browser.browserId);
+      // A reload that never becomes an answer page (stopped, gone elsewhere, tab
+      // closed) must not leave the mark for a later browser with the same id.
+      const id = browser.browserId;
+      const tab = browser.ownerDocument?.defaultView?.gBrowser?.getTabForBrowser?.(browser);
+      tab?.addEventListener("TabClose", () => freshBrowsers.delete(id), { once: true });
     }
   },
 };

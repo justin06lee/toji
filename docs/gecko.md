@@ -424,6 +424,57 @@ engine and what the open pages need. Two ways were weighed, with the ESR 153 sou
    `experience.ts` walks the whole window after a page loads and fails if any element
    outside the shell and the pages paints anything with a box on screen.
 
+## Performance: nothing runs while a page sits still
+
+The rule (the user's, 2026-09-14): performance is an expectation, not a feature. Pages
+must be smooth and Toji must never appear in macOS's "Apps using significant energy".
+Four audits (the shell, the chrome modules, the agent server, and the Firefox tree) found
+what cost, and this is what holds now:
+
+- **The rolling 15-second recording is opt-in** (`toji.replay`, default off, the switch in
+  Settings › Bug reports). It was on for every window: a full-window `drawSnapshot` at
+  15 frames a second, H.264-encoded, forever — the single costliest thing in the product,
+  running while the user read a static page. With it on, only the focused window of a
+  recordable container has a frame timer at all (`TojiRecorder` arms and disarms it on
+  `activate`/`deactivate`/`visibilitychange`, the pref, and the picker); a background
+  window has no timer, not a timer that skips. The Electron app's recorder does the same.
+- **The agent server starts on first use**, not at launch (`toji.agent.autostart` brings
+  the warm start back); every consumer already goes through `whenReady()`. The login
+  shell's PATH (sourcing a user's rc files can take most of a second) is remembered in a
+  pref keyed on the shell and its rc files' mtimes. The sidecar itself no longer probes
+  every coding-agent CLI at boot, reads saved research sessions only when the research API
+  is first used, exits on its stdin closing (the browser's pipe) with a 15 s poll behind
+  it instead of a 2 s one, writes its caches compactly and once per burst, and ships as
+  Bun bytecode (no top-level await in `index.ts` for that reason).
+- **The shell re-renders only when something it shows changed.** `TojiShell` ignores
+  `TabAttrModified` for attributes it doesn't draw (`progress` fires on every network
+  progress tick), coalesces a burst into one snapshot per frame, and compares the snapshot
+  against the last one sent before emitting. In the shell, the viewport is measured after
+  the renders that can move it (not after every render, which forced layout twice per tab
+  event), a live resize reports the hole once per frame, the agent's pointer glides through
+  motion values (no render per sample), the tab list is compared field by field, and the
+  omnibox keeps one `ResizeObserver` for its life.
+- **The vault's page actor scans once per frame at most** and flushes layout only when the
+  page's set of password inputs changed; it and the page-edge actor attach to web pages
+  only, and the edge actor exists only while the bookmarks bar is unpinned (the one time the
+  page's top edge means anything).
+- **Every request's proxy decision is synchronous** outside a Tor container (it was a
+  promise and a deferred channel start per image, script and font).
+- **Nothing over the page blurs it**: the spotlight and report sheet no longer put
+  `backdrop-filter` over the whole window (the page underneath repaints behind it every
+  frame), and their panels are opaque. The agent's tab mark breathes in opacity only.
+- **The shell bundle carries only what it draws**: its own asset list
+  (`apps/renderer/gecko/publicAsset.shell.ts`), so the 256px mark (68 KB inlined) is out and
+  the tab slot gets a 32px one; `connectEvents` (no caller) is gone.
+- **Startup**: the ephemeral-container wipe and the WebRTC blocker run from an idle
+  callback, not before the first window.
+- **Prefs** (`toji.cfg`): `browser.sessionstore.interval` 30 s,
+  `browser.pagethumbnails.capturing_disabled`, `browser.lowMemoryResponseMask` 1 with
+  `browser.tabs.unloadOnLowMemory`. Checked and already right: the new-tab preload is off
+  because `AboutNewTab.newTabURL` is overridden, the process priority manager and hardware
+  video decoding are on, the native compositor is on, `network.predictor.*` no longer
+  exists in 153.
+
 ## Phases
 
 | # | Phase | Branch | State |

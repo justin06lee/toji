@@ -8,9 +8,11 @@
 // they come (WebCodecs, hardware H.264 first) into a buffer that keeps only what
 // a clip can use; nothing is written anywhere until a report sends it.
 //
-// Never recorded: Private and Tor windows (ephemeral or Tor containers, and
-// hold-to-Tor), a window that isn't the focused one, or anything while the
-// Settings switch is off (toji.replay).
+// Off unless the Settings switch is on (toji.replay, default off): a capture at 15
+// frames a second is the costliest thing a browser window can do while a page sits
+// still. Never recorded: Private and Tor windows (ephemeral or Tor containers, and
+// hold-to-Tor), or a window that isn't the focused one — the frame timer is armed
+// only while this is the focused window of a recordable container.
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
@@ -62,6 +64,7 @@ class WindowRecorder {
   #codec = null;
   #decoderConfig = null;
   #timer = null;
+  #setup = null;
   #busy = false;
   #width = 0;
   #height = 0;
@@ -76,27 +79,71 @@ class WindowRecorder {
     this.#win = win;
   }
 
-  #paused() {
+  /** Whether this window may be recording right now. */
+  #allowed() {
     const win = this.#win;
-    if (!Services.prefs.getBoolPref(PREF, true)) {
-      return true;
+    if (!Services.prefs.getBoolPref(PREF, false)) {
+      return false;
     }
     if (Services.focus.activeWindow !== win || win.document.hidden) {
-      return true;
+      return false;
     }
     if (win.document.documentElement.hasAttribute("toji-picking")) {
-      return true;
+      return false;
     }
     const id = lazy.TojiWindows.containerOf(win);
     const c = id ? lazy.TojiContainers.byId(id) : null;
-    return !c || c.ephemeral || c.egress === "tor";
+    return !!c && !c.ephemeral && c.egress !== "tor";
   }
 
-  async start() {
-    const win = this.#win;
-    if (this.state !== "idle") {
+  /**
+   * Makes the capture match #allowed(): armed (a frame timer) only while this is the
+   * focused window of a recordable container with the switch on, and otherwise no timer
+   * at all — a window in the background costs nothing. The encoder is set up on the
+   * first arm (a codec probe) and kept.
+   */
+  async refresh() {
+    if (this.state === "unsupported" || this.state === "failed") {
       return;
     }
+    if (!this.#allowed()) {
+      this.#disarm();
+      return;
+    }
+    if (!this.#encoder) {
+      if (this.#setup) {
+        return;
+      }
+      this.#setup = this.#prepare().finally(() => (this.#setup = null));
+      await this.#setup;
+      if (!this.#encoder || !this.#allowed()) {
+        return;
+      }
+    }
+    if (this.#timer === null) {
+      this.#needKey = true;
+      this.#timer = this.#win.setInterval(() => this.#tick(), Math.round(1000 / FPS));
+      this.state = "recording";
+    }
+  }
+
+  /** Alias kept for callers that only ever asked the recorder to start. */
+  start() {
+    return this.refresh();
+  }
+
+  #disarm() {
+    if (this.#timer !== null) {
+      this.#win.clearInterval(this.#timer);
+      this.#timer = null;
+    }
+    if (this.state === "recording") {
+      this.state = "paused";
+    }
+  }
+
+  async #prepare() {
+    const win = this.#win;
     if (typeof win.VideoEncoder === "undefined" || typeof win.VideoFrame === "undefined") {
       this.state = "unsupported";
       return;
@@ -118,8 +165,7 @@ class WindowRecorder {
     });
     this.#encoder.configure(codec.config);
     this.stats = { frames: 0, captureMs: 0, skippedBusy: 0, since: Date.now() };
-    this.#timer = win.setInterval(() => this.#tick(), Math.round(1000 / FPS));
-    this.state = "recording";
+    this.state = "paused";
   }
 
   async #tick() {
@@ -128,8 +174,9 @@ class WindowRecorder {
     if (!encoder || encoder.state !== "configured") {
       return;
     }
-    if (this.#paused()) {
-      this.#needKey = true;
+    if (!this.#allowed()) {
+      // The pref or focus moved between events: stop ticking until the next refresh.
+      this.#disarm();
       return;
     }
     if (this.#busy) {
@@ -255,24 +302,59 @@ class WindowRecorder {
 }
 
 const recorders = new WeakMap();
+const windows = new Set();
+let prefObserved = false;
+
+function observePref() {
+  if (prefObserved) {
+    return;
+  }
+  prefObserved = true;
+  Services.prefs.addObserver(PREF, () => {
+    for (const win of windows) {
+      recorders.get(win)?.refresh().catch(e => console.warn("[toji:replay]", e));
+    }
+  });
+}
 
 export const TojiRecorder = {
   initWindow(win) {
     const recorder = new WindowRecorder(win);
     recorders.set(win, recorder);
+    windows.add(win);
+    observePref();
+    // Only the focused window of a recordable container records, and only while the
+    // switch is on (off by default): the capture is armed and disarmed by these events,
+    // never left ticking in a window nobody is looking at.
+    const refresh = () => recorder.refresh().catch(e => console.warn("[toji:replay]", e));
+    win.addEventListener("activate", refresh);
+    win.addEventListener("deactivate", refresh);
+    win.document.addEventListener("visibilitychange", refresh);
     // Starting costs a codec probe; do it once the window has settled.
-    win.setTimeout(() => recorder.start().catch(e => console.warn("[toji:replay]", e)), 3000);
-    win.addEventListener("unload", () => recorder.stop(), { once: true });
+    win.setTimeout(refresh, 3000);
+    win.addEventListener(
+      "unload",
+      () => {
+        windows.delete(win);
+        recorder.stop();
+      },
+      { once: true }
+    );
   },
 
   get(win) {
     return recorders.get(win) ?? null;
   },
 
+  /** The window's container changed (chosen, or hold-to-Tor): record, or stop. */
+  refresh(win) {
+    recorders.get(win)?.refresh().catch(e => console.warn("[toji:replay]", e));
+  },
+
   /** The report's clip for this window (and a poster), or null. */
   async clip(win) {
     const recorder = recorders.get(win);
-    if (!recorder || recorder.state !== "recording") {
+    if (!recorder || (recorder.state !== "recording" && recorder.state !== "paused")) {
       return null;
     }
     return recorder.clip();
