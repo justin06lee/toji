@@ -1,0 +1,340 @@
+--- a/browser/components/migration/MigrationUtils.sys.mjs
++++ b/browser/components/migration/MigrationUtils.sys.mjs
+@@ -14,10 +14,14 @@
+   PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
+   Sqlite: "resource://gre/modules/Sqlite.sys.mjs",
+   setTimeout: "resource://gre/modules/Timer.sys.mjs",
+-  MigrationWizardConstants:
+-    "chrome://browser/content/migration/migration-wizard-constants.mjs",
+ });
+ 
++// Toji: the wizard's constants (its content is gone) that the progress
++// reporting below still names.
++lazy.MigrationWizardConstants = {
++  PROGRESS_VALUE: Object.freeze({ LOADING: 1, SUCCESS: 2, WARNING: 3, INFO: 4 }),
++};
++
+ ChromeUtils.defineLazyGetter(
+   lazy,
+   "gCanGetPermissionsOnPlatformPromise",
+@@ -49,18 +53,10 @@
+ ]);
+ 
+ const MIGRATOR_MODULES = Object.freeze({
+-  EdgeProfileMigrator: {
+-    moduleURI: "resource:///modules/EdgeProfileMigrator.sys.mjs",
+-    platforms: ["win"],
+-  },
+   FirefoxProfileMigrator: {
+     moduleURI: "resource:///modules/FirefoxProfileMigrator.sys.mjs",
+     platforms: ["linux", "macosx", "win"],
+   },
+-  FirefoxSelectableProfileMigrator: {
+-    moduleURI: "resource:///modules/FirefoxSelectableProfileMigrator.sys.mjs",
+-    platforms: ["linux", "macosx", "win"],
+-  },
+   SafariProfileMigrator: {
+     moduleURI: "resource:///modules/SafariProfileMigrator.sys.mjs",
+     platforms: ["macosx"],
+@@ -146,39 +142,7 @@
+       180
+     );
+ 
+-    ChromeUtils.registerWindowActor("MigrationWizard", {
+-      parent: {
+-        esModuleURI: "resource:///actors/MigrationWizardParent.sys.mjs",
+-      },
+-
+-      child: {
+-        esModuleURI: "resource:///actors/MigrationWizardChild.sys.mjs",
+-        events: {
+-          "MigrationWizard:RequestState": { wantUntrusted: true },
+-          "MigrationWizard:BeginMigration": { wantUntrusted: true },
+-          "MigrationWizard:RequestSafariPermissions": { wantUntrusted: true },
+-          "MigrationWizard:SelectManualPasswordFile": { wantUntrusted: true },
+-          "MigrationWizard:OpenAboutAddons": { wantUntrusted: true },
+-          "MigrationWizard:PermissionsNeeded": { wantUntrusted: true },
+-          "MigrationWizard:GetPermissions": { wantUntrusted: true },
+-          "MigrationWizard:OpenURL": { wantUntrusted: true },
+-          "MigrationWizard:LaunchMacOSPasswordsApp": { wantUntrusted: true },
+-        },
+-      },
+-
+-      includeChrome: true,
+-      allFrames: true,
+-      matches: [
+-        "about:welcome",
+-        "about:welcome?*",
+-        "about:preferences",
+-        "about:settings",
+-        "chrome://browser/content/migration/migration-dialog-window.html",
+-        "chrome://browser/content/spotlight.html",
+-        "about:firefoxview",
+-      ],
+-      remoteTypes: ["parent", "privilegedabout"],
+-    });
++    // Toji: Firefox's migration wizard is gone; Toji imports through its own pages.
+ 
+     ChromeUtils.defineLazyGetter(this, "IS_LINUX_SNAP_PACKAGE", () => {
+       if (
+--- a/browser/components/sessionstore/SessionStore.sys.mjs
++++ b/browser/components/sessionstore/SessionStore.sys.mjs
+@@ -176,13 +176,12 @@
+ ChromeUtils.defineESModuleGetters(lazy, {
+   AboutNewTab: "resource:///modules/AboutNewTab.sys.mjs",
+   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
+-  AIWindow:
+-    "moz-src:///browser/components/aiwindow/ui/modules/AIWindow.sys.mjs",
++  AIWindow: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   AsyncShutdown: "resource://gre/modules/AsyncShutdown.sys.mjs",
+   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
+   DevToolsShim: "chrome://devtools-startup/content/DevToolsShim.sys.mjs",
+   E10SUtils: "resource://gre/modules/E10SUtils.sys.mjs",
+-  HomePage: "resource:///modules/HomePage.sys.mjs",
++  HomePage: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   JsonSchema: "resource://gre/modules/JsonSchema.sys.mjs",
+   PrivacyFilter: "resource://gre/modules/sessionstore/PrivacyFilter.sys.mjs",
+   sessionStoreLogger: "resource:///modules/sessionstore/SessionLogger.sys.mjs",
+@@ -5599,7 +5598,7 @@
+       delete winData.hidden;
+     }
+ 
+-    const sidebarUIState = aWindow.SidebarController.getUIState();
++    const sidebarUIState = aWindow.SidebarController?.getUIState();
+     if (sidebarUIState) {
+       winData.sidebar = structuredClone(sidebarUIState);
+     }
+@@ -6866,8 +6865,8 @@
+     if (!aSidebar || isPopup) {
+       return;
+     }
+-    aWindow.SidebarController.markSessionRestoreStateReceived();
+-    aWindow.SidebarController.updateUIState(aSidebar);
++    aWindow.SidebarController?.markSessionRestoreStateReceived();
++    aWindow.SidebarController?.updateUIState(aSidebar);
+   },
+ 
+   /**
+--- a/browser/components/sessionstore/SessionStartup.sys.mjs
++++ b/browser/components/sessionstore/SessionStartup.sys.mjs
+@@ -33,7 +33,6 @@
+ import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
+ 
+ ChromeUtils.defineESModuleGetters(lazy, {
+-  BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.sys.mjs",
+   CrashMonitor: "resource://gre/modules/CrashMonitor.sys.mjs",
+   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
+   SessionFile: "resource:///modules/sessionstore/SessionFile.sys.mjs",
+@@ -202,7 +201,6 @@
+         `initialState contains ${pinnedTabCount} pinned tabs`
+       );
+ 
+-      lazy.BrowserUsageTelemetry.updateMaxTabPinnedCount(pinnedTabCount);
+     }, 60000);
+ 
+     let isAutomaticRestoreEnabled = this.isAutomaticRestoreEnabled();
+--- a/toolkit/components/extensions/ExtensionShortcuts.sys.mjs
++++ b/toolkit/components/extensions/ExtensionShortcuts.sys.mjs
+@@ -430,7 +430,7 @@
+     }
+     doc.documentElement.appendChild(keyset);
+     if (sidebarKey) {
+-      window.SidebarController.updateShortcut({ keyId: sidebarKey.id });
++      window.SidebarController?.updateShortcut({ keyId: sidebarKey.id });
+     }
+     this.keysetsMap.set(window, keyset);
+   }
+--- a/browser/components/extensions/parent/ext-menus.js
++++ b/browser/components/extensions/parent/ext-menus.js
+@@ -1054,20 +1054,8 @@
+       const menu = window.document.getElementById(id);
+       menu.addEventListener("popupshowing", menuTracker);
+     }
+-
+-    const sidebarHeader = window.document.getElementById(
+-      "sidebar-switcher-target"
+-    );
+-    sidebarHeader.addEventListener("SidebarShown", menuTracker.onSidebarShown);
+-
+-    await window.SidebarController.promiseInitialized;
+ 
+-    if (
+-      !window.closed &&
+-      window.SidebarController.currentID === "viewBookmarksSidebar"
+-    ) {
+-      menuTracker.onSidebarShown({ currentTarget: sidebarHeader });
+-    }
++    // Toji: no sidebar, so no bookmarks-sidebar context menu to track.
+   },
+ 
+   cleanupWindow(window) {
+@@ -1076,12 +1064,7 @@
+       menu.removeEventListener("popupshowing", this);
+     }
+ 
+-    const sidebarHeader = window.document.getElementById(
+-      "sidebar-switcher-target"
+-    );
+-    sidebarHeader.removeEventListener("SidebarShown", this.onSidebarShown);
+-
+-    if (window.SidebarController.currentID === "viewBookmarksSidebar") {
++    if (window.SidebarController?.currentID === "viewBookmarksSidebar") {
+       let sidebarBrowser = window.SidebarController.browser;
+       sidebarBrowser.removeEventListener("load", this.onSidebarShown);
+       if (
+--- a/browser/components/extensions/parent/ext-windows.js
++++ b/browser/components/extensions/parent/ext-windows.js
+@@ -5,7 +5,7 @@
+ "use strict";
+ 
+ ChromeUtils.defineESModuleGetters(this, {
+-  HomePage: "resource:///modules/HomePage.sys.mjs",
++  HomePage: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
+ });
+ 
+@@ -344,7 +344,7 @@
+               createData.incognito &&
+               !PrivateBrowsingUtils.permanentPrivateBrowsing
+                 ? "about:privatebrowsing"
+-                : HomePage.get().split("|", 1)[0];
++                : HomePage.get(null).split("|", 1)[0];
+             args.appendElement(mkstr(url));
+             isOnlyMozExtensionUrl = ExtensionUtils.isExtensionUrl(url);
+ 
+--- a/browser/components/extensions/parent/ext-chrome-settings-overrides.js
++++ b/browser/components/extensions/parent/ext-chrome-settings-overrides.js
+@@ -18,7 +18,7 @@
+   ExtensionSettingsStore:
+     "resource://gre/modules/ExtensionSettingsStore.sys.mjs",
+   SearchService: "moz-src:///toolkit/components/search/SearchService.sys.mjs",
+-  HomePage: "resource:///modules/HomePage.sys.mjs",
++  HomePage: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+ });
+ 
+ const DEFAULT_SEARCH_STORE_TYPE = "default_search";
+--- a/browser/modules/BrowserWindowTracker.sys.mjs
++++ b/browser/modules/BrowserWindowTracker.sys.mjs
+@@ -19,9 +19,8 @@
+ });
+ 
+ ChromeUtils.defineESModuleGetters(lazy, {
+-  AIWindow:
+-    "moz-src:///browser/components/aiwindow/ui/modules/AIWindow.sys.mjs",
+-  HomePage: "resource:///modules/HomePage.sys.mjs",
++  AIWindow: "resource:///modules/toji/FirefoxStubs.sys.mjs",
++  HomePage: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
+ });
+ 
+--- a/toolkit/actors/NetErrorParent.sys.mjs
++++ b/toolkit/actors/NetErrorParent.sys.mjs
+@@ -14,7 +14,7 @@
+ 
+ ChromeUtils.defineESModuleGetters(lazy, {
+   BrowserUtils: "resource://gre/modules/BrowserUtils.sys.mjs",
+-  HomePage: "resource:///modules/HomePage.sys.mjs",
++  HomePage: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+ });
+ 
+ class CaptivePortalObserver {
+--- a/browser/components/BrowserContentHandler.sys.mjs
++++ b/browser/components/BrowserContentHandler.sys.mjs
+@@ -17,15 +17,12 @@
+   BrowserUtils: "resource://gre/modules/BrowserUtils.sys.mjs",
+   FirstStartup: "resource://gre/modules/FirstStartup.sys.mjs",
+   HeadlessShell: "moz-src:///browser/components/shell/HeadlessShell.sys.mjs",
+-  HomePage: "resource:///modules/HomePage.sys.mjs",
+-  LaterRun: "resource:///modules/LaterRun.sys.mjs",
++  HomePage: "resource:///modules/toji/FirefoxStubs.sys.mjs",
++  LaterRun: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
+   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
+-  SearchUIUtils: "moz-src:///browser/components/search/SearchUIUtils.sys.mjs",
+   SessionStartup: "resource:///modules/sessionstore/SessionStartup.sys.mjs",
+   ShellService: "moz-src:///browser/components/shell/ShellService.sys.mjs",
+-  SpecialMessageActions:
+-    "resource://messaging-system/lib/SpecialMessageActions.sys.mjs",
+   UpdatePing: "resource://gre/modules/UpdatePing.sys.mjs",
+ });
+ 
+@@ -419,16 +416,15 @@
+     subject => subject == win
+   );
+ 
+-  lazy.SearchUIUtils.loadSearch({
+-    window: win,
+-    searchText,
+-    usePrivateWindow:
+-      lazy.PrivateBrowsingUtils.isInTemporaryAutoStartMode ||
+-      lazy.PrivateBrowsingUtils.isWindowPrivate(win),
+-    triggeringPrincipal: lazy.gSystemPrincipal,
+-    policyContainer: win.gBrowser.selectedBrowser.policyContainer,
+-    sapSource: "system",
+-  }).catch(console.error);
++  // Toji: Firefox's search UI is gone; the default engine's submission loads.
++  let engine = await Services.search.getDefault().catch(() => null);
++  let submission = engine?.getSubmission(searchText);
++  if (submission) {
++    win.gBrowser.selectedBrowser.loadURI(submission.uri, {
++      postData: submission.postData,
++      triggeringPrincipal: lazy.gSystemPrincipal,
++    });
++  }
+ }
+ 
+ function spinForLastUpdateInstalled() {
+--- a/browser/components/shell/StartupOSIntegration.sys.mjs
++++ b/browser/components/shell/StartupOSIntegration.sys.mjs
+@@ -23,8 +23,6 @@
+ });
+ 
+ ChromeUtils.defineESModuleGetters(lazy, {
+-  FirefoxBridgeExtensionUtils:
+-    "resource:///modules/FirefoxBridgeExtensionUtils.sys.mjs",
+   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
+   ShellService: "moz-src:///browser/components/shell/ShellService.sys.mjs",
+   WindowsLaunchOnLogin: "resource://gre/modules/WindowsLaunchOnLogin.sys.mjs",
+@@ -173,14 +171,7 @@
+     if (!Services.prefs.getBoolPref("browser.firefoxbridge.enabled", false)) {
+       return;
+     }
+-    let { defaultProfile, currentProfile } = lazy.profileService;
+-    if (defaultProfile && currentProfile == defaultProfile) {
+-      await lazy.FirefoxBridgeExtensionUtils.ensureRegistered();
+-    } else {
+-      lazy.log.debug(
+-        "FirefoxBridgeExtensionUtils failed to register due to non-default current profile."
+-      );
+-    }
++    // Toji: the Firefox bridge extension (a Windows feature) is gone.
+   },
+ 
+   // Silently pin Firefox to the start menu on first run when using MSIX on a
+--- a/toolkit/components/pictureinpicture/PictureInPicture.sys.mjs
++++ b/toolkit/components/pictureinpicture/PictureInPicture.sys.mjs
+@@ -14,10 +14,9 @@
+ });
+ 
+ ChromeUtils.defineESModuleGetters(lazy, {
+-  ASRouter:
+-    // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
+-    "resource:///modules/asrouter/ASRouter.sys.mjs",
+-  PageActions: "resource:///modules/PageActions.sys.mjs",
++  // Toji: Firefox's messaging system and page actions are gone; stand-ins answer.
++  ASRouter: "resource:///modules/toji/FirefoxStubs.sys.mjs",
++  PageActions: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
+ });
+ 
+--- a/browser/modules/BrowserUIUtils.sys.mjs
++++ b/browser/modules/BrowserUIUtils.sys.mjs
+@@ -2,7 +2,7 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+-import { UrlbarPrefs } from "moz-src:///browser/components/urlbar/UrlbarPrefs.sys.mjs";
++import { UrlbarPrefs } from "resource:///modules/toji/FirefoxStubs.sys.mjs";
+ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
+ 
+ export var BrowserUIUtils = {

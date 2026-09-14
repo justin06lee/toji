@@ -1,0 +1,20 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# Toji (gecko/overlay): the tab model, without Firefox's all-tabs menu, tab
+# previews, group editor, tab notes and AI grouping.
+
+with Files("**"):
+    BUG_COMPONENT = ("Firefox", "Tabbed Browser")
+
+JAR_MANIFESTS += ["jar.mn"]
+
+MOZ_SRC_FILES += [
+    "AsyncTabSwitcher.sys.mjs",
+    "GroupsList.sys.mjs",
+    "NewTabPagePreloading.sys.mjs",
+    "OpenInTabsUtils.sys.mjs",
+    "TabMetrics.sys.mjs",
+    "TabUnloader.sys.mjs",
+]

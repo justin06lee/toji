@@ -1,0 +1,143 @@
+--- a/browser/components/tabbrowser/content/tabbrowser.js
++++ b/browser/components/tabbrowser/content/tabbrowser.js
+@@ -182,8 +182,9 @@
+ 
+     init() {
+       this.tabContainer = document.getElementById("tabbrowser-tabs");
+-      this.tabGroupMenu = document.getElementById("tab-group-editor");
+-      this.tabNoteMenu = document.getElementById("tab-note-menu");
++      // Toji: Firefox's group editor and tab notes are gone; groups are the shell's.
++      this.tabGroupMenu = null;
++      this.tabNoteMenu = null;
+       this.tabbox = document.getElementById("tabbrowser-tabbox");
+       this.tabpanels = document.getElementById("tabbrowser-tabpanels");
+       this.pinnedTabsContainer = document.getElementById(
+@@ -192,26 +193,22 @@
+       this.splitViewCommandSet = document.getElementById("splitViewCommands");
+ 
+       ChromeUtils.defineESModuleGetters(this, {
+-        ASRouter: "resource:///modules/asrouter/ASRouter.sys.mjs",
++        ASRouter: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+         AsyncTabSwitcher:
+           "moz-src:///browser/components/tabbrowser/AsyncTabSwitcher.sys.mjs",
+         OpenInTabsUtils:
+           "moz-src:///browser/components/tabbrowser/OpenInTabsUtils.sys.mjs",
+         PictureInPicture: "resource://gre/modules/PictureInPicture.sys.mjs",
+-        SmartTabGroupingManager:
+-          "moz-src:///browser/components/tabbrowser/SmartTabGrouping.sys.mjs",
+-        SponsorProtection:
+-          "moz-src:///browser/components/newtab/SponsorProtection.sys.mjs",
++        SmartTabGroupingManager: "resource:///modules/toji/FirefoxStubs.sys.mjs",
++        SponsorProtection: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+         TabMetrics:
+           "moz-src:///browser/components/tabbrowser/TabMetrics.sys.mjs",
+         TabStateFlusher:
+           "resource:///modules/sessionstore/TabStateFlusher.sys.mjs",
+-        TaskbarTabsUtils:
+-          "resource:///modules/taskbartabs/TaskbarTabsUtils.sys.mjs",
+-        TaskbarTabs: "resource:///modules/taskbartabs/TaskbarTabs.sys.mjs",
+-        UrlbarUtils: "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs",
+-        UrlbarProviderOpenTabs:
+-          "moz-src:///browser/components/urlbar/UrlbarProviderOpenTabs.sys.mjs",
++        TaskbarTabsUtils: "resource:///modules/toji/FirefoxStubs.sys.mjs",
++        TaskbarTabs: "resource:///modules/toji/FirefoxStubs.sys.mjs",
++        UrlbarUtils: "resource:///modules/toji/FirefoxStubs.sys.mjs",
++        UrlbarProviderOpenTabs: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+         FaviconUtils: "moz-src:///toolkit/modules/FaviconUtils.sys.mjs",
+         KeyboardLockUtils: "resource://gre/modules/KeyboardLockUtils.sys.mjs",
+       });
+@@ -219,7 +216,6 @@
+         return new Localization(
+           [
+             "browser/tabbrowser.ftl",
+-            "browser/taskbartabs.ftl",
+             "branding/brand.ftl",
+           ],
+           true
+@@ -3801,7 +3797,7 @@
+       }
+ 
+       if (!color) {
+-        color = this.tabGroupMenu.nextUnusedColor;
++        color = this.tabGroupMenu?.nextUnusedColor ?? "blue";
+       }
+ 
+       if (!id) {
+@@ -3880,8 +3876,8 @@
+         telemetrySource: this.TabMetrics.METRIC_SOURCE.UNKNOWN,
+       }
+     ) {
+-      if (this.tabGroupMenu.panel.state != "closed") {
+-        this.tabGroupMenu.panel.hidePopup(options.animate);
++      if (this.tabGroupMenu?.panel.state != "closed") {
++        this.tabGroupMenu?.panel.hidePopup(options.animate);
+       }
+ 
+       if (!options.skipPermitUnload) {
+@@ -8269,7 +8265,7 @@
+     }
+ 
+     on_TabGroupCreateByUser(aEvent) {
+-      this.tabGroupMenu.openCreateModal(aEvent.target);
++      this.tabGroupMenu?.openCreateModal(aEvent.target);
+     }
+ 
+     on_TabGrouped(aEvent) {
+@@ -10917,7 +10913,7 @@
+     // When using the tab context menu to create a group from the all tabs
+     // panel, make sure we close that panel so that it doesn't obscure the tab
+     // group creation panel.
+-    gTabsPanel.hideAllTabsPanel();
++    globalThis.gTabsPanel?.hideAllTabsPanel();
+   },
+ 
+   moveSplitViewToNewGroup() {
+@@ -10949,7 +10945,7 @@
+     // When using the tab context menu to create a group from the all tabs
+     // panel, make sure we close that panel so that it doesn't obscure the tab
+     // group creation panel.
+-    gTabsPanel.hideAllTabsPanel();
++    globalThis.gTabsPanel?.hideAllTabsPanel();
+   },
+ 
+   /**
+@@ -11078,6 +11074,6 @@
+ };
+ 
+ ChromeUtils.defineESModuleGetters(TabContextMenu, {
+-  GenAI: "resource:///modules/GenAI.sys.mjs",
+-  TabNotes: "moz-src:///browser/components/tabnotes/TabNotes.sys.mjs",
++  GenAI: "resource:///modules/toji/FirefoxStubs.sys.mjs",
++  TabNotes: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+ });
+--- a/browser/components/tabbrowser/content/tabs.js
++++ b/browser/components/tabbrowser/content/tabs.js
+@@ -794,7 +794,7 @@
+       // open the tab group context menu as if the label had DOM focus.
+       // The button property is used to differentiate between key and mouse.
+       if (event.button == 0 && isTabGroupLabel(this.ariaFocusedItem)) {
+-        gBrowser.tabGroupMenu.openEditModal(this.ariaFocusedItem.group);
++        gBrowser.tabGroupMenu?.openEditModal(this.ariaFocusedItem.group);
+         event.preventDefault();
+       }
+     }
+--- a/browser/components/tabbrowser/content/tabgroup.js
++++ b/browser/components/tabbrowser/content/tabgroup.js
+@@ -114,7 +114,7 @@
+       this.#labelContainerElement.addEventListener("mouseout", this);
+       this.#labelElement.addEventListener("contextmenu", e => {
+         e.preventDefault();
+-        gBrowser.tabGroupMenu.openEditModal(this);
++        gBrowser.tabGroupMenu?.openEditModal(this);
+         return false;
+       });
+ 
+@@ -684,7 +684,7 @@
+       if (isToggleElement && event.button === 0) {
+         event.preventDefault();
+         this.collapsed = !this.collapsed;
+-        gBrowser.tabGroupMenu.close();
++        gBrowser.tabGroupMenu?.close();
+ 
+         /** @type {GleanCounter} */
+         let interactionMetric = this.collapsed

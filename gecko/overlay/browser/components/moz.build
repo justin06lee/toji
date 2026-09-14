@@ -1,0 +1,51 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# Toji's list of browser components (gecko/overlay). Firefox's UI components
+# are deleted from the tree (gecko/strip.txt); what is built is the engine's
+# behaviour and Toji's own code.
+
+with Files("**"):
+    BUG_COMPONENT = ("Firefox", "General")
+
+DIRS += [
+    "about",
+    "attribution",
+    "customizableui",
+    "downloads",
+    "enterprisepolicies",
+    "extensions",
+    "migration",
+    "permissions",
+    "pictureinpicture",
+    "places",
+    "prompts",
+    "protections",
+    "protocolhandler",
+    "sessionstore",
+    "shell",
+    "tabbrowser",
+    "webrtc",
+]
+
+DIRS += ["build"]
+
+EXTRA_COMPONENTS += [
+    "BrowserComponents.manifest",
+]
+
+EXTRA_JS_MODULES += [
+    "BrowserContentHandler.sys.mjs",
+    "BrowserGlue.sys.mjs",
+    "distribution.sys.mjs",
+]
+
+MOZ_SRC_FILES += [
+    "DesktopActorRegistry.sys.mjs",
+    "ProfileDataUpgrader.sys.mjs",
+]
+
+XPCOM_MANIFESTS += [
+    "components.conf",
+]

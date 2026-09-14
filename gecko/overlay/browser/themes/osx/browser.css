@@ -1,0 +1,25 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+/* Toji (gecko/overlay): chrome://browser/skin/ for the browser window. Firefox's
+   toolbars, tabs, panels and their theme are gone; the window's UI is Toji's
+   shell (chrome://toji/content/toji.css and the shell's own stylesheet). What is
+   left here styles the engine's surfaces: the content area and the frames the
+   engine still draws in it (tab-modal prompts, crash and error pages), and the
+   permission and add-on prompts hung from the shell's address bar. */
+
+@import url("chrome://global/skin/design-system/toolbar.css");
+@import url("chrome://browser/skin/browser-colors.css");
+@import url("chrome://browser/skin/tabbrowser/content-area.css");
+@import url("chrome://browser/skin/tabbrowser/fullscreen-and-pointerlock.css");
+@import url("chrome://browser/skin/notification-icons.css");
+@import url("chrome://browser/skin/addon-notification.css");
+@import url("chrome://browser/skin/identity-credential-notification.css");
+
+/* Firefox's hidden tab strip: no layout of its own. */
+#tabbrowser-tabs,
+#pinned-tabs-container,
+#tabbrowser-arrowscrollbox {
+  min-height: 0;
+}

@@ -1,0 +1,186 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# Toji (gecko/overlay): the macOS menu bar, as the Electron app's — File, Edit,
+# View, Window, Help. The application menu (About, Settings, Services, Hide,
+# Quit) is built by macOS from the items it finds here by id. Toji adds
+# Help › Report a Bug… at runtime (TojiBugReport). Firefox's History,
+# Bookmarks, Profiles and Tools menus are gone.
+
+       <menubar id="main-menubar">
+          <script src="chrome://browser/content/browser-menubar.js" />
+            <menu id="file-menu" data-l10n-id="menu-file">
+              <menupopup id="menu_FilePopup">
+                <menuitem id="menu_newNavigator"
+                          key="key_newNavigator"
+                          command="cmd_newNavigator" data-l10n-id="menu-file-new-window"/>
+                <menuitem id="menu_newPrivateWindow"
+                          command="Tools:PrivateBrowsing"
+                          key="key_privatebrowsing" data-l10n-id="menu-file-new-private-window"/>
+                <menuseparator/>
+                <menuitem id="menu_newNavigatorTab"
+                          command="cmd_newNavigatorTab"
+                          key="key_newNavigatorTab" data-l10n-id="menu-file-new-tab"/>
+                <menuitem id="menu_openFile"
+                          command="Browser:OpenFile"
+                          key="openFileKb" data-l10n-id="menu-file-open-file"/>
+                <menuitem id="menu_close"
+                          key="key_close"
+                          command="cmd_close" data-l10n-id="menu-file-close-tab" data-l10n-args='{"tabCount": 1}'/>
+                <menuseparator/>
+                <menuitem id="menu_closeWindow"
+                          command="cmd_closeWindow"
+                          key="key_closeWindow" data-l10n-id="menu-file-close-window"/>
+                <menuseparator/>
+                <menuitem id="menu_savePage"
+                          key="key_savePage"
+                          command="Browser:SavePage" data-l10n-id="menu-file-save-page"/>
+                <menuitem id="menu_print"
+                          key="printKb"
+                          command="cmd_print" data-l10n-id="menu-file-print"/>
+                <menuitem id="menu_FileQuitItem"
+#ifdef XP_MACOSX
+                          data-l10n-id="menu-quit-mac"
+#else
+                          data-l10n-id="menu-quit"
+#endif
+                          key="key_quitApplication"
+                          command="cmd_quitApplication"/>
+#ifdef XP_MACOSX
+<!-- nsMenuBarX hides these and uses them to build the Application menu. -->
+<!-- macOS 13 changed "Preferences" to "Settings" so one of these gets picked. -->
+                <menuitem id="menu_preferences"
+                          data-l10n-id="menu-application-preferences"
+                          key="key_preferencesCmdMac"/>
+                <menuitem id="menu_settings"
+                          data-l10n-id="menu-application-settings"
+                          key="key_preferencesCmdMac"/>
+                <menuitem id="menu_mac_services" data-l10n-id="menu-application-services"/>
+                <menuitem id="menu_mac_hide_app" data-l10n-id="menu-application-hide-this" key="key_hideThisAppCmdMac"/>
+                <menuitem id="menu_mac_hide_others" data-l10n-id="menu-application-hide-other" key="key_hideOtherAppsCmdMac"/>
+                <menuitem id="menu_mac_show_all" data-l10n-id="menu-application-show-all"/>
+                <menuitem id="menu_mac_touch_bar" data-l10n-id="menu-application-touch-bar"/>
+#endif
+              </menupopup>
+            </menu>
+
+            <menu id="edit-menu" data-l10n-id="menu-edit">
+              <menupopup id="menu_EditPopup">
+                <menuitem id="menu_undo"
+                          key="key_undo"
+                          command="cmd_undo" data-l10n-id="text-action-undo"/>
+                <menuitem id="menu_redo"
+                          key="key_redo"
+                          command="cmd_redo" data-l10n-id="text-action-redo"/>
+                <menuseparator/>
+                <menuitem id="menu_cut"
+                          key="key_cut"
+                          command="cmd_cut" data-l10n-id="text-action-cut"/>
+                <menuitem id="menu_copy"
+                          key="key_copy"
+                          command="cmd_copy" data-l10n-id="text-action-copy"/>
+                <menuitem id="menu_paste"
+                          key="key_paste"
+                          command="cmd_paste" data-l10n-id="text-action-paste"/>
+                <menuitem id="menu_delete"
+                          key="key_delete"
+                          command="cmd_delete" data-l10n-id="text-action-delete"/>
+                <menuseparator/>
+                <menuitem id="menu_selectAll"
+                          key="key_selectAll"
+                          command="cmd_selectAll" data-l10n-id="text-action-select-all"/>
+                <menuseparator hidden="true" id="textfieldDirection-separator"/>
+                <menuitem id="textfieldDirection-swap"
+                          command="cmd_switchTextDirection"
+                          key="key_switchTextDirection"
+                          hidden="true" data-l10n-id="menu-edit-bidi-switch-text-direction"/>
+#ifdef XP_UNIX
+#ifndef XP_MACOSX
+                <menuseparator/>
+                <menuitem id="menu_preferences"
+                          data-l10n-id="menu-settings"
+                          />
+#endif
+#endif
+              </menupopup>
+            </menu>
+
+            <menu id="view-menu" data-l10n-id="menu-view">
+              <menupopup id="menu_viewPopup">
+                <menu id="viewFullZoomMenu" data-l10n-id="menu-view-full-zoom">
+                  <menupopup>
+                    <menuitem id="menu_zoomEnlarge"
+                              key="key_fullZoomEnlarge"
+                              command="cmd_fullZoomEnlarge" data-l10n-id="menu-view-full-zoom-enlarge"/>
+                    <menuitem id="menu_zoomReduce"
+                              key="key_fullZoomReduce"
+                              command="cmd_fullZoomReduce" data-l10n-id="menu-view-full-zoom-reduce"/>
+                    <menuseparator/>
+                    <menuitem id="menu_zoomReset"
+                              key="key_fullZoomReset"
+                              command="cmd_fullZoomReset" data-l10n-id="menu-view-full-zoom-actual-size"/>
+                    <menuseparator/>
+                    <menuitem id="toggle_zoom"
+                              type="checkbox"
+                              command="cmd_fullZoomToggle"
+                              observes="cmd_fullZoomToggle"
+                              data-l10n-id="menu-view-full-zoom-toggle"/>
+                  </menupopup>
+                </menu>
+                <menuitem id="repair-text-encoding"
+                          disabled="true"
+                          data-l10n-id="menu-view-repair-text-encoding"/>
+                <menuseparator/>
+#ifdef XP_MACOSX
+                <menuitem id="enterFullScreenItem"
+                          key="key_enterFullScreen"
+                          data-l10n-id="menu-view-enter-full-screen"/>
+                <menuitem id="exitFullScreenItem"
+                          key="key_exitFullScreen"
+                          hidden="true" data-l10n-id="menu-view-exit-full-screen"/>
+#else
+                <menuitem id="fullScreenItem"
+                          key="key_enterFullScreen"
+                          type="checkbox"
+                          command="View:FullScreen"
+                          observes="View:FullScreen"
+                          data-l10n-id="menu-view-full-screen"/>
+#endif
+                <menuseparator hidden="true" id="documentDirection-separator"/>
+                <menuitem id="documentDirection-swap"
+                          hidden="true"
+                          data-l10n-id="menu-view-bidi-switch-page-direction"/>
+              </menupopup>
+            </menu>
+
+#ifdef XP_MACOSX
+<!-- Do not dynamically modify the Window menu and be careful when making static changes to it.
+     macOS adds extra functionality to this menu, such as a list of windows, which can break when
+     modifying this menu. See bug 1642138 and bug 1807697 for example. -->
+            <menu id="windowMenu"
+                   data-l10n-id="menu-window-menu">
+                <menupopup id="windowPopup">
+                    <menuseparator/>
+                    <menuitem command="cmd_minimizeWindow" key="key_minimizeWindow" data-l10n-id="window-minimize-command" />
+                    <menuitem command="zoomWindow"/>
+                    <menuseparator id="sep-window-list"/>
+                </menupopup>
+            </menu>
+#endif
+            <menu id="helpMenu" data-l10n-id="menu-help">
+              <menupopup id="menu_HelpPopup">
+                <menuitem id="helpSafeMode"
+                          data-l10n-id="menu-help-enter-troubleshoot-mode2"/>
+                <menuitem id="troubleShooting"
+                          data-l10n-id="menu-help-more-troubleshooting-info"/>
+                <menuseparator id="aboutSeparator"/>
+                <menuitem id="aboutName"
+                          data-l10n-id="menu-about"/>
+                <menuseparator id="helpPolicySeparator"
+                          hidden="true"/>
+                <menuitem id="helpPolicySupport"
+                          hidden="true"/>
+              </menupopup>
+          </menu>
+        </menubar>

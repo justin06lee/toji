@@ -7,6 +7,7 @@ browser.jar:
   content/toji/toji.css                  (content/toji.css)
   content/toji/prompts.css               (content/prompts.css)
   content/toji/ask-process.js            (content/ask-process.js)
+  content/toji/window/stubs.js           (content/window/stubs.js)
   content/toji/fonts/                    (content/fonts/*)
   content/toji/profiles/                 (content/profiles/*.svg)
 # Toji's pages, built by `bun run build:pages` (gecko/build.ts).

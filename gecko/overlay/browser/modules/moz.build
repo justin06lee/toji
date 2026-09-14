@@ -1,0 +1,40 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# Toji (gecko/overlay): the window modules the engine's behaviour needs; the
+# ones behind Firefox's toolbars, new tab page and telemetry are deleted.
+
+with Files("**"):
+    BUG_COMPONENT = ("Firefox", "General")
+
+EXTRA_JS_MODULES += [
+    "AboutNewTab.sys.mjs",
+    "BrowserDOMWindow.sys.mjs",
+    "BrowserUIUtils.sys.mjs",
+    "BrowserWindowTracker.sys.mjs",
+    "ContentCrashHandlers.sys.mjs",
+    "EveryWindow.sys.mjs",
+    "ExtensionsUI.sys.mjs",
+    "FaviconLoader.sys.mjs",
+    "PermissionUI.sys.mjs",
+    "PopupAndRedirectBlockerObserver.sys.mjs",
+    "ProcessHangMonitor.sys.mjs",
+    "Sanitizer.sys.mjs",
+    "SharingUtils.sys.mjs",
+    "SiteDataManager.sys.mjs",
+    "SitePermissions.sys.mjs",
+    "UpdatePolicyEnforcer.sys.mjs",
+    "URILoadingHelper.sys.mjs",
+    "webrtcUI.sys.mjs",
+]
+
+MOZ_SRC_FILES += [
+    "CanvasPermissionPromptHelper.sys.mjs",
+    "ObserverForwarder.sys.mjs",
+]
+
+if CONFIG["MOZ_WIDGET_TOOLKIT"] == "windows":
+    EXTRA_JS_MODULES += [
+        "FilePickerCrashed.sys.mjs",
+    ]
