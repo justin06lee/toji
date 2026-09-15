@@ -1,0 +1,13 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+browser.jar:
+   content/browser/tabbrowser/browser-fullZoom.js         (content/browser-fullZoom.js)
+   content/browser/tabbrowser/drag-and-drop.js            (content/drag-and-drop.js)
+   content/browser/tabbrowser/split-view-footer.js        (content/split-view-footer.js)
+   content/browser/tabbrowser/tab.js                      (content/tab.js)
+   content/browser/tabbrowser/tabbrowser.js               (content/tabbrowser.js)
+   content/browser/tabbrowser/tabgroup.js                 (content/tabgroup.js)
+   content/browser/tabbrowser/tabs.js                     (content/tabs.js)
+   content/browser/tabbrowser/tabsplitview.js             (content/tabsplitview.js)

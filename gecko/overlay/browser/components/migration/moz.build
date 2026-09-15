@@ -1,0 +1,38 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# Toji (gecko/overlay): the migrators Toji's imports use (Chrome-family,
+# Safari, files), without Firefox's wizard.
+
+EXTRA_JS_MODULES += [
+    "ChromeMigrationUtils.sys.mjs",
+    "ChromeProfileMigrator.sys.mjs",
+    "FileMigrators.sys.mjs",
+    "FirefoxProfileMigrator.sys.mjs",
+    "MigrationUtils.sys.mjs",
+    "MigratorBase.sys.mjs",
+    "ProfileMigrator.sys.mjs",
+]
+
+if CONFIG["MOZ_WIDGET_TOOLKIT"] == "cocoa":
+    EXPORTS += [
+        "nsKeychainMigrationUtils.h",
+    ]
+    EXTRA_JS_MODULES += [
+        "ChromeMacOSLoginCrypto.sys.mjs",
+        "SafariProfileMigrator.sys.mjs",
+    ]
+    UNIFIED_SOURCES += [
+        "nsKeychainMigrationUtils.mm",
+    ]
+    XPIDL_SOURCES += [
+        "nsIKeychainMigrationUtils.idl",
+    ]
+    XPIDL_MODULE = "migration"
+
+XPCOM_MANIFESTS += [
+    "components.conf",
+]
+
+FINAL_LIBRARY = "browsercomps"

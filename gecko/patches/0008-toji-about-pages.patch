@@ -1,0 +1,149 @@
+--- a/browser/components/about/AboutRedirector.cpp
++++ b/browser/components/about/AboutRedirector.cpp
+@@ -44,16 +44,6 @@
+     browser/components/about/components.conf
+ */
+ static const RedirEntry kRedirMap[] = {
+-    {"aichatcontent", "chrome://browser/content/aiwindow/aiChatContent.html",
+-     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+-         nsIAboutModule::URI_CAN_LOAD_IN_PRIVILEGEDABOUT_PROCESS |
+-         nsIAboutModule::URI_MUST_LOAD_IN_CHILD | nsIAboutModule::ALLOW_SCRIPT |
+-         nsIAboutModule::HIDE_FROM_ABOUTABOUT},
+-    {"asrouter", "chrome://browser/content/asrouter/asrouter-admin.html",
+-     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+-         nsIAboutModule::URI_CAN_LOAD_IN_PRIVILEGEDABOUT_PROCESS |
+-         nsIAboutModule::URI_MUST_LOAD_IN_CHILD | nsIAboutModule::ALLOW_SCRIPT |
+-         nsIAboutModule::HIDE_FROM_ABOUTABOUT},
+     {"blocked", "chrome://browser/content/blockedSite.xhtml",
+      nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+          nsIAboutModule::URI_CAN_LOAD_IN_CHILD | nsIAboutModule::ALLOW_SCRIPT |
+@@ -62,117 +52,21 @@
+      nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+          nsIAboutModule::URI_CAN_LOAD_IN_CHILD | nsIAboutModule::ALLOW_SCRIPT |
+          nsIAboutModule::HIDE_FROM_ABOUTABOUT},
+-    {"unloads", "chrome://browser/content/tabunloader/aboutUnloads.html",
+-     nsIAboutModule::ALLOW_SCRIPT},
+     {"framecrashed", "chrome://browser/content/aboutFrameCrashed.html",
+      nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+          nsIAboutModule::URI_CAN_LOAD_IN_CHILD |
+          nsIAboutModule::HIDE_FROM_ABOUTABOUT},
+-    {"logins", "chrome://browser/content/aboutlogins/aboutLogins.html",
+-     nsIAboutModule::ALLOW_SCRIPT | nsIAboutModule::URI_MUST_LOAD_IN_CHILD |
+-         nsIAboutModule::URI_CAN_LOAD_IN_PRIVILEGEDABOUT_PROCESS |
+-         nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+-         nsIAboutModule::IS_SECURE_CHROME_UI},
+-    {"loginsimportreport",
+-     "chrome://browser/content/aboutlogins/aboutLoginsImportReport.html",
+-     nsIAboutModule::ALLOW_SCRIPT | nsIAboutModule::URI_MUST_LOAD_IN_CHILD |
+-         nsIAboutModule::URI_CAN_LOAD_IN_PRIVILEGEDABOUT_PROCESS |
+-         nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+-         nsIAboutModule::IS_SECURE_CHROME_UI},
+-    {"firefoxview", "chrome://browser/content/firefoxview/firefoxview.html",
+-     nsIAboutModule::ALLOW_SCRIPT | nsIAboutModule::IS_SECURE_CHROME_UI},
+-    {"opentabs", "chrome://browser/content/tabbrowser/opentabs.html",
+-     nsIAboutModule::ALLOW_SCRIPT | nsIAboutModule::IS_SECURE_CHROME_UI |
+-         nsIAboutModule::HIDE_FROM_ABOUTABOUT},
+-    {"policies", "chrome://browser/content/policies/aboutPolicies.html",
+-     nsIAboutModule::ALLOW_SCRIPT | nsIAboutModule::IS_SECURE_CHROME_UI},
+-    {"privatebrowsing", "chrome://browser/content/aboutPrivateBrowsing.html",
+-     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+-         nsIAboutModule::URI_MUST_LOAD_IN_CHILD | nsIAboutModule::ALLOW_SCRIPT |
+-         nsIAboutModule::URI_CAN_LOAD_IN_PRIVILEGEDABOUT_PROCESS},
+     {"profiling",
+      "chrome://devtools/content/performance-new/aboutprofiling/index.html",
+      nsIAboutModule::ALLOW_SCRIPT | nsIAboutModule::IS_SECURE_CHROME_UI},
+-    {"rights", "https://www.mozilla.org/about/legal/terms/firefox/",
+-     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+-         nsIAboutModule::URI_MUST_LOAD_IN_CHILD},
+-    {"robots", "chrome://browser/content/aboutRobots.xhtml",
+-     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+-         nsIAboutModule::ALLOW_SCRIPT},
+     {"sessionrestore", "chrome://browser/content/aboutSessionRestore.xhtml",
+      nsIAboutModule::ALLOW_SCRIPT | nsIAboutModule::HIDE_FROM_ABOUTABOUT |
+          nsIAboutModule::IS_SECURE_CHROME_UI},
+     {"tabcrashed", "chrome://browser/content/aboutTabCrashed.xhtml",
+      nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+          nsIAboutModule::ALLOW_SCRIPT | nsIAboutModule::HIDE_FROM_ABOUTABOUT},
+-    {"welcomeback", "chrome://browser/content/aboutWelcomeBack.xhtml",
+-     nsIAboutModule::ALLOW_SCRIPT | nsIAboutModule::HIDE_FROM_ABOUTABOUT |
+-         nsIAboutModule::IS_SECURE_CHROME_UI},
+-    {"welcome", "about:blank",
+-     nsIAboutModule::URI_MUST_LOAD_IN_CHILD |
+-         nsIAboutModule::URI_CAN_LOAD_IN_PRIVILEGEDABOUT_PROCESS |
+-         nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+-         nsIAboutModule::ALLOW_SCRIPT},
+-    {"messagepreview",
+-     "chrome://browser/content/messagepreview/messagepreview.html",
+-     nsIAboutModule::URI_MUST_LOAD_IN_CHILD |
+-         nsIAboutModule::URI_CAN_LOAD_IN_PRIVILEGEDABOUT_PROCESS |
+-         nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+-         nsIAboutModule::ALLOW_SCRIPT | nsIAboutModule::HIDE_FROM_ABOUTABOUT},
+-    {"settings", "chrome://browser/content/preferences/preferences.xhtml",
+-     nsIAboutModule::ALLOW_SCRIPT | nsIAboutModule::IS_SECURE_CHROME_UI |
+-         nsIAboutModule::HIDE_FROM_ABOUTABOUT},
+-    {"preferences", "chrome://browser/content/preferences/preferences.xhtml",
+-     nsIAboutModule::ALLOW_SCRIPT | nsIAboutModule::IS_SECURE_CHROME_UI},
+-    {"downloads",
+-     "chrome://browser/content/downloads/contentAreaDownloadsView.xhtml",
+-     nsIAboutModule::ALLOW_SCRIPT | nsIAboutModule::IS_SECURE_CHROME_UI},
+-    {"reader", "chrome://global/content/reader/aboutReader.html",
+-     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+-         nsIAboutModule::ALLOW_SCRIPT | nsIAboutModule::URI_MUST_LOAD_IN_CHILD |
+-         nsIAboutModule::HIDE_FROM_ABOUTABOUT},
+     {"restartrequired", "chrome://browser/content/aboutRestartRequired.xhtml",
+      nsIAboutModule::ALLOW_SCRIPT | nsIAboutModule::HIDE_FROM_ABOUTABOUT},
+-    {"protections", "chrome://browser/content/protections.html",
+-     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+-         nsIAboutModule::URI_MUST_LOAD_IN_CHILD | nsIAboutModule::ALLOW_SCRIPT |
+-         nsIAboutModule::URI_CAN_LOAD_IN_PRIVILEGEDABOUT_PROCESS |
+-         nsIAboutModule::IS_SECURE_CHROME_UI},
+-#ifdef MOZ_NORMANDY
+-    {"studies", "resource://normandy-content/about-studies/about-studies.html",
+-     nsIAboutModule::ALLOW_SCRIPT | nsIAboutModule::IS_SECURE_CHROME_UI |
+-         nsIAboutModule::URI_CAN_LOAD_IN_PRIVILEGEDABOUT_PROCESS |
+-         nsIAboutModule::URI_MUST_LOAD_IN_CHILD |
+-         nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT},
+-#endif
+-#ifdef MOZ_SELECTABLE_PROFILES
+-    {"profilemanager", "chrome://browser/content/profiles/profiles.html",
+-     nsIAboutModule::ALLOW_SCRIPT | nsIAboutModule::IS_SECURE_CHROME_UI |
+-         nsIAboutModule::HIDE_FROM_ABOUTABOUT},
+-    {"editprofile", "chrome://browser/content/profiles/edit-profile.html",
+-     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+-         nsIAboutModule::IS_SECURE_CHROME_UI | nsIAboutModule::ALLOW_SCRIPT |
+-         nsIAboutModule::URI_MUST_LOAD_IN_CHILD |
+-         nsIAboutModule::URI_CAN_LOAD_IN_PRIVILEGEDABOUT_PROCESS |
+-         nsIAboutModule::HIDE_FROM_ABOUTABOUT},
+-    {"deleteprofile", "chrome://browser/content/profiles/delete-profile.html",
+-     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+-         nsIAboutModule::IS_SECURE_CHROME_UI |
+-         nsIAboutModule::URI_MUST_LOAD_IN_CHILD | nsIAboutModule::ALLOW_SCRIPT |
+-         nsIAboutModule::URI_CAN_LOAD_IN_PRIVILEGEDABOUT_PROCESS |
+-         nsIAboutModule::HIDE_FROM_ABOUTABOUT},
+-    {"newprofile", "chrome://browser/content/profiles/new-profile.html",
+-     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+-         nsIAboutModule::IS_SECURE_CHROME_UI | nsIAboutModule::ALLOW_SCRIPT |
+-         nsIAboutModule::URI_MUST_LOAD_IN_CHILD |
+-         nsIAboutModule::URI_CAN_LOAD_IN_PRIVILEGEDABOUT_PROCESS |
+-         nsIAboutModule::HIDE_FROM_ABOUTABOUT},
+-#endif
+-    {"keyboard", "chrome://browser/content/customkeys/customkeys.html",
+-     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+-         nsIAboutModule::IS_SECURE_CHROME_UI | nsIAboutModule::ALLOW_SCRIPT |
+-         nsIAboutModule::URI_MUST_LOAD_IN_CHILD |
+-         nsIAboutModule::URI_CAN_LOAD_IN_PRIVILEGEDABOUT_PROCESS},
+ };
+ 
+ static nsAutoCString GetAboutModuleName(nsIURI* aURI) {
+--- a/toolkit/components/moz.build
++++ b/toolkit/components/moz.build
+@@ -141,9 +141,6 @@
+ if CONFIG["MOZ_BUILD_APP"] == "browser":
+     DIRS += ["messaging-system", "normandy"]
+ 
+-if CONFIG["MOZ_BUILD_APP"] != "comm/mail":
+-    DIRS += ["ipprotection"]
+-
+ DIRS += ["nimbus"]
+ 
+ if CONFIG["MOZ_BACKGROUNDTASKS"]:

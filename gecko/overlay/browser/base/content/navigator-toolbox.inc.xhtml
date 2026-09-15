@@ -1,0 +1,81 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# Toji (gecko/overlay): the toolbox holds the menubar (native on macOS), the
+# engine's tab strip — the DOM its tab model lives in, never shown — and the
+# notification deck the engine puts its bars in (a blocked popup, a slow
+# script). Firefox's toolbars, buttons and URL bar are gone; Toji's shell
+# draws the window's UI.
+
+<toolbox id="navigator-toolbox" class="chrome-block">
+
+  <!-- Menu -->
+  <toolbar type="menubar" id="toolbar-menubar"
+           class="browser-toolbar chromeclass-menubar browser-titlebar"
+           mode="icons"
+           autohide="true">
+    <toolbaritem id="menubar-items" align="center">
+#include browser-menubar.inc.xhtml
+    </toolbaritem>
+  </toolbar>
+
+  <!-- The engine's tabs: hidden (toji.css), never drawn. -->
+  <toolbar id="TabsToolbar"
+           class="browser-toolbar browser-titlebar"
+           fullscreentoolbar="true"
+           mode="icons"
+           flex="1">
+    <hbox flex="1" align="end" class="toolbar-items">
+      <hbox id="TabsToolbar-customization-target" flex="1">
+        <tabs id="tabbrowser-tabs"
+              is="tabbrowser-tabs"
+              aria-multiselectable="true"
+              setfocus="false"
+              orient="horizontal"
+              stopwatchid="tabClick">
+          <div id="pinned-drop-indicator" hidden="true">
+            <span id="pinned-drop-indicator-text" data-l10n-id="pinned-tabs-drop-indicator"></span>
+          </div>
+          <arrowscrollbox id="pinned-tabs-container" orient="horizontal" clicktoscroll=""></arrowscrollbox>
+          <splitter orient="vertical" id="vertical-pinned-tabs-splitter" resizebefore="sibling" resizeafter="none" hidden="true"/>
+          <hbox class="tab-drop-indicator" hidden="true"/>
+          <arrowscrollbox id="tabbrowser-arrowscrollbox" orient="horizontal" flex="1" clicktoscroll="" scrolledtostart="" scrolledtoend="">
+            <tab is="tabbrowser-tab" class="tabbrowser-tab" selected="true" visuallyselected="" fadein=""/>
+            <hbox id="tabbrowser-arrowscrollbox-periphery">
+              <toolbarbutton id="tabs-newtab-button"
+                             class="toolbarbutton-1"
+                             command="cmd_newNavigatorTab"
+                             data-l10n-id="tabs-toolbar-new-tab"/>
+              <spacer class="closing-tabs-spacer" style="width: 0;"/>
+            </hbox>
+          </arrowscrollbox>
+          <toolbarbutton id="vertical-tabs-newtab-button"
+                              class="toolbarbutton-1"
+                              command="cmd_newNavigatorTab"
+                              data-l10n-id="tabs-toolbar-new-tab"/>
+          <html:span id="tabbrowser-tab-a11y-desc" hidden="true"/>
+        </tabs>
+
+        <toolbarbutton id="new-tab-button"
+                       class="toolbarbutton-1"
+                       data-l10n-id="tabs-toolbar-new-tab"
+                       command="cmd_newNavigatorTab"
+                       hidden="true"/>
+        <toolbarbutton id="alltabs-button"
+                       class="toolbarbutton-1"
+                       hidden="true"/>
+      </hbox>
+    </hbox>
+  </toolbar>
+
+  <!-- Kept for the engine's code that looks the navigation bar up; it holds nothing. -->
+  <toolbar id="nav-bar" class="browser-toolbar" fullscreentoolbar="true" mode="icons"/>
+
+  <toolbar id="notifications-toolbar" class="browser-toolbar" nowindowdrag="" fullscreentoolbar="true">
+    <!-- NOTE: This gets instantiated in-place -->
+    <html:template id="tab-notification-deck-template">
+      <html:named-deck id="tab-notification-deck"></html:named-deck>
+    </html:template>
+  </toolbar>
+</toolbox>

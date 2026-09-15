@@ -1,0 +1,45 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# Toji (gecko/overlay): the actors behind the engine's behaviour in pages —
+# prompts, permissions, links and favicons, media, crashes, the context menu.
+# The ones behind Firefox's pages and panels are deleted.
+
+with Files("**"):
+    BUG_COMPONENT = ("Firefox", "General")
+
+FINAL_TARGET_FILES.actors += [
+    "AboutTabCrashedChild.sys.mjs",
+    "AboutTabCrashedParent.sys.mjs",
+    "BlockedSiteChild.sys.mjs",
+    "BlockedSiteParent.sys.mjs",
+    "BrowserProcessChild.sys.mjs",
+    "BrowserTabChild.sys.mjs",
+    "ClickHandlerChild.sys.mjs",
+    "ClickHandlerParent.sys.mjs",
+    "ContextMenuChild.sys.mjs",
+    "ContextMenuParent.sys.mjs",
+    "DecoderDoctorChild.sys.mjs",
+    "DecoderDoctorParent.sys.mjs",
+    "DOMFullscreenChild.sys.mjs",
+    "DOMFullscreenParent.sys.mjs",
+    "EncryptedMediaChild.sys.mjs",
+    "EncryptedMediaParent.sys.mjs",
+    "FormValidationChild.sys.mjs",
+    "FormValidationParent.sys.mjs",
+    "LinkHandlerChild.sys.mjs",
+    "LinkHandlerParent.sys.mjs",
+    "PluginChild.sys.mjs",
+    "PluginParent.sys.mjs",
+    "PointerLockChild.sys.mjs",
+    "PointerLockParent.sys.mjs",
+    "PromptParent.sys.mjs",
+    "RefreshBlockerChild.sys.mjs",
+    "RefreshBlockerParent.sys.mjs",
+    "SpeechDispatcherChild.sys.mjs",
+    "SpeechDispatcherParent.sys.mjs",
+    "SwitchDocumentDirectionChild.sys.mjs",
+    "WebRTCChild.sys.mjs",
+    "WebRTCParent.sys.mjs",
+]

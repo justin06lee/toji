@@ -331,8 +331,9 @@ try {
     return {
       customTitlebar: doc.documentElement.hasAttribute("customtitlebar"),
       buttons: buttons ? { appearance: win.getComputedStyle(buttons).appearance, width: buttons.getBoundingClientRect().width, height: buttons.getBoundingClientRect().height } : "absent",
-      historyMenu: doc.getElementById("history-menu")?.hidden,
-      toolsMenu: doc.getElementById("tools-menu")?.hidden,
+      // Gone from the tree now; hidden was the earlier state.
+      historyMenu: !doc.getElementById("history-menu") || doc.getElementById("history-menu").hidden,
+      toolsMenu: !doc.getElementById("tools-menu") || doc.getElementById("tools-menu").hidden,
       file,
       // Emptied, not removed (Firefox's code looks some keys up): no key, no command.
       findKey: (k => !!k && (k.hasAttribute("key") || k.hasAttribute("command")) && !k.hasAttribute("disabled"))(doc.getElementById("key_find")),

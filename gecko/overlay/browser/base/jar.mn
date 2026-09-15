@@ -1,0 +1,65 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# Toji (gecko/overlay): the browser window's own files. Firefox's toolbars,
+# panels, page info, robots and the rest are gone; the window's UI is Toji's
+# shell (browser/toji).
+
+browser.jar:
+%  content browser %content/browser/ contentaccessible=yes
+
+        content/browser/aboutDialog-appUpdater.js     (content/aboutDialog-appUpdater.js)
+*       content/browser/aboutDialog.xhtml                    (content/aboutDialog.xhtml)
+        content/browser/aboutDialog.js                (content/aboutDialog.js)
+        content/browser/aboutDialog.css               (content/aboutDialog.css)
+        content/browser/aboutRestartRequired.js       (content/aboutRestartRequired.js)
+        content/browser/aboutRestartRequired.xhtml    (content/aboutRestartRequired.xhtml)
+        content/browser/aboutFrameCrashed.html        (content/aboutFrameCrashed.html)
+        content/browser/aboutTabCrashed.css           (content/aboutTabCrashed.css)
+        content/browser/aboutTabCrashed.js            (content/aboutTabCrashed.js)
+        content/browser/aboutTabCrashed.xhtml         (content/aboutTabCrashed.xhtml)
+        content/browser/blanktab.html                 (content/blanktab.html)
+        content/browser/browser.js                    (content/browser.js)
+*       content/browser/browser.xhtml                 (content/browser.xhtml)
+        content/browser/browser-a11yUtils.js          (content/browser-a11yUtils.js)
+        content/browser/browser-addons.js             (content/browser-addons.js)
+        content/browser/browser-commands.js           (content/browser-commands.js)
+        content/browser/browser-context.js            (content/browser-context.js)
+        content/browser/browser-fullScreenAndPointerLock.js (content/browser-fullScreenAndPointerLock.js)
+        content/browser/browser-gestureSupport.js           (content/browser-gestureSupport.js)
+        content/browser/browser-init.js                     (content/browser-init.js)
+        content/browser/browser-main.js                     (content/browser-main.js)
+        content/browser/browser-menubar.js                  (content/browser-menubar.js)
+        content/browser/browser-safebrowsing.js             (content/browser-safebrowsing.js)
+        content/browser/browser-sets.js                     (content/browser-sets.js)
+        content/browser/browser-customtitlebar.js           (content/browser-customtitlebar.js)
+        content/browser/browser-graphics-utils.js           (content/browser-graphics-utils.js)
+        content/browser/browser-webrtc.js                   (content/browser-webrtc.js)
+        content/browser/global-scripts.js                   (content/global-scripts.js)
+        content/browser/main-popupset.js                    (content/main-popupset.js)
+        content/browser/safeMode.css                        (content/safeMode.css)
+        content/browser/safeMode.js                         (content/safeMode.js)
+        content/browser/safeMode.xhtml                      (content/safeMode.xhtml)
+        content/browser/sanitize_v2.xhtml                   (content/sanitize_v2.xhtml)
+        content/browser/sanitizeDialog.js                   (content/sanitizeDialog.js)
+        content/browser/utilityOverlay.js                   (content/utilityOverlay.js)
+        content/browser/webext-panels.css                   (content/webext-panels.css)
+        content/browser/webext-panels.js                    (content/webext-panels.js)
+*       content/browser/webext-panels.xhtml                 (content/webext-panels.xhtml)
+        content/browser/nsContextMenu.sys.mjs               (content/nsContextMenu.sys.mjs)
+#ifdef XP_MACOSX
+*       content/browser/hiddenWindowMac.xhtml         (content/hiddenWindowMac.xhtml)
+        content/browser/nonbrowser-mac.js             (content/nonbrowser-mac.js)
+#endif
+        content/browser/webrtcIndicator.xhtml         (content/webrtcIndicator.xhtml)
+        content/browser/webrtcIndicator.js            (content/webrtcIndicator.js)
+# the following files are browser-specific overrides
+*       content/browser/license.html                  (/toolkit/content/license.html)
+% override chrome://global/content/license.html chrome://browser/content/license.html
+        content/browser/blockedSite.xhtml               (content/blockedSite.xhtml)
+        content/browser/blockedSite.js                  (content/blockedSite.js)
+*       content/browser/default-bookmarks.html        (content/default-bookmarks.html)
+
+# L10n resources and overrides.
+% override chrome://global/locale/appstrings.properties chrome://browser/locale/appstrings.properties

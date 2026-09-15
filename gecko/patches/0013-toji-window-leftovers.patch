@@ -1,0 +1,111 @@
+--- a/browser/base/content/popup-notifications.inc.xhtml
++++ b/browser/base/content/popup-notifications.inc.xhtml
+@@ -96,23 +96,6 @@
+       </popupnotificationcontent>
+     </popupnotification>
+ 
+-    <html:link rel="stylesheet" href="chrome://browser/content/passwordmgr/login-doorhanger-username-field.css"/>
+-    <popupnotification id="password-notification" hidden="true">
+-      <popupnotificationcontent orient="vertical">
+-        <html:login-doorhanger-username-field id="password-notification-username"
+-                                 data-l10n-id="panel-save-update-username-2"
+-                                 data-l10n-attrs="label"
+-                                 class="login-doorhanger-field"
+-                                 autocompletesearch="login-doorhanger-username"
+-                                 autocompletepopup="PopupAutoComplete"
+-                                 maxrows="10"
+-                                 maxdropmarkerrows="10"></html:login-doorhanger-username-field>
+-        <html:moz-input-password id="password-notification-password"
+-                                 data-l10n-id="panel-save-update-password-2"
+-                                 data-l10n-attrs="label"
+-                                 class="login-doorhanger-field"/>
+-      </popupnotificationcontent>
+-    </popupnotification>
+ 
+     <popupnotification id="addon-progress-notification" is="addon-progress-notification" hidden="true">
+       <popupnotificationcontent orient="vertical">
+--- a/browser/components/extensions/parent/ext-browser.js
++++ b/browser/components/extensions/parent/ext-browser.js
+@@ -9,7 +9,7 @@
+ // shared among the different ext-*.js scripts.
+ 
+ ChromeUtils.defineESModuleGetters(this, {
+-  AboutReaderParent: "resource:///actors/AboutReaderParent.sys.mjs",
++  AboutReaderParent: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
+   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
+ });
+--- a/devtools/startup/DevToolsStartup.sys.mjs
++++ b/devtools/startup/DevToolsStartup.sys.mjs
+@@ -34,9 +34,9 @@
+   CustomizableUI:
+     "moz-src:///browser/components/customizableui/CustomizableUI.sys.mjs",
+   CustomizableWidgets:
+-    "moz-src:///browser/components/customizableui/CustomizableWidgets.sys.mjs",
++    "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   PanelMultiView:
+-    "moz-src:///browser/components/customizableui/PanelMultiView.sys.mjs",
++    "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
+   ProfilerMenuButton:
+     "resource://devtools/client/performance-new/popup/menu-button.sys.mjs",
+@@ -799,6 +799,9 @@
+    */
+   hookBrowserToolsMenu(window) {
+     const menu = window.document.getElementById("browserToolsMenu");
++    if (!menu) {
++      return;
++    }
+     const onPopupShowing = () => {
+       menu.removeEventListener("popupshowing", onPopupShowing);
+       this.initDevTools("SystemMenu");
+--- a/browser/components/prompts/PromptCollection.sys.mjs
++++ b/browser/components/prompts/PromptCollection.sys.mjs
+@@ -5,7 +5,7 @@
+ const lazy = {};
+ ChromeUtils.defineESModuleGetters(lazy, {
+   SelectableProfileService:
+-    "resource:///modules/profiles/SelectableProfileService.sys.mjs",
++    "resource:///modules/toji/FirefoxStubs.sys.mjs",
+ });
+ 
+ /**
+--- a/browser/actors/BrowserProcessChild.sys.mjs
++++ b/browser/actors/BrowserProcessChild.sys.mjs
+@@ -6,7 +6,7 @@
+ 
+ ChromeUtils.defineESModuleGetters(lazy, {
+   AboutHomeStartupCacheChild:
+-    "resource:///modules/AboutNewTabRedirector.sys.mjs",
++    "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   WebRTCChild: "resource:///actors/WebRTCChild.sys.mjs",
+ });
+ 
+--- a/browser/base/content/macWindow.inc.xhtml
++++ b/browser/base/content/macWindow.inc.xhtml
+@@ -11,11 +11,7 @@
+ <linkset>
+   <html:link rel="localization" href="branding/brand.ftl"/>
+   <html:link rel="localization" href="browser/browserSets.ftl"/>
+-  <html:link rel="localization" href="browser/firefoxView.ftl"/>
+   <html:link rel="localization" href="browser/menubar.ftl"/>
+-  <html:link rel="localization" href="browser/reportBrokenSite.ftl"/>
+-  <html:link rel="localization" href="browser/screenshots.ftl"/>
+-  <html:link rel="localization" href="preview/aiWindow.ftl"/>
+   <html:link rel="localization" href="toolkit/branding/brandings.ftl"/>
+   <html:link rel="localization" href="toolkit/global/textActions.ftl"/>
+ </linkset>
+--- a/browser/base/content/nonbrowser-mac.js
++++ b/browser/base/content/nonbrowser-mac.js
+@@ -118,10 +118,7 @@
+     // initialise the offline listener
+     BrowserOffline.init();
+ 
+-    // Initialize the private browsing UI only if window is private
+-    if (PrivateBrowsingUtils.isWindowPrivate(window)) {
+-      PrivateBrowsingUI.init(window);
+-    }
++    // Toji: PrivateBrowsingUI (Firefox's private-window menu tweaks) is deleted.
+   },
+ 
+   shutdown() {

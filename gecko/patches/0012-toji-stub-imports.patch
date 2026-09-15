@@ -1,0 +1,102 @@
+--- a/browser/modules/Sanitizer.sys.mjs
++++ b/browser/modules/Sanitizer.sys.mjs
+@@ -8,9 +8,9 @@
+ 
+ ChromeUtils.defineESModuleGetters(lazy, {
+   AIWindow:
+-    "moz-src:///browser/components/aiwindow/ui/modules/AIWindow.sys.mjs",
++    "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   ChatStore:
+-    "moz-src:///browser/components/aiwindow/ui/modules/ChatStore.sys.mjs",
++    "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   ContextualIdentityService:
+     "resource://gre/modules/ContextualIdentityService.sys.mjs",
+   FormHistory: "resource://gre/modules/FormHistory.sys.mjs",
+--- a/browser/base/content/sanitizeDialog.js
++++ b/browser/base/content/sanitizeDialog.js
+@@ -16,7 +16,7 @@
+ 
+ ChromeUtils.defineESModuleGetters(lazy, {
+   AIWindow:
+-    "moz-src:///browser/components/aiwindow/ui/modules/AIWindow.sys.mjs",
++    "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   DownloadUtils: "resource://gre/modules/DownloadUtils.sys.mjs",
+   SiteDataManager: "resource:///modules/SiteDataManager.sys.mjs",
+ });
+--- a/browser/components/tabbrowser/NewTabPagePreloading.sys.mjs
++++ b/browser/components/tabbrowser/NewTabPagePreloading.sys.mjs
+@@ -14,7 +14,7 @@
+ ChromeUtils.defineESModuleGetters(lazy, {
+   AboutNewTab: "resource:///modules/AboutNewTab.sys.mjs",
+   AIWindow:
+-    "moz-src:///browser/components/aiwindow/ui/modules/AIWindow.sys.mjs",
++    "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
+   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
+ });
+--- a/browser/modules/BrowserDOMWindow.sys.mjs
++++ b/browser/modules/BrowserDOMWindow.sys.mjs
+@@ -11,7 +11,7 @@
+ 
+ ChromeUtils.defineESModuleGetters(lazy, {
+   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
+-  TaskbarTabsUtils: "resource:///modules/taskbartabs/TaskbarTabsUtils.sys.mjs",
++  TaskbarTabsUtils: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   URILoadingHelper: "resource:///modules/URILoadingHelper.sys.mjs",
+ });
+ 
+--- a/browser/components/places/PlacesUIUtils.sys.mjs
++++ b/browser/components/places/PlacesUIUtils.sys.mjs
+@@ -13,7 +13,7 @@
+   BrowserUtils: "resource://gre/modules/BrowserUtils.sys.mjs",
+   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
+   ContentSharingUtils:
+-    "resource:///modules/contentsharing/ContentSharingUtils.sys.mjs",
++    "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   CustomizableUI:
+     "moz-src:///browser/components/customizableui/CustomizableUI.sys.mjs",
+   MigrationUtils: "resource:///modules/MigrationUtils.sys.mjs",
+--- a/toolkit/components/extensions/WebNavigation.sys.mjs
++++ b/toolkit/components/extensions/WebNavigation.sys.mjs
+@@ -9,7 +9,7 @@
+   BrowserUtils: "resource://gre/modules/BrowserUtils.sys.mjs",
+   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
+   ClickHandlerParent: "resource:///actors/ClickHandlerParent.sys.mjs",
+-  UrlbarUtils: "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs",
++  UrlbarUtils: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   WebNavigationFrames: "resource://gre/modules/WebNavigationFrames.sys.mjs",
+ });
+ 
+--- a/browser/components/downloads/DownloadsViewUI.sys.mjs
++++ b/browser/components/downloads/DownloadsViewUI.sys.mjs
+@@ -19,7 +19,7 @@
+   DownloadsCommon:
+     "moz-src:///browser/components/downloads/DownloadsCommon.sys.mjs",
+   FileUtils: "resource://gre/modules/FileUtils.sys.mjs",
+-  UrlbarUtils: "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs",
++  UrlbarUtils: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+ });
+ 
+ XPCOMUtils.defineLazyServiceGetter(
+--- a/browser/actors/LinkHandlerParent.sys.mjs
++++ b/browser/actors/LinkHandlerParent.sys.mjs
+@@ -14,7 +14,7 @@
+ ChromeUtils.defineESModuleGetters(lazy, {
+   PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
+   OpenSearchManager:
+-    "moz-src:///browser/components/search/OpenSearchManager.sys.mjs",
++    "resource:///modules/toji/FirefoxStubs.sys.mjs",
+ });
+ 
+ let gTestListeners = new Set();
+--- a/browser/components/shell/ShellService.sys.mjs
++++ b/browser/components/shell/ShellService.sys.mjs
+@@ -9,7 +9,7 @@
+ 
+ ChromeUtils.defineESModuleGetters(lazy, {
+   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
+-  ASRouter: "resource:///modules/asrouter/ASRouter.sys.mjs",
++  ASRouter: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   ScheduledTask: "resource://gre/modules/ScheduledTask.sys.mjs",
+   Subprocess: "resource://gre/modules/Subprocess.sys.mjs",
+   WindowsSetDefaultRedirect:

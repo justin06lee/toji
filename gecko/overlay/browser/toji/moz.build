@@ -13,6 +13,7 @@ EXTRA_COMPONENTS += ["Toji.manifest"]
 
 # resource:///modules/toji/
 EXTRA_JS_MODULES.toji += [
+    "modules/FirefoxStubs.sys.mjs",
     "modules/TojiAgent.sys.mjs",
     "modules/TojiAgentServer.sys.mjs",
     "modules/TojiAsk.sys.mjs",

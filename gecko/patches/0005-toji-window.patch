@@ -1,0 +1,3247 @@
+--- a/browser/base/content/browser.js
++++ b/browser/base/content/browser.js
+@@ -12,24 +12,15 @@
+ // lazy module getters
+ 
+ ChromeUtils.defineESModuleGetters(this, {
+-  AIWindow:
+-    "moz-src:///browser/components/aiwindow/ui/modules/AIWindow.sys.mjs",
++  AIWindow: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   AMTelemetry: "resource://gre/modules/AddonManager.sys.mjs",
+   AboutNewTab: "resource:///modules/AboutNewTab.sys.mjs",
+-  AboutReaderParent: "resource:///actors/AboutReaderParent.sys.mjs",
+-  ActionsProviderContextualSearch:
+-    "moz-src:///browser/components/urlbar/ActionsProviderContextualSearch.sys.mjs",
+   AddonManager: "resource://gre/modules/AddonManager.sys.mjs",
+   BrowserTelemetryUtils: "resource://gre/modules/BrowserTelemetryUtils.sys.mjs",
+   BrowserUIUtils: "resource:///modules/BrowserUIUtils.sys.mjs",
+-  BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.sys.mjs",
+   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
+-  CFRPageActions: "resource:///modules/asrouter/CFRPageActions.sys.mjs",
+   Color: "resource://gre/modules/Color.sys.mjs",
+-  ContentAnalysis:
+-    "moz-src:///browser/components/contentanalysis/content/ContentAnalysis.sys.mjs",
+-  ContentSharingUtils:
+-    "resource:///modules/contentsharing/ContentSharingUtils.sys.mjs",
++  ContentSharingUtils: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   ContextualIdentityService:
+     "resource://gre/modules/ContextualIdentityService.sys.mjs",
+   CustomizableUI:
+@@ -41,7 +32,7 @@
+     "moz-src:///browser/components/downloads/DownloadsCommon.sys.mjs",
+   E10SUtils: "resource://gre/modules/E10SUtils.sys.mjs",
+   ExtensionsUI: "resource:///modules/ExtensionsUI.sys.mjs",
+-  HomePage: "resource:///modules/HomePage.sys.mjs",
++  HomePage: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   LightweightThemeConsumer:
+     "resource://gre/modules/LightweightThemeConsumer.sys.mjs",
+   LoginHelper: "resource://gre/modules/LoginHelper.sys.mjs",
+@@ -53,14 +44,8 @@
+   NewTabUtils: "resource://gre/modules/NewTabUtils.sys.mjs",
+   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
+   nsContextMenu: "chrome://browser/content/nsContextMenu.sys.mjs",
+-  OpenSearchManager:
+-    "moz-src:///browser/components/search/OpenSearchManager.sys.mjs",
+-  PageActions: "resource:///modules/PageActions.sys.mjs",
++  PageActions: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   PageThumbs: "resource://gre/modules/PageThumbs.sys.mjs",
+-  PanelMultiView:
+-    "moz-src:///browser/components/customizableui/PanelMultiView.sys.mjs",
+-  PanelView:
+-    "moz-src:///browser/components/customizableui/PanelMultiView.sys.mjs",
+   PictureInPicture: "resource://gre/modules/PictureInPicture.sys.mjs",
+   PlacesTransactions: "resource://gre/modules/PlacesTransactions.sys.mjs",
+   PlacesUIUtils: "moz-src:///browser/components/places/PlacesUIUtils.sys.mjs",
+@@ -68,23 +53,13 @@
+   PopupAndRedirectBlockerObserver:
+     "resource:///modules/PopupAndRedirectBlockerObserver.sys.mjs",
+   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
+-  ReducedProtectionNotification:
+-    "resource:///modules/ReducedProtectionNotification.sys.mjs",
+-  PrivateBrowsingUI: "moz-src:///browser/modules/PrivateBrowsingUI.sys.mjs",
+   ProcessHangMonitor: "resource:///modules/ProcessHangMonitor.sys.mjs",
+   ProfilesDatastoreService:
+     "moz-src:///toolkit/profile/ProfilesDatastoreService.sys.mjs",
+   PromptUtils: "resource://gre/modules/PromptUtils.sys.mjs",
+   ReaderMode: "moz-src:///toolkit/components/reader/ReaderMode.sys.mjs",
+-  ResetPBMPanel:
+-    "moz-src:///browser/components/privatebrowsing/ResetPBMPanel.sys.mjs",
+   SafeBrowsing: "resource://gre/modules/SafeBrowsing.sys.mjs",
+   Sanitizer: "resource:///modules/Sanitizer.sys.mjs",
+-  ScreenshotsUtils:
+-    "moz-src:///browser/components/screenshots/ScreenshotsUtils.sys.mjs",
+-  SearchUIUtils: "moz-src:///browser/components/search/SearchUIUtils.sys.mjs",
+-  SelectableProfileService:
+-    "resource:///modules/profiles/SelectableProfileService.sys.mjs",
+   SessionStartup: "resource:///modules/sessionstore/SessionStartup.sys.mjs",
+   SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
+   SessionWindowUI: "resource:///modules/sessionstore/SessionWindowUI.sys.mjs",
+@@ -95,31 +70,16 @@
+   SubDialog: "resource://gre/modules/SubDialog.sys.mjs",
+   SubDialogManager: "resource://gre/modules/SubDialog.sys.mjs",
+   TabCrashHandler: "resource:///modules/ContentCrashHandlers.sys.mjs",
+-  TabsSetupFlowManager:
+-    "resource:///modules/firefox-view-tabs-setup-manager.sys.mjs",
+-  TaskbarTabsChrome:
+-    "resource:///modules/taskbartabs/TaskbarTabsChrome.sys.mjs",
+   TelemetryEnvironment: "resource://gre/modules/TelemetryEnvironment.sys.mjs",
+-  ToolbarContextMenu:
+-    "moz-src:///browser/components/customizableui/ToolbarContextMenu.sys.mjs",
+-  ToolbarDropHandler:
+-    "moz-src:///browser/components/customizableui/ToolbarDropHandler.sys.mjs",
+-  ToolbarIconColor: "moz-src:///browser/themes/ToolbarIconColor.sys.mjs",
+   TranslationsParent: "resource://gre/actors/TranslationsParent.sys.mjs",
+-  UITour: "moz-src:///browser/components/uitour/UITour.sys.mjs",
+   UpdateUtils: "resource://gre/modules/UpdateUtils.sys.mjs",
+   URILoadingHelper: "resource:///modules/URILoadingHelper.sys.mjs",
+-  UrlbarPrefs: "moz-src:///browser/components/urlbar/UrlbarPrefs.sys.mjs",
+-  UrlbarProviderSearchTips:
+-    "moz-src:///browser/components/urlbar/UrlbarProviderSearchTips.sys.mjs",
+-  UrlbarTokenizer:
+-    "moz-src:///browser/components/urlbar/UrlbarTokenizer.sys.mjs",
+-  UrlbarUtils: "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs",
++  UrlbarPrefs: "resource:///modules/toji/FirefoxStubs.sys.mjs",
++  UrlbarUtils: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   Weave: "resource://services-sync/main.sys.mjs",
+   WebNavigationFrames: "resource://gre/modules/WebNavigationFrames.sys.mjs",
+   webrtcUI: "resource:///modules/webrtcUI.sys.mjs",
+   WebsiteFilter: "resource:///modules/policies/WebsiteFilter.sys.mjs",
+-  ZoomUI: "resource:///modules/ZoomUI.sys.mjs",
+ });
+ 
+ ChromeUtils.defineLazyGetter(this, "fxAccounts", () => {
+@@ -136,16 +96,6 @@
+ 
+ XPCOMUtils.defineLazyScriptGetter(
+   this,
+-  "PlacesTreeView",
+-  "chrome://browser/content/places/treeView.js"
+-);
+-XPCOMUtils.defineLazyScriptGetter(
+-  this,
+-  ["PlacesInsertionPoint", "PlacesController", "PlacesControllerDragHelper"],
+-  "chrome://browser/content/places/controller.js"
+-);
+-XPCOMUtils.defineLazyScriptGetter(
+-  this,
+   "PrintUtils",
+   "chrome://global/content/printUtils.js"
+ );
+@@ -161,76 +111,21 @@
+ );
+ XPCOMUtils.defineLazyScriptGetter(
+   this,
+-  "PanelUI",
+-  "chrome://browser/content/customizableui/panelUI.js"
+-);
+-XPCOMUtils.defineLazyScriptGetter(
+-  this,
+   "gViewSourceUtils",
+   "chrome://global/content/viewSourceUtils.js"
+ );
+ XPCOMUtils.defineLazyScriptGetter(
+   this,
+-  "gTabsPanel",
+-  "chrome://browser/content/tabbrowser/browser-allTabsMenu.js"
+-);
+-XPCOMUtils.defineLazyScriptGetter(
+-  this,
+-  [
+-    "BrowserAddonUI",
+-    "gExtensionsNotifications",
+-    "gUnifiedExtensions",
+-    "gXPInstallObserver",
+-  ],
++  ["BrowserAddonUI", "gXPInstallObserver"],
+   "chrome://browser/content/browser-addons.js"
+ );
+ XPCOMUtils.defineLazyScriptGetter(
+   this,
+-  "ctrlTab",
+-  "chrome://browser/content/tabbrowser/browser-ctrlTab.js"
+-);
+-XPCOMUtils.defineLazyScriptGetter(
+-  this,
+-  ["CustomizationHandler", "AutoHideMenubar"],
+-  "chrome://browser/content/browser-customization.js"
+-);
+-XPCOMUtils.defineLazyScriptGetter(
+-  this,
+   ["PointerLock", "FullScreen"],
+   "chrome://browser/content/browser-fullScreenAndPointerLock.js"
+ );
+ XPCOMUtils.defineLazyScriptGetter(
+   this,
+-  "gIdentityHandler",
+-  "chrome://browser/content/browser-siteIdentity.js"
+-);
+-XPCOMUtils.defineLazyScriptGetter(
+-  this,
+-  "gPermissionPanel",
+-  "chrome://browser/content/browser-sitePermissionPanel.js"
+-);
+-XPCOMUtils.defineLazyScriptGetter(
+-  this,
+-  "SelectTranslationsPanel",
+-  "chrome://browser/content/translations/selectTranslationsPanel.js"
+-);
+-XPCOMUtils.defineLazyScriptGetter(
+-  this,
+-  "FullPageTranslationsPanel",
+-  "chrome://browser/content/translations/fullPageTranslationsPanel.js"
+-);
+-XPCOMUtils.defineLazyScriptGetter(
+-  this,
+-  "gProtectionsHandler",
+-  "chrome://browser/content/browser-siteProtections.js"
+-);
+-XPCOMUtils.defineLazyScriptGetter(
+-  this,
+-  "gTrustPanelHandler",
+-  "chrome://browser/content/browser-trustPanel.js"
+-);
+-XPCOMUtils.defineLazyScriptGetter(
+-  this,
+   ["gGestureSupport", "gHistorySwipeAnimation"],
+   "chrome://browser/content/browser-gestureSupport.js"
+ );
+@@ -241,50 +136,11 @@
+ );
+ XPCOMUtils.defineLazyScriptGetter(
+   this,
+-  "gSync",
+-  "chrome://browser/content/browser-sync.js"
+-);
+-XPCOMUtils.defineLazyScriptGetter(
+-  this,
+-  "gBrowserThumbnails",
+-  "chrome://browser/content/browser-thumbnails.js"
+-);
+-XPCOMUtils.defineLazyScriptGetter(
+-  this,
+-  [
+-    "DownloadsPanel",
+-    "DownloadsOverlayLoader",
+-    "DownloadsView",
+-    "DownloadsViewUI",
+-    "DownloadsViewController",
+-    "DownloadsSummary",
+-    "DownloadsFooter",
+-    "DownloadsBlockedSubview",
+-  ],
+-  "chrome://browser/content/downloads/downloads.js"
+-);
+-XPCOMUtils.defineLazyScriptGetter(
+-  this,
+-  ["DownloadsButton", "DownloadsIndicatorView"],
+-  "chrome://browser/content/downloads/indicator.js"
+-);
+-XPCOMUtils.defineLazyScriptGetter(
+-  this,
+-  "gEditItemOverlay",
+-  "chrome://browser/content/places/editBookmark.js"
+-);
+-XPCOMUtils.defineLazyScriptGetter(
+-  this,
+   "gGfxUtils",
+   "chrome://browser/content/browser-graphics-utils.js"
+ );
+ XPCOMUtils.defineLazyScriptGetter(
+   this,
+-  "ToolbarKeyboardNavigator",
+-  "chrome://browser/content/browser-toolbarKeyNav.js"
+-);
+-XPCOMUtils.defineLazyScriptGetter(
+-  this,
+   "A11yUtils",
+   "chrome://browser/content/browser-a11yUtils.js"
+ );
+@@ -293,16 +149,6 @@
+   "gSharedTabWarning",
+   "chrome://browser/content/browser-webrtc.js"
+ );
+-XPCOMUtils.defineLazyScriptGetter(
+-  this,
+-  "gPageStyleMenu",
+-  "chrome://browser/content/browser-pagestyle.js"
+-);
+-XPCOMUtils.defineLazyScriptGetter(
+-  this,
+-  "gProfiles",
+-  "chrome://browser/content/browser-profiles.js"
+-);
+ 
+ // lazy service getters
+ 
+@@ -359,56 +205,11 @@
+   );
+ });
+ 
+-ChromeUtils.defineLazyGetter(this, "gCustomizeMode", () => {
+-  let { CustomizeMode } = ChromeUtils.importESModule(
+-    "moz-src:///browser/components/customizableui/CustomizeMode.sys.mjs"
+-  );
+-  return new CustomizeMode(window);
+-});
+ 
+ ChromeUtils.defineLazyGetter(this, "gNavToolbox", () => {
+   return document.getElementById("navigator-toolbox");
+ });
+ 
+-ChromeUtils.defineLazyGetter(this, "gURLBar", () => {
+-  let urlbar = document.getElementById("urlbar");
+-
+-  let beforeFocusOrSelect = event => {
+-    // In customize mode, the url bar is disabled. If a new tab is opened or the
+-    // user switches to a different tab, this function gets called before we've
+-    // finished leaving customize mode, and the url bar will still be disabled.
+-    // We can't focus it when it's disabled, so we need to re-run ourselves when
+-    // we've finished leaving customize mode.
+-    if (
+-      CustomizationHandler.isCustomizing() ||
+-      CustomizationHandler.isExitingCustomizeMode
+-    ) {
+-      gNavToolbox.addEventListener(
+-        "aftercustomization",
+-        () => {
+-          if (event.type == "beforeselect") {
+-            gURLBar.select();
+-          } else {
+-            gURLBar.focus();
+-          }
+-        },
+-        {
+-          once: true,
+-        }
+-      );
+-      event.preventDefault();
+-      return;
+-    }
+-
+-    if (window.fullScreen) {
+-      FullScreen.showNavToolbox();
+-    }
+-  };
+-  urlbar.addEventListener("beforefocus", beforeFocusOrSelect);
+-  urlbar.addEventListener("beforeselect", beforeFocusOrSelect);
+-
+-  return urlbar;
+-});
+ 
+ // High priority notification bars shown at the top of the window.
+ ChromeUtils.defineLazyGetter(this, "gNotificationBox", () => {
+@@ -564,26 +365,6 @@
+ 
+ XPCOMUtils.defineLazyPreferenceGetter(
+   this,
+-  "gFxaToolbarEnabled",
+-  "identity.fxaccounts.toolbar.enabled",
+-  false,
+-  (aPref, aOldVal, aNewVal) => {
+-    updateFxaToolbarMenu(aNewVal);
+-  }
+-);
+-
+-XPCOMUtils.defineLazyPreferenceGetter(
+-  this,
+-  "gFxaToolbarAccessed",
+-  "identity.fxaccounts.toolbar.accessed",
+-  false,
+-  () => {
+-    updateFxaToolbarMenu(gFxaToolbarEnabled);
+-  }
+-);
+-
+-XPCOMUtils.defineLazyPreferenceGetter(
+-  this,
+   "gAddonAbuseReportEnabled",
+   "extensions.abuseReport.enabled",
+   false
+@@ -627,15 +408,6 @@
+   );
+ });
+ 
+-customElements.setElementCreationCallback(
+-  "login-doorhanger-username-field",
+-  () => {
+-    ChromeUtils.importESModule(
+-      "chrome://browser/content/passwordmgr/login-doorhanger-username-field.mjs",
+-      { global: "current" }
+-    );
+-  }
+-);
+ 
+ var gBrowser;
+ var gContextMenu = null; // nsContextMenu instance
+@@ -710,13 +482,7 @@
+   }
+ }
+ 
+-var gPageIcons = {
+-  "about:home": "chrome://branding/content/icon32.png",
+-  "about:newtab": "chrome://branding/content/icon32.png",
+-  "about:opentabs": "chrome://branding/content/icon32.png",
+-  "about:welcome": "chrome://branding/content/icon32.png",
+-  "about:privatebrowsing": "chrome://browser/skin/privatebrowsing/favicon.svg",
+-};
++var gPageIcons = {};
+ 
+ var gInitialPages = [
+   "about:blank",
+@@ -749,13 +515,7 @@
+ }
+ 
+ function updateBookmarkToolbarVisibility() {
+-  BookmarkingUI.updateEmptyToolbarMessage();
+-  setToolbarVisibility(
+-    BookmarkingUI.toolbar,
+-    gBookmarksToolbarVisibility,
+-    false,
+-    false
+-  );
++  // Toji: the bookmarks bar is the shell's.
+ }
+ 
+ // This is a stringbundle-like interface to gBrowserBundle, formerly a getter for
+@@ -768,45 +528,7 @@
+     return gBrowserBundle.formatStringFromName(key, array);
+   },
+ };
+-
+-function updateFxaToolbarMenu(enable, isInitialUpdate = false) {
+-  // We only show the Firefox Account toolbar menu if the feature is enabled and
+-  // if sync is enabled.
+-  const syncEnabled = Services.prefs.getBoolPref(
+-    "identity.fxaccounts.enabled",
+-    false
+-  );
+-
+-  const mainWindowEl = document.documentElement;
+-  const fxaPanelEl = PanelMultiView.getViewNode(document, "PanelUI-fxa");
+-  const taskbarTab = mainWindowEl.hasAttribute("taskbartab");
+-
+-  // To minimize the toolbar button flickering or appearing/disappearing during startup,
+-  // we use this pref to anticipate the likely FxA status.
+-  const statusGuess = !!Services.prefs.getStringPref(
+-    "identity.fxaccounts.account.device.name",
+-    ""
+-  );
+-  mainWindowEl.setAttribute(
+-    "fxastatus",
+-    statusGuess ? "signed_in" : "not_configured"
+-  );
+ 
+-  fxaPanelEl.addEventListener("ViewShowing", gSync.updateSendToDeviceTitle);
+-
+-  if (enable && syncEnabled && !taskbarTab) {
+-    mainWindowEl.setAttribute("fxatoolbarmenu", "visible");
+-
+-    // We have to manually update the sync state UI when toggling the FxA toolbar
+-    // because it could show an invalid icon if the user is logged in and no sync
+-    // event was performed yet.
+-    if (!isInitialUpdate) {
+-      gSync.maybeUpdateUIState();
+-    }
+-  } else {
+-    mainWindowEl.removeAttribute("fxatoolbarmenu");
+-  }
+-}
+ 
+ function UpdateBackForwardCommands(aWebNavigation) {
+   var backCommand = document.getElementById("Browser:Back");
+@@ -1260,13 +982,7 @@
+       if (XULBrowserWindow.stopCommand.hasAttribute("disabled")) {
+         BrowserCommands.stop();
+       }
+-      break;
+-    case "Search":
+-      SearchUIUtils.webSearch(window);
+       break;
+-    case "Bookmarks":
+-      SidebarController.toggle("viewBookmarksSidebar");
+-      break;
+     case "Home":
+       BrowserCommands.home();
+       break;
+@@ -1428,57 +1144,6 @@
+   return url;
+ }
+ 
+-function UpdateUrlbarSearchSplitterState() {
+-  var splitter = document.getElementById("urlbar-search-splitter");
+-  var urlbar = document.getElementById("urlbar-container");
+-  var searchbar = document.getElementById("search-container");
+-
+-  if (document.documentElement.hasAttribute("customizing")) {
+-    if (splitter) {
+-      splitter.remove();
+-    }
+-    return;
+-  }
+-
+-  // If the splitter is already in the right place, we don't need to do anything:
+-  if (
+-    splitter &&
+-    ((splitter.nextElementSibling == searchbar &&
+-      splitter.previousElementSibling == urlbar) ||
+-      (splitter.nextElementSibling == urlbar &&
+-        splitter.previousElementSibling == searchbar))
+-  ) {
+-    return;
+-  }
+-
+-  let ibefore = null;
+-  let resizebefore = "none";
+-  let resizeafter = "none";
+-  if (urlbar && searchbar) {
+-    if (urlbar.nextElementSibling == searchbar) {
+-      resizeafter = "sibling";
+-      ibefore = searchbar;
+-    } else if (searchbar.nextElementSibling == urlbar) {
+-      resizebefore = "sibling";
+-      ibefore = urlbar;
+-    }
+-  }
+-
+-  if (ibefore) {
+-    if (!splitter) {
+-      splitter = document.createXULElement("splitter");
+-      splitter.id = "urlbar-search-splitter";
+-      splitter.setAttribute("resizebefore", resizebefore);
+-      splitter.setAttribute("resizeafter", resizeafter);
+-      splitter.setAttribute("skipintoolbarset", "true");
+-      splitter.setAttribute("overflows", "false");
+-      splitter.className = "chromeclass-toolbar-additional";
+-    }
+-    urlbar.parentNode.insertBefore(splitter, ibefore);
+-  } else if (splitter) {
+-    splitter.remove();
+-  }
+-}
+ 
+ function UpdatePopupNotificationsVisibility() {
+   // Only need to update PopupNotifications if it has already been initialized
+@@ -1490,10 +1155,6 @@
+     PopupNotifications.anchorVisibilityChange();
+   }
+ 
+-  // This is similar to the above, but for notifications attached to the
+-  // hamburger menu icon (such as update notifications and add-on install
+-  // notifications.)
+-  PanelUI?.updateNotifications();
+ }
+ 
+ function PageProxyClickHandler(aEvent) {
+@@ -1836,7 +1497,7 @@
+     if (!Services.policies.isAllowed("profileImport")) {
+       document
+         .getElementById("cmd_file_importFromAnotherBrowser")
+-        .setAttribute("disabled", "true");
++        ?.setAttribute("disabled", "true");
+     }
+   },
+ 
+@@ -2003,7 +1664,6 @@
+     }
+ 
+     this.overLink = url;
+-    LinkTargetDisplay.update(options);
+   },
+ 
+   onEnterDOMFullscreen() {
+@@ -2079,10 +1739,6 @@
+       aStateFlags & nsIWebProgressListener.STATE_START &&
+       aStateFlags & nsIWebProgressListener.STATE_IS_NETWORK
+     ) {
+-      if (aRequest && aWebProgress.isTopLevel) {
+-        OpenSearchManager.clearEngines(browser);
+-      }
+-
+       this.isBusy = true;
+ 
+       if (
+@@ -2367,20 +2023,8 @@
+       } else {
+         element.setAttribute("disabled", "true");
+       }
+-    }
+-
+-    if (TranslationsParent.isFullPageTranslationsRestrictedForPage(gBrowser)) {
+-      this._menuItemForTranslations.setAttribute("disabled", "true");
+-    } else {
+-      this._menuItemForTranslations.removeAttribute("disabled");
+     }
+-
+-    const shouldShowTranslationsMenuItems =
+-      TranslationsParent.AIFeature.isEnabled &&
+-      TranslationsParent.getIsTranslationsEngineSupported();
+ 
+-    this._menuItemForTranslations.hidden = !shouldShowTranslationsMenuItems;
+-    this._moreToolsTranslateMenuItem.hidden = !shouldShowTranslationsMenuItems;
+   },
+ 
+   /**
+@@ -2462,9 +2106,7 @@
+     return principal.URI;
+   },
+ 
+-  asyncUpdateUI() {
+-    OpenSearchManager.updateOpenSearchBadge(window);
+-  },
++  asyncUpdateUI() {},
+ 
+   onStatusChange(aWebProgress, aRequest, aStatus, aMessage) {
+     this.status = aMessage;
+@@ -2607,291 +2249,9 @@
+   "browser.newtabpage.enabled",
+   true
+ );
+-
+-var LinkTargetDisplay = {
+-  get DELAY_SHOW() {
+-    delete this.DELAY_SHOW;
+-    return (this.DELAY_SHOW = Services.prefs.getIntPref(
+-      "browser.overlink-delay"
+-    ));
+-  },
+-
+-  DELAY_HIDE: 250,
+-  _timer: 0,
+-
+-  get _contextMenu() {
+-    delete this._contextMenu;
+-    return (this._contextMenu = document.getElementById(
+-      "contentAreaContextMenu"
+-    ));
+-  },
+-
+-  update({ hideStatusPanelImmediately = false } = {}) {
+-    if (
+-      this._contextMenu.state == "open" ||
+-      this._contextMenu.state == "showing"
+-    ) {
+-      this._contextMenu.addEventListener("popuphidden", () => this.update(), {
+-        once: true,
+-      });
+-      return;
+-    }
+-
+-    clearTimeout(this._timer);
+-    window.removeEventListener("mousemove", this, true);
+-
+-    if (!XULBrowserWindow.overLink) {
+-      if (hideStatusPanelImmediately) {
+-        this._hide();
+-      } else {
+-        this._timer = setTimeout(this._hide.bind(this), this.DELAY_HIDE);
+-      }
+-      return;
+-    }
+-
+-    if (StatusPanel.isVisible) {
+-      StatusPanel.update();
+-    } else {
+-      // Let the display appear when the mouse doesn't move within the delay
+-      this._showDelayed();
+-      window.addEventListener("mousemove", this, true);
+-    }
+-  },
+-
+-  handleEvent(event) {
+-    switch (event.type) {
+-      case "mousemove":
+-        // Restart the delay since the mouse was moved
+-        clearTimeout(this._timer);
+-        this._showDelayed();
+-        break;
+-    }
+-  },
+-
+-  _showDelayed() {
+-    this._timer = setTimeout(
+-      function (self) {
+-        StatusPanel.update();
+-        window.removeEventListener("mousemove", self, true);
+-      },
+-      this.DELAY_SHOW,
+-      this
+-    );
+-  },
+-
+-  _hide() {
+-    clearTimeout(this._timer);
+-
+-    StatusPanel.update();
+-  },
+-};
+-
+-var CombinedStopReload = {
+-  // Try to initialize. Returns whether initialization was successful, which
+-  // may mean we had already initialized.
+-  ensureInitialized() {
+-    if (this._initialized) {
+-      return true;
+-    }
+-    if (this._destroyed) {
+-      return false;
+-    }
+-
+-    let reload = document.getElementById("reload-button");
+-    let stop = document.getElementById("stop-button");
+-    // It's possible the stop/reload buttons have been moved to the palette.
+-    // They may be reinserted later, so we will retry initialization if/when
+-    // we get notified of document loads.
+-    if (!stop || !reload) {
+-      return false;
+-    }
+-
+-    this._initialized = true;
+-    if (!XULBrowserWindow.stopCommand.hasAttribute("disabled")) {
+-      reload.setAttribute("displaystop", "true");
+-    }
+-    stop.addEventListener("click", this);
+-
+-    // Removing attributes based on the observed command doesn't happen if the button
+-    // is in the palette when the command's attribute is removed (cf. bug 309953)
+-    for (let button of [stop, reload]) {
+-      if (button.hasAttribute("disabled")) {
+-        let command = document.getElementById(button.getAttribute("command"));
+-        if (!command.hasAttribute("disabled")) {
+-          button.removeAttribute("disabled");
+-        }
+-      }
+-    }
+-
+-    this.reload = reload;
+-    this.stop = stop;
+-    this.stopReloadContainer = this.reload.parentNode;
+-    this.timeWhenSwitchedToStop = 0;
+-
+-    this.stopReloadContainer.addEventListener("animationend", this);
+-    this.stopReloadContainer.addEventListener("animationcancel", this);
+-
+-    return true;
+-  },
+-
+-  uninit() {
+-    this._destroyed = true;
+-
+-    if (!this._initialized) {
+-      return;
+-    }
+ 
+-    this._cancelTransition();
+-    this.stop.removeEventListener("click", this);
+-    this.stopReloadContainer.removeEventListener("animationend", this);
+-    this.stopReloadContainer.removeEventListener("animationcancel", this);
+-    this.stopReloadContainer = null;
+-    this.reload = null;
+-    this.stop = null;
+-  },
+ 
+-  handleEvent(event) {
+-    switch (event.type) {
+-      case "click":
+-        if (event.button == 0 && !this.stop.disabled) {
+-          this._stopClicked = true;
+-        }
+-        break;
+-      case "animationcancel":
+-      case "animationend": {
+-        if (
+-          event.target.classList.contains("toolbarbutton-animatable-image") &&
+-          (event.animationName == "reload-to-stop" ||
+-            event.animationName == "stop-to-reload")
+-        ) {
+-          this.stopReloadContainer.removeAttribute("animate");
+-        }
+-      }
+-    }
+-  },
+ 
+-  onTabSwitch() {
+-    // Reset the time in the event of a tabswitch since the stored time
+-    // would have been associated with the previous tab, so the animation will
+-    // still run if the page has been loading until long after the tab switch.
+-    this.timeWhenSwitchedToStop = window.performance.now();
+-  },
+-
+-  switchToStop(aRequest, aWebProgress) {
+-    if (
+-      !this.ensureInitialized() ||
+-      !this._shouldSwitch(aRequest, aWebProgress)
+-    ) {
+-      return;
+-    }
+-
+-    // Store the time that we switched to the stop button only if a request
+-    // is active. Requests are null if the switch is related to a tabswitch.
+-    // This is used to determine if we should show the stop->reload animation.
+-    if (aRequest instanceof Ci.nsIRequest) {
+-      this.timeWhenSwitchedToStop = window.performance.now();
+-    }
+-
+-    let shouldAnimate =
+-      aRequest instanceof Ci.nsIRequest &&
+-      aWebProgress.isTopLevel &&
+-      aWebProgress.isLoadingDocument &&
+-      !gBrowser.tabAnimationsInProgress &&
+-      !gReduceMotion &&
+-      this.stopReloadContainer.closest("#nav-bar-customization-target");
+-
+-    this._cancelTransition();
+-    if (shouldAnimate) {
+-      this.stopReloadContainer.setAttribute("animate", "true");
+-    } else {
+-      this.stopReloadContainer.removeAttribute("animate");
+-    }
+-    this.reload.setAttribute("displaystop", "true");
+-  },
+-
+-  switchToReload(aRequest, aWebProgress) {
+-    if (!this.ensureInitialized() || !this.reload.hasAttribute("displaystop")) {
+-      return;
+-    }
+-
+-    let shouldAnimate =
+-      aRequest instanceof Ci.nsIRequest &&
+-      aWebProgress.isTopLevel &&
+-      !aWebProgress.isLoadingDocument &&
+-      !gBrowser.tabAnimationsInProgress &&
+-      !gReduceMotion &&
+-      this._loadTimeExceedsMinimumForAnimation() &&
+-      this.stopReloadContainer.closest("#nav-bar-customization-target");
+-
+-    if (shouldAnimate) {
+-      this.stopReloadContainer.setAttribute("animate", "true");
+-    } else {
+-      this.stopReloadContainer.removeAttribute("animate");
+-    }
+-
+-    this.reload.removeAttribute("displaystop");
+-
+-    if (!shouldAnimate || this._stopClicked) {
+-      this._stopClicked = false;
+-      this._cancelTransition();
+-      this.reload.disabled =
+-        XULBrowserWindow.reloadCommand.hasAttribute("disabled");
+-      return;
+-    }
+-
+-    if (this._timer) {
+-      return;
+-    }
+-
+-    // Temporarily disable the reload button to prevent the user from
+-    // accidentally reloading the page when intending to click the stop button
+-    this.reload.disabled = true;
+-    this._timer = setTimeout(
+-      function (self) {
+-        self._timer = 0;
+-        self.reload.disabled =
+-          XULBrowserWindow.reloadCommand.hasAttribute("disabled");
+-      },
+-      650,
+-      this
+-    );
+-  },
+-
+-  _loadTimeExceedsMinimumForAnimation() {
+-    // If the time between switching to the stop button then switching to
+-    // the reload button exceeds 150ms, then we will show the animation.
+-    // If we don't know when we switched to stop (switchToStop is called
+-    // after init but before switchToReload), then we will prevent the
+-    // animation from occuring.
+-    return (
+-      this.timeWhenSwitchedToStop &&
+-      window.performance.now() - this.timeWhenSwitchedToStop > 150
+-    );
+-  },
+-
+-  _shouldSwitch(aRequest, aWebProgress) {
+-    if (
+-      aRequest &&
+-      aRequest.originalURI &&
+-      (aRequest.originalURI.schemeIs("chrome") ||
+-        (aRequest.originalURI.schemeIs("about") &&
+-          aWebProgress.isTopLevel &&
+-          !aRequest.originalURI.spec.startsWith("about:reader")))
+-    ) {
+-      return false;
+-    }
+-
+-    return true;
+-  },
+-
+-  _cancelTransition() {
+-    if (this._timer) {
+-      clearTimeout(this._timer);
+-      this._timer = 0;
+-    }
+-  },
+-};
+-
+ var TabsProgressListener = {
+   onStateChange(aBrowser, aWebProgress, aRequest, aStateFlags, aStatus) {
+     // Collect telemetry data about tab load times.
+@@ -2959,15 +2319,6 @@
+     // Filter out location changes caused by anchor navigation
+     // or history.push/pop/replaceState.
+     if (aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT) {
+-      // Reader mode cares about history.pushState and friends.
+-      // FIXME: The content process should manage this directly (bug 1445351).
+-      aBrowser.sendMessageToActor(
+-        "Reader:PushState",
+-        {
+-          isArticle: aBrowser.isArticle,
+-        },
+-        "AboutReader"
+-      );
+       return;
+     }
+ 
+@@ -2996,11 +2347,7 @@
+     if (!iconURI) {
+       return;
+     }
+-    if (browser == gBrowser.selectedBrowser) {
+-      // If the "Add Search Engine" page action is in the urlbar, its image
+-      // needs to be set to the new icon, so call updateOpenSearchBadge.
+-      OpenSearchManager.updateOpenSearchBadge(window);
+-    }
++
+   },
+ };
+ 
+@@ -3011,339 +2358,22 @@
+   let autoHide = popup.querySelector(".fullscreen-context-autohide");
+   if (autoHide) {
+     FullScreen.updateAutohideMenuitem(autoHide);
+-  }
+-}
+-
+-function onViewToolbarCommand(aEvent) {
+-  let node = aEvent.originalTarget;
+-  let menuId;
+-  let toolbarId;
+-  let isVisible;
+-  if (node.dataset.bookmarksToolbarVisibility) {
+-    isVisible = node.dataset.visibilityEnum;
+-    toolbarId = "PersonalToolbar";
+-    menuId = node.parentNode.parentNode.parentNode.id;
+-    Services.prefs.setCharPref(
+-      "browser.toolbars.bookmarks.visibility",
+-      isVisible
+-    );
+-  } else {
+-    menuId = node.parentNode.id;
+-    toolbarId = node.getAttribute("toolbarId");
+-    isVisible = node.hasAttribute("checked");
+   }
+-  CustomizableUI.setToolbarVisibility(toolbarId, isVisible);
+-  BrowserUsageTelemetry.recordToolbarVisibility(toolbarId, isVisible, menuId);
+ }
+ 
+-function setToolbarVisibility(
+-  toolbar,
+-  isVisible,
+-  persist = true,
+-  animated = true
+-) {
+-  let hidingAttribute;
+-  if (toolbar.getAttribute("type") == "menubar") {
+-    hidingAttribute = "autohide";
+-    if (AppConstants.platform == "linux") {
+-      Services.prefs.setBoolPref("ui.key.menuAccessKeyFocuses", !isVisible);
+-    }
+-  } else {
+-    hidingAttribute = "collapsed";
+-  }
+ 
+-  if (toolbar == BookmarkingUI.toolbar) {
+-    // For the bookmarks toolbar, we need to persist state before toggling
+-    // the visibility in this window, because the state can be different
+-    // (newtab vs never or always) even when that won't change visibility
+-    // in this window.
+-    if (persist) {
+-      let prefValue;
+-      if (typeof isVisible == "string") {
+-        prefValue = isVisible;
+-      } else {
+-        prefValue = isVisible ? "always" : "never";
+-      }
+-      Services.prefs.setCharPref(
+-        "browser.toolbars.bookmarks.visibility",
+-        prefValue
+-      );
+-    }
+ 
+-    switch (isVisible) {
+-      case true:
+-      case "always":
+-        isVisible = true;
+-        break;
+-      case false:
+-      case "never":
+-        isVisible = false;
+-        break;
+-      case "newtab":
+-      default: {
+-        let currentURI;
+-        if (!gBrowserInit.domContentLoaded) {
+-          let uriToLoad = gBrowserInit.uriToLoadPromise;
+-          if (uriToLoad) {
+-            if (Array.isArray(uriToLoad)) {
+-              // We only care about the first tab being loaded
+-              uriToLoad = uriToLoad[0];
+-            }
+-            currentURI = URL.parse(uriToLoad)?.URI;
+-            if (!currentURI) {
+-              currentURI = gBrowser?.currentURI;
+-            }
+-          }
+-        } else {
+-          currentURI = gBrowser.currentURI;
+-        }
+-        isVisible = BookmarkingUI.isOnNewTabPage(currentURI);
+-        break;
+-      }
+-    }
+-  }
+ 
+-  if (toolbar.hasAttribute(hidingAttribute) != isVisible) {
+-    // If this call will not result in a visibility change, return early
+-    // since dispatching toolbarvisibilitychange will cause views to get rebuilt.
+-    return;
+-  }
+-
+-  toolbar.classList.toggle("instant", !animated);
+-  toolbar.toggleAttribute(hidingAttribute, !isVisible);
+-  // For the bookmarks toolbar, we will have saved state above. For other
+-  // toolbars, we need to do it after setting the attribute, or we might
+-  // save the wrong state.
+-  if (persist && toolbar.id != "PersonalToolbar") {
+-    Services.xulStore.persist(toolbar, hidingAttribute);
+-  }
+-
+-  let eventParams = {
+-    detail: {
+-      visible: isVisible,
+-    },
+-    bubbles: true,
+-  };
+-  let event = new CustomEvent("toolbarvisibilitychange", eventParams);
+-  toolbar.dispatchEvent(event);
+-}
+-
+-function updateToggleControlLabel(control) {
+-  if (!control.hasAttribute("label-checked")) {
+-    return;
+-  }
+-
+-  if (!control.hasAttribute("label-unchecked")) {
+-    control.setAttribute("label-unchecked", control.getAttribute("label"));
+-  }
+-  let prefix = control.hasAttribute("checked") ? "" : "un";
+-  control.setAttribute("label", control.getAttribute(`label-${prefix}checked`));
+-}
+-
+ // Propagates Win10's tablet mode into the browser CSS. (Win11's tablet mode is
+ // more like non-tablet mode and has no need for this.)
+-var Win10TabletModeUpdater = {
+-  init() {
+-    if (AppConstants.platform == "win") {
+-      this.update(WindowsUIUtils.inWin10TabletMode);
+-      Services.obs.addObserver(this, "tablet-mode-change");
+-    }
+-  },
+ 
+-  uninit() {
+-    if (AppConstants.platform == "win") {
+-      Services.obs.removeObserver(this, "tablet-mode-change");
+-    }
+-  },
+-
+-  observe(subject, topic, data) {
+-    this.update(data == "win10-tablet-mode");
+-  },
+-
+-  update(isInTabletMode) {
+-    if (isInTabletMode) {
+-      document.documentElement.setAttribute("win10-tablet-mode", "true");
+-    } else {
+-      document.documentElement.removeAttribute("win10-tablet-mode");
+-    }
+-  },
+-};
+-
+ function displaySecurityInfo() {
+   BrowserCommands.pageInfo(null, "securityTab");
+ }
+ 
+ // Updates the UI density (for touch and compact mode) based on the uidensity pref.
+-var gUIDensity = {
+-  MODE_NORMAL: 0,
+-  MODE_COMPACT: 1,
+-  MODE_TOUCH: 2,
+-  uiDensityPref: "browser.uidensity",
+-  autoTouchModePref: "browser.touchmode.auto",
+-  knownPrefs: new Set(["browser.uidensity", "browser.touchmode.auto"]),
+-
+-  init() {
+-    this.update();
+-    Services.obs.addObserver(this, "tablet-mode-change");
+-    Services.prefs.addObserver(this.uiDensityPref, this);
+-    Services.prefs.addObserver(this.autoTouchModePref, this);
+-  },
+-
+-  uninit() {
+-    Services.obs.removeObserver(this, "tablet-mode-change");
+-    Services.prefs.removeObserver(this.uiDensityPref, this);
+-    Services.prefs.removeObserver(this.autoTouchModePref, this);
+-  },
+-
+-  observe(aSubject, aTopic, aPrefName) {
+-    const ok = (() => {
+-      if (aTopic == "tablet-mode-change") {
+-        return true;
+-      }
+-      if (aTopic == "nsPref:changed" && this.knownPrefs.has(aPrefName)) {
+-        return true;
+-      }
+-      return false;
+-    })();
+-    if (!ok) {
+-      return;
+-    }
+-
+-    this.update();
+-  },
+-
+-  getCurrentDensity() {
+-    // Automatically override the uidensity to touch in Windows tablet mode
+-    // (either Win10 or Win11).
+-    if (AppConstants.platform == "win") {
+-      const inTablet =
+-        WindowsUIUtils.inWin10TabletMode || WindowsUIUtils.inWin11TabletMode;
+-      if (inTablet && Services.prefs.getBoolPref(this.autoTouchModePref)) {
+-        return { mode: this.MODE_TOUCH, overridden: true };
+-      }
+-    }
+-    return {
+-      mode: Services.prefs.getIntPref(this.uiDensityPref),
+-      overridden: false,
+-    };
+-  },
+-
+-  update(mode) {
+-    if (mode == null) {
+-      mode = this.getCurrentDensity().mode;
+-    }
+-
+-    let docs = [document.documentElement];
+-    let shouldUpdateSidebar =
+-      SidebarController.initialized && SidebarController.isOpen;
+-    if (shouldUpdateSidebar) {
+-      docs.push(SidebarController.browser.contentDocument.documentElement);
+-    }
+-    for (let doc of docs) {
+-      switch (mode) {
+-        case this.MODE_COMPACT:
+-          doc.setAttribute("uidensity", "compact");
+-          break;
+-        case this.MODE_TOUCH:
+-          doc.setAttribute("uidensity", "touch");
+-          break;
+-        default:
+-          doc.removeAttribute("uidensity");
+-          break;
+-      }
+-    }
+-    if (shouldUpdateSidebar) {
+-      let tree = SidebarController.browser.contentDocument.querySelector(
+-        ".sidebar-placesTree"
+-      );
+-      if (tree) {
+-        // Tree items don't update their styles without changing some property on the
+-        // parent tree element, like background-color or border. See bug 1407399.
+-        tree.style.border = "1px";
+-        tree.style.border = "";
+-      }
+-    }
+-
+-    window.dispatchEvent(new CustomEvent("uidensitychanged"));
+-  },
+-};
+-
+-const DynamicShortcutTooltip = {
+-  nodeToTooltipMap: {
+-    "bookmarks-menu-button": "bookmarksMenuButton.tooltip",
+-    "context-reload": "reloadButton.tooltip",
+-    "context-stop": "stopButton.tooltip",
+-    "downloads-button": "downloads.tooltip",
+-    "fullscreen-button": "fullscreenButton.tooltip",
+-    "appMenu-fullscreen-button2": "fullscreenButton.tooltip",
+-    "new-window-button": "newWindowButton.tooltip",
+-    "new-tab-button": "newTabButton.tooltip",
+-    "tabs-newtab-button": "newTabButton.tooltip",
+-    "reload-button": "reloadButton.tooltip",
+-    "stop-button": "stopButton.tooltip",
+-    "urlbar-zoom-button": "urlbar-zoom-button.tooltip",
+-    "appMenu-zoomEnlarge-button2": "zoomEnlarge-button.tooltip",
+-    "appMenu-zoomReset-button2": "zoomReset-button.tooltip",
+-    "appMenu-zoomReduce-button2": "zoomReduce-button.tooltip",
+-    "reader-mode-button": "reader-mode-button.tooltip",
+-    "reader-mode-button-icon": "reader-mode-button.tooltip",
+-    "vertical-tabs-newtab-button": "newTabButton.tooltip",
+-  },
+ 
+-  nodeToShortcutMap: {
+-    "bookmarks-menu-button": "manBookmarkKb",
+-    "context-reload": "key_reload",
+-    "context-stop": "key_stop",
+-    "downloads-button": "key_openDownloads",
+-    "fullscreen-button": "key_enterFullScreen",
+-    "appMenu-fullscreen-button2": "key_enterFullScreen",
+-    "new-window-button": "key_newNavigator",
+-    "new-tab-button": "key_newNavigatorTab",
+-    "tabs-newtab-button": "key_newNavigatorTab",
+-    "reload-button": "key_reload",
+-    "stop-button": "key_stop",
+-    "urlbar-zoom-button": "key_fullZoomReset",
+-    "appMenu-zoomEnlarge-button2": "key_fullZoomEnlarge",
+-    "appMenu-zoomReset-button2": "key_fullZoomReset",
+-    "appMenu-zoomReduce-button2": "key_fullZoomReduce",
+-    "reader-mode-button": "key_toggleReaderMode",
+-    "reader-mode-button-icon": "key_toggleReaderMode",
+-    "vertical-tabs-newtab-button": "key_newNavigatorTab",
+-  },
+ 
+-  getText(nodeId) {
+-    if (!this.cache.has(nodeId) && nodeId in this.nodeToTooltipMap) {
+-      let strId = this.nodeToTooltipMap[nodeId];
+-      let args = [];
+-      let shouldCache = true;
+-      if (nodeId in this.nodeToShortcutMap) {
+-        let shortcutId = this.nodeToShortcutMap[nodeId];
+-        let shortcut = document.getElementById(shortcutId);
+-        if (shortcut) {
+-          let prettyShortcut = ShortcutUtils.prettifyShortcut(shortcut);
+-          args.push(prettyShortcut);
+-          if (!prettyShortcut) {
+-            shouldCache = false;
+-          }
+-        }
+-      }
+-      let string = gNavigatorBundle.getFormattedString(strId, args);
+-      if (shouldCache) {
+-        this.cache.set(nodeId, string);
+-      }
+-      return string;
+-    }
+-    return this.cache.get(nodeId);
+-  },
+-
+-  updateText(aTooltip) {
+-    let nodeId = aTooltip.triggerNode.id;
+-    aTooltip.setAttribute("label", this.getText(nodeId));
+-  },
+-
+-  cache: new Map(),
+-};
+-
+ /*
+  * - [ Dependencies ] ---------------------------------------------------------
+  *  utilityOverlay.js:
+@@ -3841,12 +2871,7 @@
+     const remoteControlComponent = this.getRemoteControlComponent();
+     if (remoteControlComponent) {
+       mainWindow.setAttribute("remotecontrol", "true");
+-      const remoteControlIcon = document.getElementById("remote-control-icon");
+-      document.l10n.setAttributes(
+-        remoteControlIcon,
+-        "urlbar-remote-control-notification-anchor2",
+-        { component: remoteControlComponent }
+-      );
++
+     } else {
+       mainWindow.removeAttribute("remotecontrol");
+     }
+@@ -4092,70 +3117,6 @@
+   },
+ };
+ 
+-var PanicButtonNotifier = {
+-  init() {
+-    this._initialized = true;
+-    if (window.PanicButtonNotifierShouldNotify) {
+-      delete window.PanicButtonNotifierShouldNotify;
+-      this.notify();
+-    }
+-  },
+-  createPanelIfNeeded() {
+-    // Lazy load the panic-button-success-notification panel the first time we need to display it.
+-    if (!document.getElementById("panic-button-success-notification")) {
+-      let template = document.getElementById("panicButtonNotificationTemplate");
+-      template.replaceWith(template.content);
+-    }
+-  },
+-  notify() {
+-    if (!this._initialized) {
+-      window.PanicButtonNotifierShouldNotify = true;
+-      return;
+-    }
+-    // Display notification panel here...
+-    try {
+-      this.createPanelIfNeeded();
+-      let popup = document.getElementById("panic-button-success-notification");
+-      popup.hidden = false;
+-
+-      // To close the popup in 3 seconds after the popup is shown but left uninteracted.
+-      let closePopup = () => {
+-        popup.hidePopup();
+-      };
+-      popup.addEventListener("popupshown", function () {
+-        PanicButtonNotifier.timer = setTimeout(closePopup, 3000);
+-      });
+-
+-      let closeButton = document.getElementById(
+-        "panic-button-success-closebutton"
+-      );
+-      closeButton.addEventListener("command", closePopup);
+-
+-      // To prevent the popup from closing when user tries to interact with the
+-      // popup using mouse or keyboard.
+-      let onUserInteractsWithPopup = () => {
+-        clearTimeout(PanicButtonNotifier.timer);
+-      };
+-      popup.addEventListener("mouseover", onUserInteractsWithPopup);
+-      window.addEventListener("keydown", onUserInteractsWithPopup);
+-
+-      let removeListeners = () => {
+-        popup.removeEventListener("mouseover", onUserInteractsWithPopup);
+-        window.removeEventListener("keydown", onUserInteractsWithPopup);
+-        popup.removeEventListener("popuphidden", removeListeners);
+-        closeButton.removeEventListener("command", closePopup);
+-        clearTimeout(PanicButtonNotifier.timer);
+-      };
+-      popup.addEventListener("popuphidden", removeListeners);
+-
+-      let widget = CustomizableUI.getWidget("panic-button").forWindow(window);
+-      let anchor = widget.anchor.icon;
+-      popup.openPopup(anchor, popup.getAttribute("position"));
+-    } catch (ex) {
+-      console.error(ex);
+-    }
+-  },
+-};
+ 
+ /**
+  * The TabDialogBox supports opening window dialogs as SubDialogs on the tab and content
+@@ -4678,295 +3639,8 @@
+   gDialogBox = null;
+ }
+ 
++// Toji: the confirmation toasts hung from Firefox's toolbar buttons are gone.
+ var ConfirmationHint = {
+-  _timerID: null,
+-
+-  /**
+-   * Shows a transient, non-interactive confirmation hint anchored to an
+-   * element, usually used in response to a user action to reaffirm that it was
+-   * successful and potentially provide extra context. Examples for such hints:
+-   * - "Saved to bookmarks" after bookmarking a page
+-   * - "Sent!" after sending a tab to another device
+-   * - "Queued (offline)" when attempting to send a tab to another device
+-   *   while offline
+-   *
+-   * @param  anchor (DOM node, required)
+-   *         The anchor for the panel.
+-   * @param  messageId (string, required)
+-   *         For getting the message string from confirmationHints.ftl
+-   * @param  options (object, optional)
+-   *         An object with the following optional properties:
+-   *         - event (DOM event): The event that triggered the feedback
+-   *         - descriptionId (string): message ID of the description text
+-   *         - position (string): position of the panel relative to the anchor.
+-   *         - l10nArgs (object): l10n arguments for the messageId.
+-   *         - hideCheckmark: Whether to hide the animated checkmark
+-   */
+-  show(
+-    anchor,
+-    messageId,
+-    {
+-      hideCheckmark = false,
+-      descriptionId,
+-      l10nArgs,
+-      showDescription,
+-      position,
+-      event,
+-    } = {}
+-  ) {
+-    this._reset();
+-
+-    MozXULElement.insertFTLIfNeeded("toolkit/branding/brandings.ftl");
+-    MozXULElement.insertFTLIfNeeded("browser/confirmationHints.ftl");
+-
+-    // IP Protection strings are still in preview (see Bug 2011776).
+-    // Only insert the preview file if we're showing a hint for IP Protection.
+-    if (
+-      messageId === "confirmation-hint-ipprotection-navigated-to-excluded-site"
+-    ) {
+-      MozXULElement.insertFTLIfNeeded("browser/ipProtection.ftl");
+-    }
+-
+-    document.l10n.setAttributes(this._message, messageId, l10nArgs);
+-    if (descriptionId) {
+-      document.l10n.setAttributes(this._description, descriptionId);
+-      this._description.hidden = false;
+-      this._panel.classList.add("with-description");
+-    } else {
+-      this._description.hidden = true;
+-      this._panel.classList.remove("with-description");
+-    }
+-
+-    this._panel.setAttribute("data-message-id", messageId);
+-
+-    if (!hideCheckmark) {
+-      this._panel.classList.add("with-checkmark");
+-    }
+-
+-    // The timeout value used here allows the panel to stay open for
+-    // 3s after the text transition (duration=120ms) has finished.
+-    // If there is a description, we show for 6s after the text transition.
+-    const DURATION = showDescription ? 6000 : 3000;
+-    this._panel.addEventListener(
+-      "popupshown",
+-      () => {
+-        this._animationBox.setAttribute("animate", "true");
+-        this._timerID = setTimeout(() => {
+-          this._panel.hidePopup(true);
+-        }, DURATION + 120);
+-      },
+-      { once: true }
+-    );
+-
+-    this._panel.addEventListener(
+-      "popuphidden",
+-      () => {
+-        // reset the timerId in case our timeout wasn't the cause of the popup being hidden
+-        this._reset();
+-      },
+-      { once: true }
+-    );
+-
+-    this._panel.openPopup(anchor, {
+-      position: position ?? "bottomleft topleft",
+-      triggerEvent: event,
+-    });
+-  },
+-
+-  _reset() {
+-    if (this._timerID) {
+-      clearTimeout(this._timerID);
+-      this._timerID = null;
+-    }
+-    if (this.__panel) {
+-      this._animationBox.removeAttribute("animate");
+-      this._panel.removeAttribute("data-message-id");
+-      this._panel.classList.remove("with-checkmark");
+-    }
+-  },
+-
+-  get _panel() {
+-    this._ensurePanel();
+-    return this.__panel;
+-  },
+-
+-  get _animationBox() {
+-    this._ensurePanel();
+-    delete this._animationBox;
+-    return (this._animationBox = document.getElementById(
+-      "confirmation-hint-checkmark-animation-container"
+-    ));
+-  },
+-
+-  get _message() {
+-    this._ensurePanel();
+-    delete this._message;
+-    return (this._message = document.getElementById(
+-      "confirmation-hint-message"
+-    ));
+-  },
+-
+-  get _description() {
+-    this._ensurePanel();
+-    delete this._description;
+-    return (this._description = document.getElementById(
+-      "confirmation-hint-description"
+-    ));
+-  },
+-
+-  _ensurePanel() {
+-    if (!this.__panel) {
+-      let wrapper = document.getElementById("confirmation-hint-wrapper");
+-      wrapper.replaceWith(wrapper.content);
+-      this.__panel = document.getElementById("confirmation-hint");
+-    }
+-  },
++  show() {},
+ };
+ 
+-var FirefoxViewHandler = {
+-  tab: null,
+-  BUTTON_ID: "firefox-view-button",
+-  get button() {
+-    return document.getElementById(this.BUTTON_ID);
+-  },
+-  init() {
+-    CustomizableUI.addListener(this);
+-
+-    ChromeUtils.defineESModuleGetters(this, {
+-      SyncedTabs: "resource://services-sync/SyncedTabs.sys.mjs",
+-    });
+-  },
+-  uninit() {
+-    CustomizableUI.removeListener(this);
+-  },
+-  onWidgetRemoved(aWidgetId) {
+-    if (aWidgetId == this.BUTTON_ID && this.tab) {
+-      gBrowser.removeTab(this.tab);
+-    }
+-  },
+-  onWidgetAdded(aWidgetId) {
+-    if (aWidgetId === this.BUTTON_ID) {
+-      this.button.removeAttribute("open");
+-    }
+-  },
+-  openTab(section) {
+-    if (!CustomizableUI.getPlacementOfWidget(this.BUTTON_ID)) {
+-      CustomizableUI.addWidgetToArea(
+-        this.BUTTON_ID,
+-        CustomizableUI.AREA_TABSTRIP,
+-        CustomizableUI.getPlacementOfWidget("tabbrowser-tabs").position
+-      );
+-    }
+-    let viewURL = "about:firefoxview";
+-    if (section) {
+-      viewURL = `${viewURL}#${section}`;
+-    }
+-    // Need to account for navigation to Firefox View pages
+-    if (
+-      this.tab &&
+-      this.tab.linkedBrowser.currentURI.spec.split("#")[0] != viewURL
+-    ) {
+-      gBrowser.removeTab(this.tab);
+-      this.tab = null;
+-    }
+-    if (!this.tab) {
+-      this.tab = gBrowser.addTrustedTab(viewURL);
+-      this.tab.addEventListener("TabClose", this, { once: true });
+-      gBrowser.tabContainer.addEventListener("TabSelect", this);
+-      window.addEventListener("activate", this);
+-      gBrowser.hideTab(this.tab);
+-      this.button.setAttribute("aria-controls", this.tab.linkedPanel);
+-    }
+-    // we put this here to avoid a race condition that would occur
+-    // if this was called in response to "TabSelect"
+-    this._closeDeviceConnectedTab();
+-    gBrowser.selectedTab = this.tab;
+-  },
+-  openToolbarMouseEvent(event, section) {
+-    if (event?.type == "mousedown" && event?.button != 0) {
+-      return;
+-    }
+-    this.openTab(section);
+-  },
+-  handleEvent(e) {
+-    switch (e.type) {
+-      case "TabSelect": {
+-        const selected = e.target == this.tab;
+-        this.button?.toggleAttribute("open", selected);
+-        this.button?.setAttribute("aria-pressed", selected);
+-        this._recordViewIfTabSelected();
+-        this._onTabForegrounded();
+-        // If Fx View is opened, add temporary style to make first available tab focusable
+-        // When Fx View is closed, remove temporary -moz-user-focus style from first available tab
+-        gBrowser.visibleTabs[0].style.MozUserFocus =
+-          e.target == this.tab ? "normal" : "";
+-        break;
+-      }
+-      case "TabClose":
+-        this.tab = null;
+-        gBrowser.tabContainer.removeEventListener("TabSelect", this);
+-        this.button?.removeAttribute("aria-controls");
+-        break;
+-      case "activate":
+-        this._onTabForegrounded();
+-        break;
+-    }
+-  },
+-  _closeDeviceConnectedTab() {
+-    if (!TabsSetupFlowManager.didFxaTabOpen) {
+-      return;
+-    }
+-    // close the tab left behind after a user pairs a device and
+-    // is redirected back to the Firefox View tab
+-    const fxaRoot = Services.prefs.getCharPref(
+-      "identity.fxaccounts.remote.root"
+-    );
+-    const fxDeviceConnectedTab = gBrowser.tabs.find(tab =>
+-      tab.linkedBrowser.currentURI.displaySpec.startsWith(
+-        `${fxaRoot}pair/auth/complete`
+-      )
+-    );
+-
+-    if (!fxDeviceConnectedTab) {
+-      return;
+-    }
+-
+-    if (gBrowser.tabs.length <= 2) {
+-      // if its the only tab besides the Firefox View tab,
+-      // open a new tab first so the browser doesn't close
+-      gBrowser.addTrustedTab("about:newtab");
+-    }
+-    gBrowser.removeTab(fxDeviceConnectedTab);
+-    TabsSetupFlowManager.didFxaTabOpen = false;
+-  },
+-  _onTabForegrounded() {
+-    if (this.tab?.selected) {
+-      this.SyncedTabs.syncTabs();
+-    }
+-  },
+-  _recordViewIfTabSelected() {
+-    if (this.tab?.selected) {
+-      const PREF_NAME = "browser.firefox-view.button-clicks";
+-      const MAX_DAYS_COUNT = 30 * 24 * 60 * 60 * 1000;
+-      let buttonClicksData = JSON.parse(
+-        Services.prefs.getStringPref(
+-          PREF_NAME,
+-          '{"count":0,"lastCountTime":""}'
+-        )
+-      );
+-      let { count, lastCountTime } = buttonClicksData;
+-      // Record telemetry
+-      Glean.firefoxviewNext.tabSelectedToolbarbutton.record();
+-
+-      if (Math.round(Date.now()) - lastCountTime >= MAX_DAYS_COUNT) {
+-        // reset count every 30 days
+-        count = 0;
+-      } else {
+-        count++;
+-      }
+-      buttonClicksData.lastCountTime = Math.round(Date.now());
+-      buttonClicksData.count = count;
+-      Services.prefs.setStringPref(PREF_NAME, JSON.stringify(buttonClicksData));
+-    }
+-  },
+-};
+--- a/browser/base/content/browser-addons.js
++++ b/browser/base/content/browser-addons.js
+@@ -1755,89 +1755,8 @@
+     }
+   },
+ };
+-
+-var gExtensionsNotifications = {
+-  initialized: false,
+-  init() {
+-    this.updateAlerts();
+-    this.boundUpdate = this.updateAlerts.bind(this);
+-    ExtensionsUI.on("change", this.boundUpdate);
+-    this.initialized = true;
+-  },
+-
+-  uninit() {
+-    // uninit() can race ahead of init() in some cases, if that happens,
+-    // we have no handler to remove.
+-    if (!this.initialized) {
+-      return;
+-    }
+-    ExtensionsUI.off("change", this.boundUpdate);
+-  },
+-
+-  _createAddonButton(l10nId, addon, callback) {
+-    let text = addon
+-      ? lazy.l10n.formatValueSync(l10nId, { addonName: addon.name })
+-      : lazy.l10n.formatValueSync(l10nId);
+-    let button = document.createXULElement("toolbarbutton");
+-    button.setAttribute("id", l10nId);
+-    button.setAttribute("wrap", "true");
+-    button.setAttribute("label", text);
+-    button.setAttribute("tooltiptext", text);
+-    const DEFAULT_EXTENSION_ICON =
+-      "chrome://mozapps/skin/extensions/extensionGeneric.svg";
+-    button.setAttribute("image", addon?.iconURL || DEFAULT_EXTENSION_ICON);
+-    button.className = "addon-banner-item subviewbutton";
+ 
+-    button.addEventListener("command", callback);
+-    PanelUI.addonNotificationContainer.appendChild(button);
+-  },
+ 
+-  updateAlerts() {
+-    let sideloaded = ExtensionsUI.sideloaded;
+-    let updates = ExtensionsUI.updates;
+-
+-    let container = PanelUI.addonNotificationContainer;
+-
+-    while (container.firstChild) {
+-      container.firstChild.remove();
+-    }
+-
+-    let items = 0;
+-    if (lazy.AMBrowserExtensionsImport.canCompleteOrCancelInstalls) {
+-      this._createAddonButton("webext-imported-addons", null, () => {
+-        lazy.AMBrowserExtensionsImport.completeInstalls();
+-      });
+-      items++;
+-    }
+-
+-    for (let update of updates) {
+-      if (++items > 4) {
+-        break;
+-      }
+-      this._createAddonButton(
+-        "webext-perms-update-menu-item",
+-        update.addon,
+-        () => {
+-          ExtensionsUI.showUpdate(gBrowser, update);
+-        }
+-      );
+-    }
+-
+-    for (let addon of sideloaded) {
+-      if (++items > 4) {
+-        break;
+-      }
+-      this._createAddonButton("webext-perms-sideload-menu-item", addon, () => {
+-        // We need to hide the main menu manually because the toolbarbutton is
+-        // removed immediately while processing this event, and PanelUI is
+-        // unable to identify which panel should be closed automatically.
+-        PanelUI.hide();
+-        ExtensionsUI.showSideloaded(gBrowser, addon);
+-      });
+-    }
+-  },
+-};
+-
+ var BrowserAddonUI = {
+   async promptRemoveExtension(addon) {
+     let { name } = addon;
+@@ -2011,1349 +1930,4 @@
+     });
+   },
+ };
+-
+-// We must declare `gUnifiedExtensions` using `var` below to avoid a
+-// "redeclaration" syntax error.
+-var gUnifiedExtensions = {
+-  _initialized: false,
+-  // buttonAlwaysVisible: true, -- based on pref, declared later.
+-  _buttonShownBeforeButtonOpen: null,
+-  _buttonBarHasMouse: false,
+-
+-  // We use a `<deck>` in the extension items to show/hide messages below each
+-  // extension name. We have a default message for origin controls, and
+-  // optionally a second message shown on hover, which describes the action
+-  // (when clicking on the action button). We have another message shown when
+-  // the menu button is hovered/focused. The constants below define the indexes
+-  // of each message in the `<deck>`.
+-  MESSAGE_DECK_INDEX_DEFAULT: 0,
+-  MESSAGE_DECK_INDEX_HOVER: 1,
+-  MESSAGE_DECK_INDEX_MENU_HOVER: 2,
+-
+-  init() {
+-    if (this._initialized) {
+-      return;
+-    }
+-
+-    // Button is hidden by default, declared in navigator-toolbox.inc.xhtml.
+-    this._button = document.getElementById("unified-extensions-button");
+-    this._navbar = document.getElementById("nav-bar");
+-    this.updateButtonVisibility();
+-    this._buttonAttrObs = new MutationObserver(() => this.onButtonOpenChange());
+-    this._buttonAttrObs.observe(this._button, { attributeFilter: ["open"] });
+-    this._button.addEventListener("PopupNotificationsBeforeAnchor", this);
+-    this._updateButtonBarListeners();
+-
+-    gBrowser.addTabsProgressListener(this);
+-    window.addEventListener("TabSelect", () => this.updateAttention());
+-    window.addEventListener("toolbarvisibilitychange", this);
+-
+-    this.permListener = () => this.updateAttention();
+-    lazy.ExtensionPermissions.addListener(this.permListener);
+-
+-    this.onAppMenuShowing = this.onAppMenuShowing.bind(this);
+-    PanelUI.mainView.addEventListener("ViewShowing", this.onAppMenuShowing);
+-    gNavToolbox.addEventListener("customizationstarting", this);
+-    gNavToolbox.addEventListener("aftercustomization", this);
+-    CustomizableUI.addListener(this);
+-    AddonManager.addManagerListener(this);
+-
+-    Glean.extensionsButton.prefersHiddenButton.set(!this.buttonAlwaysVisible);
+-
+-    this._initialized = true;
+-  },
+-
+-  uninit() {
+-    if (!this._initialized) {
+-      return;
+-    }
+-
+-    this._buttonAttrObs.disconnect();
+-    this._button.removeEventListener("PopupNotificationsBeforeAnchor", this);
+-
+-    window.removeEventListener("toolbarvisibilitychange", this);
+-
+-    lazy.ExtensionPermissions.removeListener(this.permListener);
+-    this.permListener = null;
+-
+-    PanelUI.mainView.removeEventListener("ViewShowing", this.onAppMenuShowing);
+-    gNavToolbox.removeEventListener("customizationstarting", this);
+-    gNavToolbox.removeEventListener("aftercustomization", this);
+-    CustomizableUI.removeListener(this);
+-    AddonManager.removeManagerListener(this);
+-  },
+-
+-  _updateButtonBarListeners() {
+-    // Called from init() and when the buttonAlwaysVisible flag changes.
+-    //
+-    // We don't expect the user to be interacting with the Extensions Button or
+-    // the navbar when the buttonAlwaysVisible flag changes. Still, we reset
+-    // the _buttonBarHasMouse flag to false to make sure that the button can be
+-    // hidden eventually if there are no other triggers:
+-    // - on registration, we don't know whether the mouse is on the navbar.
+-    // - after unregistration, the flag is no longer maintained, and false is a
+-    //   safe default value.
+-    this._buttonBarHasMouse = false;
+-    // We need mouse listeners on _navbar to maintain _buttonBarHasMouse,
+-    // but only if the button is conditionally visible/hidden.
+-    if (this.buttonAlwaysVisible) {
+-      this._navbar.removeEventListener("mouseover", this);
+-      this._navbar.removeEventListener("mouseout", this);
+-    } else {
+-      this._navbar.addEventListener("mouseover", this);
+-      this._navbar.addEventListener("mouseout", this);
+-    }
+-  },
+-
+-  onBlocklistAttentionUpdated() {
+-    this.updateAttention();
+-  },
+-
+-  onAppMenuShowing() {
+-    document.getElementById("appMenu-extensions-themes-button").hidden =
+-      !this.buttonAlwaysVisible;
+-    document.getElementById("appMenu-unified-extensions-button").hidden =
+-      this.buttonAlwaysVisible;
+-  },
+-
+-  onLocationChange(browser, webProgress, _request, _uri, flags) {
+-    // Only update on top-level cross-document navigations in the selected tab.
+-    if (
+-      webProgress.isTopLevel &&
+-      browser === gBrowser.selectedBrowser &&
+-      !(flags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT)
+-    ) {
+-      this.updateAttention();
+-    }
+-  },
+-
+-  updateButtonVisibility() {
+-    // TODO: Bug 1778684 - Auto-hide button when there is no active extension.
+-    let shouldShowButton =
+-      this.buttonAlwaysVisible ||
+-      // If anything is anchored to the button, keep it visible.
+-      this._button.open ||
+-      // Button will be open soon - see ensureButtonShownBeforeAttachingPanel.
+-      this._buttonShownBeforeButtonOpen ||
+-      // Items in the toolbar shift when the button hides. To prevent the user
+-      // from clicking on something different than they intended, never hide an
+-      // already-visible button while the mouse is still in the toolbar.
+-      (!this.button.hidden && this._buttonBarHasMouse) ||
+-      // Attention dot - see comment at buttonIgnoresAttention.
+-      (!this.buttonIgnoresAttention && this.button.hasAttribute("attention")) ||
+-      // Always show when customizing, because even if the button should mostly
+-      // be hidden, the user should be able to specify the desired location for
+-      // cases where the button is forcibly shown.
+-      CustomizationHandler.isCustomizing();
+-
+-    if (shouldShowButton) {
+-      this._button.hidden = false;
+-      this._navbar.setAttribute("unifiedextensionsbuttonshown", true);
+-    } else {
+-      this._button.hidden = true;
+-      this._navbar.removeAttribute("unifiedextensionsbuttonshown");
+-    }
+-  },
+-
+-  ensureButtonShownBeforeAttachingPanel(panel) {
+-    if (!this.buttonAlwaysVisible && !this._button.open) {
+-      // When the panel is anchored to the button, its "open" attribute will be
+-      // set, which visually renders as a "button pressed". Until we get there,
+-      // we need to make sure that the button is visible so that it can serve
+-      // as anchor.
+-      this._buttonShownBeforeButtonOpen = panel;
+-      this.updateButtonVisibility();
+-    }
+-  },
+-
+-  onButtonOpenChange() {
+-    if (this._button.open) {
+-      this._buttonShownBeforeButtonOpen = false;
+-    }
+-    if (!this.buttonAlwaysVisible && !this._button.open) {
+-      this.updateButtonVisibility();
+-    }
+-  },
+-
+-  // Update the attention indicator for the whole unified extensions button.
+-  updateAttention() {
+-    let permissionsAttention = false;
+-    let quarantinedAttention = false;
+-    let blocklistAttention = AddonManager.shouldShowBlocklistAttention();
+-
+-    // Computing the OriginControls state for all active extensions is potentially
+-    // more expensive, and so we don't compute it if we have already determined that
+-    // there is a blocklist attention to be shown.
+-    if (!blocklistAttention) {
+-      for (let policy of this.getActivePolicies()) {
+-        let widget = this.browserActionFor(policy)?.widget;
+-
+-        // Only show for extensions which are not already visible in the toolbar.
+-        if (!widget || widget.areaType !== CustomizableUI.TYPE_TOOLBAR) {
+-          if (lazy.OriginControls.getAttentionState(policy, window).attention) {
+-            permissionsAttention = true;
+-            break;
+-          }
+-        }
+-      }
+-
+-      // If the domain is quarantined and we have extensions not allowed, we'll
+-      // show a notification in the panel so we want to let the user know about
+-      // it.
+-      quarantinedAttention = this._shouldShowQuarantinedNotification();
+-    }
+-
+-    this.button.toggleAttribute(
+-      "attention",
+-      quarantinedAttention || permissionsAttention || blocklistAttention
+-    );
+-    let msgId = permissionsAttention
+-      ? "unified-extensions-button-permissions-needed"
+-      : "unified-extensions-button";
+-    // Quarantined state takes precedence over anything else.
+-    if (quarantinedAttention) {
+-      msgId = "unified-extensions-button-quarantined";
+-    }
+-    // blocklistAttention state takes precedence over the other ones
+-    // because it is dismissible and, once dismissed, the tooltip will
+-    // show one of the other messages if appropriate.
+-    if (blocklistAttention) {
+-      msgId = "unified-extensions-button-blocklisted";
+-    }
+-    this.button.ownerDocument.l10n.setAttributes(this.button, msgId);
+-    if (!this.buttonAlwaysVisible && !this.buttonIgnoresAttention) {
+-      if (blocklistAttention) {
+-        this.recordButtonTelemetry("attention_blocklist");
+-      } else if (permissionsAttention || quarantinedAttention) {
+-        this.recordButtonTelemetry("attention_permission_denied");
+-      }
+-      this.updateButtonVisibility();
+-    }
+-  },
+-
+-  // Get the anchor to use with PopupNotifications.show(). If you add a new use
+-  // of this method, make sure to update gXPInstallObserver.NOTIFICATION_IDS!
+-  // If the new ID is not added in NOTIFICATION_IDS, consider handling the case
+-  // in the "PopupNotificationsBeforeAnchor" handler elsewhere in this file.
+-  getPopupAnchorID(aBrowser, aWindow) {
+-    const anchorID = "unified-extensions-button";
+-    const attr = anchorID + "popupnotificationanchor";
+-
+-    if (!aBrowser[attr]) {
+-      // A hacky way of setting the popup anchor outside the usual url bar
+-      // icon box, similar to how it was done for CFR.
+-      // See: https://searchfox.org/mozilla-central/rev/c5c002f81f08a73e04868e0c2bf0eb113f200b03/toolkit/modules/PopupNotifications.sys.mjs#40
+-      aBrowser[attr] = aWindow.document.getElementById(
+-        anchorID
+-        // Anchor on the toolbar icon to position the popup right below the
+-        // button.
+-      ).firstElementChild;
+-    }
+-
+-    return anchorID;
+-  },
+-
+-  get button() {
+-    return this._button;
+-  },
+-
+-  /**
+-   * Gets a list of active WebExtensionPolicy instances of type "extension",
+-   * excluding hidden extensions, available to this window.
+-   *
+-   * @param {boolean} skipPBMCheck When false (the default), the result
+-   *                  excludes extensions that cannot access the current window
+-   *                  due to the window being a private browsing window that
+-   *                  the extension is not allowed to access.
+-   * @returns {Array<WebExtensionPolicy>} An array of active policies.
+-   */
+-  getActivePolicies(skipPBMCheck = false) {
+-    let policies = WebExtensionPolicy.getActiveExtensions();
+-    policies = policies.filter(policy => {
+-      let { extension } = policy;
+-      if (extension?.type !== "extension") {
+-        // extension can only be null due to bugs (bug 1642012).
+-        // Exclude non-extension types such as themes, dictionaries, etc.
+-        return false;
+-      }
+-
+-      // Ignore hidden and extensions that cannot access the current window
+-      // (because of PB mode when we are in a private window), since users
+-      // cannot do anything with those extensions anyway.
+-      if (
+-        extension.isHidden ||
+-        // NOTE: policy.canAccessWindow() sounds generic, but it really only
+-        // enforces private browsing access.
+-        (!skipPBMCheck && !policy.canAccessWindow(window))
+-      ) {
+-        return false;
+-      }
+-
+-      return true;
+-    });
+-
+-    return policies;
+-  },
+-
+-  /**
+-   * Returns true when there are active extensions listed/shown in the unified
+-   * extensions panel, and false otherwise (e.g. when extensions are pinned in
+-   * the toolbar OR there are 0 active extensions).
+-   *
+-   * @param {Array<WebExtensionPolicy> [policies] The list of extensions to
+-   *   evaluate. Defaults to the active extensions with access to this window
+-   *   (see getActivePolicies).
+-   * @returns {boolean} Whether there are extensions listed in the panel.
+-   */
+-  hasExtensionsInPanel(policies = this.getActivePolicies()) {
+-    return policies.some(policy => {
+-      let widget = this.browserActionFor(policy)?.widget;
+-      return (
+-        !widget ||
+-        widget.areaType !== CustomizableUI.TYPE_TOOLBAR ||
+-        widget.forWindow(window).overflowed
+-      );
+-    });
+-  },
+-
+-  isPrivateWindowMissingExtensionsWithoutPBMAccess() {
+-    if (!PrivateBrowsingUtils.isWindowPrivate(window)) {
+-      return false;
+-    }
+-    const policies = this.getActivePolicies(/* skipPBMCheck */ true);
+-    return policies.some(p => !p.privateBrowsingAllowed);
+-  },
+-
+-  /**
+-   * Returns whether there is any active extension without private browsing
+-   * access, for which the user can toggle the "Run in Private Windows" option.
+-   * This complements the isPrivateWindowMissingExtensionsWithoutPBMAccess()
+-   * method, by distinguishing cases where the user can enable any extension
+-   * in the private window, vs cases where the user cannot.
+-   *
+-   * @returns {Promise<boolean>} Whether there is any "Run in Private Windows"
+-   *                             option that is Off and can be set to On.
+-   */
+-  async isAtLeastOneExtensionWithPBMOptIn() {
+-    const addons = await AddonManager.getAddonsByTypes(["extension"]);
+-    return addons.some(addon => {
+-      if (
+-        // We only care about extensions shown in the panel and about:addons.
+-        addon.hidden ||
+-        // We only care about extensions whose PBM access can be toggled.
+-        !(
+-          addon.permissions &
+-          lazy.AddonManager.PERM_CAN_CHANGE_PRIVATEBROWSING_ACCESS
+-        )
+-      ) {
+-        return false;
+-      }
+-      const policy = WebExtensionPolicy.getByID(addon.id);
+-      // policy can be null if the extension is not active.
+-      return policy && !policy.privateBrowsingAllowed;
+-    });
+-  },
+-
+-  async getDisabledExtensionsInfo() {
+-    let addons = await AddonManager.getAddonsByTypes(["extension"]);
+-    addons = addons.filter(a => !a.hidden && !a.isActive);
+-    const isAnyDisabled = !!addons.length;
+-    const isAnyEnableable = addons.some(
+-      a => a.permissions & lazy.AddonManager.PERM_CAN_ENABLE
+-    );
+-    return { isAnyDisabled, isAnyEnableable };
+-  },
+-
+-  handleEvent(event) {
+-    switch (event.type) {
+-      case "ViewShowing":
+-        this.onPanelViewShowing(event.target);
+-        break;
+-
+-      case "ViewHiding":
+-        this.onPanelViewHiding(event.target);
+-        break;
+-
+-      case "PopupNotificationsBeforeAnchor":
+-        {
+-          const popupnotification = PopupNotifications.panel.firstElementChild;
+-          const popupid = popupnotification?.getAttribute("popupid");
+-          if (popupid === "addon-webext-permissions") {
+-            // "addon-webext-permissions" is also in NOTIFICATION_IDS, but to
+-            // distinguish it from other cases, give it a separate reason.
+-            this.recordButtonTelemetry("extension_permission_prompt");
+-          } else if (gXPInstallObserver.NOTIFICATION_IDS.includes(popupid)) {
+-            this.recordButtonTelemetry("addon_install_doorhanger");
+-          } else {
+-            console.error(`Unrecognized notification ID: ${popupid}`);
+-          }
+-          this.ensureButtonShownBeforeAttachingPanel(PopupNotifications.panel);
+-        }
+-        break;
+-
+-      case "mouseover":
+-        this._buttonBarHasMouse = true;
+-        break;
+-
+-      case "mouseout":
+-        if (
+-          this._buttonBarHasMouse &&
+-          !this._navbar.contains(event.relatedTarget)
+-        ) {
+-          this._buttonBarHasMouse = false;
+-          this.updateButtonVisibility();
+-        }
+-        break;
+-
+-      case "customizationstarting":
+-        this.panel.hidePopup();
+-        this.recordButtonTelemetry("customize");
+-        this.updateButtonVisibility();
+-        break;
+-
+-      case "aftercustomization":
+-        this.updateButtonVisibility();
+-        break;
+-
+-      case "toolbarvisibilitychange":
+-        this.onToolbarVisibilityChange(event.target.id, event.detail.visible);
+-        break;
+-    }
+-  },
+-
+-  onPanelViewShowing(panelview) {
+-    const policies = this.getActivePolicies();
+-
+-    // Only add extensions that do not have a browser action in this list since
+-    // the extensions with browser action have CUI widgets and will appear in
+-    // the panel (or toolbar) via the CUI mechanism.
+-    const policiesForList = policies.filter(
+-      p => !p.extension.hasBrowserActionUI
+-    );
+-    policiesForList.sort((a, b) => a.name.localeCompare(b.name));
+-
+-    const list = panelview.querySelector(".unified-extensions-list");
+-    for (const policy of policiesForList) {
+-      const item = document.createElement("unified-extensions-item");
+-      item.setExtension(policy.extension);
+-      list.appendChild(item);
+-    }
+-
+-    const emptyStateBox = panelview.querySelector(
+-      "#unified-extensions-empty-state"
+-    );
+-    if (this.hasExtensionsInPanel(policies)) {
+-      // Any of the extension lists are non-empty.
+-      emptyStateBox.hidden = true;
+-    } else if (this.isPrivateWindowMissingExtensionsWithoutPBMAccess()) {
+-      document.l10n.setAttributes(
+-        emptyStateBox.querySelector("h2"),
+-        "unified-extensions-empty-reason-private-browsing-not-allowed"
+-      );
+-      document.l10n.setAttributes(
+-        emptyStateBox.querySelector("description"),
+-        "unified-extensions-empty-content-explain-enable2"
+-      );
+-      emptyStateBox.hidden = false;
+-      this.isAtLeastOneExtensionWithPBMOptIn().then(result => {
+-        // The "enable" message is somewhat misleading when the user cannot
+-        // enable the extension, show a generic message instead (bug 1992179).
+-        if (!result) {
+-          document.l10n.setAttributes(
+-            emptyStateBox.querySelector("description"),
+-            "unified-extensions-empty-content-explain-manage2"
+-          );
+-        }
+-      });
+-    } else {
+-      emptyStateBox.hidden = true;
+-      this.getDisabledExtensionsInfo().then(disabledExtensionsInfo => {
+-        if (disabledExtensionsInfo.isAnyDisabled) {
+-          document.l10n.setAttributes(
+-            emptyStateBox.querySelector("h2"),
+-            "unified-extensions-empty-reason-extension-not-enabled"
+-          );
+-          document.l10n.setAttributes(
+-            emptyStateBox.querySelector("description"),
+-            disabledExtensionsInfo.isAnyEnableable
+-              ? "unified-extensions-empty-content-explain-enable2"
+-              : "unified-extensions-empty-content-explain-manage2"
+-          );
+-          emptyStateBox.hidden = false;
+-        } else if (!policies.length) {
+-          document.l10n.setAttributes(
+-            emptyStateBox.querySelector("h2"),
+-            "unified-extensions-empty-reason-zero-extensions-onboarding"
+-          );
+-          document.l10n.setAttributes(
+-            emptyStateBox.querySelector("description"),
+-            "unified-extensions-empty-content-explain-extensions-onboarding"
+-          );
+-          emptyStateBox.hidden = false;
+-
+-          // Replace the "Manage Extensions" button with "Discover Extensions".
+-          // We add the "Discover Extensions" button, and "Manage Extensions"
+-          // button (#unified-extensions-manage-extensions) is hidden by CSS.
+-          const discoverButton = this._createDiscoverButton(panelview);
+-
+-          const manageExtensionsButton = panelview.querySelector(
+-            "#unified-extensions-manage-extensions"
+-          );
+-          // Insert before toolbarseparator, to make it easier to hide the
+-          // toolbarseparator and manageExtensionsButton with CSS.
+-          manageExtensionsButton.previousElementSibling.before(discoverButton);
+-        }
+-      });
+-    }
+-
+-    const container = panelview.querySelector(
+-      "#unified-extensions-messages-container"
+-    );
+-
+-    if (Services.appinfo.inSafeMode) {
+-      this._messageBarSafemode ??= this._makeMessageBar({
+-        messageBarFluentId: "unified-extensions-notice-safe-mode",
+-        supportPage: "diagnose-firefox-issues-using-troubleshoot-mode",
+-        type: "info",
+-      });
+-      container.prepend(this._messageBarSafemode);
+-    } // No "else" case; inSafeMode flag is fixed at browser startup.
+-
+-    if (this.blocklistAttentionInfo?.shouldShow) {
+-      this._messageBarBlocklist = this._createBlocklistMessageBar(container);
+-    } else {
+-      this._messageBarBlocklist?.remove();
+-      this._messageBarBlocklist = null;
+-    }
+-
+-    const shouldShowQuarantinedNotification =
+-      this._shouldShowQuarantinedNotification();
+-    if (shouldShowQuarantinedNotification) {
+-      if (!this._messageBarQuarantinedDomain) {
+-        this._messageBarQuarantinedDomain = this._makeMessageBar({
+-          messageBarFluentId:
+-            "unified-extensions-mb-quarantined-domain-message-3",
+-          supportPage: "quarantined-domains",
+-          supportPageFluentId:
+-            "unified-extensions-mb-quarantined-domain-learn-more",
+-          dismissible: false,
+-        });
+-        this._messageBarQuarantinedDomain
+-          .querySelector("a")
+-          .addEventListener("click", () => {
+-            this.togglePanel();
+-          });
+-      }
+-
+-      container.appendChild(this._messageBarQuarantinedDomain);
+-    } else if (
+-      !shouldShowQuarantinedNotification &&
+-      this._messageBarQuarantinedDomain &&
+-      container.contains(this._messageBarQuarantinedDomain)
+-    ) {
+-      container.removeChild(this._messageBarQuarantinedDomain);
+-      this._messageBarQuarantinedDomain = null;
+-    }
+-  },
+-
+-  onPanelViewHiding(panelview) {
+-    if (window.closed) {
+-      return;
+-    }
+-    const list = panelview.querySelector(".unified-extensions-list");
+-    while (list.lastChild) {
+-      list.lastChild.remove();
+-    }
+-    panelview
+-      .querySelector("#unified-extensions-discover-extensions")
+-      ?.remove();
+-
+-    // If temporary access was granted, (maybe) clear attention indicator.
+-    requestAnimationFrame(() => this.updateAttention());
+-  },
+-
+-  onToolbarVisibilityChange(toolbarId, isVisible) {
+-    // A list of extension widget IDs (possibly empty).
+-    let widgetIDs;
+-
+-    try {
+-      widgetIDs = CustomizableUI.getWidgetIdsInArea(toolbarId).filter(
+-        CustomizableUI.isWebExtensionWidget
+-      );
+-    } catch {
+-      // Do nothing if the area does not exist for some reason.
+-      return;
+-    }
+-
+-    // The list of overflowed extensions in the extensions panel.
+-    const overflowedExtensionsList = this.panel.querySelector(
+-      "#overflowed-extensions-list"
+-    );
+-
+-    // We are going to move all the extension widgets via DOM manipulation
+-    // *only* so that it looks like these widgets have moved (and users will
+-    // see that) but CUI still thinks the widgets haven't been moved.
+-    //
+-    // We can move the extension widgets either from the toolbar to the
+-    // extensions panel OR the other way around (when the toolbar becomes
+-    // visible again).
+-    for (const widgetID of widgetIDs) {
+-      const widget = CustomizableUI.getWidget(widgetID);
+-      if (!widget) {
+-        continue;
+-      }
+-
+-      if (isVisible) {
+-        this._maybeMoveWidgetNodeBack(widget.id);
+-      } else {
+-        const { node } = widget.forWindow(window);
+-        // Artificially overflow the extension widget in the extensions panel
+-        // when the toolbar is hidden.
+-        node.setAttribute("overflowedItem", true);
+-        node.setAttribute("artificallyOverflowed", true);
+-        // This attribute forces browser action popups to be anchored to the
+-        // extensions button.
+-        node.setAttribute("cui-anchorid", "unified-extensions-button");
+-        overflowedExtensionsList.appendChild(node);
+-
+-        this._updateWidgetClassName(widgetID, /* inPanel */ true);
+-      }
+-    }
+-  },
+-
+-  _maybeMoveWidgetNodeBack(widgetID) {
+-    const widget = CustomizableUI.getWidget(widgetID);
+-    if (!widget) {
+-      return;
+-    }
+-
+-    // We only want to move back widget nodes that have been manually moved
+-    // previously via `onToolbarVisibilityChange()`.
+-    const { node } = widget.forWindow(window);
+-    if (!node.hasAttribute("artificallyOverflowed")) {
+-      return;
+-    }
+-
+-    const { area, position } = CustomizableUI.getPlacementOfWidget(widgetID);
+-
+-    // This is where we are going to re-insert the extension widgets (DOM
+-    // nodes) but we need to account for some hidden DOM nodes already present
+-    // in this container when determining where to put the nodes back.
+-    const container = CustomizableUI.getCustomizationTarget(
+-      document.getElementById(area)
+-    );
+-
+-    let moved = false;
+-    let currentPosition = 0;
+-
+-    for (const child of container.childNodes) {
+-      const isSkipToolbarset = child.getAttribute("skipintoolbarset") == "true";
+-      if (isSkipToolbarset && child !== container.lastChild) {
+-        continue;
+-      }
+-
+-      if (currentPosition === position) {
+-        child.before(node);
+-        moved = true;
+-        break;
+-      }
+-
+-      if (child === container.lastChild) {
+-        child.after(node);
+-        moved = true;
+-        break;
+-      }
+-
+-      currentPosition++;
+-    }
+-
+-    if (moved) {
+-      // Remove the attribute set when we artificially overflow the widget.
+-      node.removeAttribute("overflowedItem");
+-      node.removeAttribute("artificallyOverflowed");
+-      node.removeAttribute("cui-anchorid");
+-
+-      this._updateWidgetClassName(widgetID, /* inPanel */ false);
+-    }
+-  },
+-
+-  _panel: null,
+-  get panel() {
+-    // Lazy load the unified-extensions-panel panel the first time we need to
+-    // display it.
+-    if (!this._panel) {
+-      let template = document.getElementById(
+-        "unified-extensions-panel-template"
+-      );
+-      template.replaceWith(template.content);
+-      this._panel = document.getElementById("unified-extensions-panel");
+-      let customizationArea = this._panel.querySelector(
+-        "#unified-extensions-area"
+-      );
+-      CustomizableUI.registerPanelNode(
+-        customizationArea,
+-        CustomizableUI.AREA_ADDONS
+-      );
+-      CustomizableUI.addPanelCloseListeners(this._panel);
+-
+-      this._panel
+-        .querySelector("#unified-extensions-manage-extensions")
+-        .addEventListener("command", () => {
+-          BrowserAddonUI.openAddonsMgr("addons://list/extension");
+-        });
+-
+-      // Lazy-load the l10n strings. Those strings are used for the CUI and
+-      // non-CUI extensions in the unified extensions panel.
+-      document
+-        .getElementById("unified-extensions-context-menu")
+-        .querySelectorAll("[data-lazy-l10n-id]")
+-        .forEach(el => {
+-          el.setAttribute("data-l10n-id", el.getAttribute("data-lazy-l10n-id"));
+-          el.removeAttribute("data-lazy-l10n-id");
+-        });
+-    }
+-    return this._panel;
+-  },
+-
+-  // `aEvent` and `reason` are optional. If `reason` is specified, it should be
+-  // a valid argument to gUnifiedExtensions.recordButtonTelemetry().
+-  async togglePanel(aEvent, reason) {
+-    if (!CustomizationHandler.isCustomizing()) {
+-      if (aEvent) {
+-        if (
+-          // On MacOS, ctrl-click will send a context menu event from the
+-          // widget, so we don't want to bring up the panel when ctrl key is
+-          // pressed.
+-          (aEvent.type == "mousedown" &&
+-            (aEvent.button !== 0 ||
+-              (AppConstants.platform === "macosx" && aEvent.ctrlKey))) ||
+-          (aEvent.type === "keypress" &&
+-            aEvent.charCode !== KeyEvent.DOM_VK_SPACE &&
+-            aEvent.keyCode !== KeyEvent.DOM_VK_RETURN)
+-        ) {
+-          return;
+-        }
+-
+-        // The button should directly open `about:addons` when the user does not
+-        // have any active extensions listed in the unified extensions panel,
+-        // and no alternative content is available for display in the panel.
+-        const policies = this.getActivePolicies();
+-        if (
+-          policies.length &&
+-          !this.hasExtensionsInPanel(policies) &&
+-          !this.isPrivateWindowMissingExtensionsWithoutPBMAccess() &&
+-          !(await this.getDisabledExtensionsInfo()).isAnyDisabled
+-        ) {
+-          // This may happen if the user has pinned all of their extensions.
+-          // In that case, the extensions panel is empty.
+-          await BrowserAddonUI.openAddonsMgr("addons://list/extension");
+-          return;
+-        }
+-      }
+-
+-      this.blocklistAttentionInfo =
+-        await AddonManager.getBlocklistAttentionInfo();
+-
+-      let panel = this.panel;
+-
+-      if (!this._listView) {
+-        this._listView = PanelMultiView.getViewNode(
+-          document,
+-          "unified-extensions-view"
+-        );
+-        this._listView.addEventListener("ViewShowing", this);
+-        this._listView.addEventListener("ViewHiding", this);
+-      }
+-
+-      if (this._button.open) {
+-        PanelMultiView.hidePopup(panel);
+-        this._button.open = false;
+-      } else {
+-        // Overflow extensions placed in collapsed toolbars, if any.
+-        for (const toolbarId of CustomizableUI.getCollapsedToolbarIds(window)) {
+-          // We pass `false` because all these toolbars are collapsed.
+-          this.onToolbarVisibilityChange(toolbarId, /* isVisible */ false);
+-        }
+-
+-        panel.hidden = false;
+-        this.recordButtonTelemetry(reason || "extensions_panel_showing");
+-        this.ensureButtonShownBeforeAttachingPanel(panel);
+-        PanelMultiView.openPopup(panel, this._button, {
+-          position: "bottomright topright",
+-          triggerEvent: aEvent,
+-        });
+-      }
+-    }
+-
+-    // We always dispatch an event (useful for testing purposes).
+-    window.dispatchEvent(new CustomEvent("UnifiedExtensionsTogglePanel"));
+-  },
+-
+-  async openPanel(event, reason) {
+-    if (this._button.open) {
+-      throw new Error("Tried to open panel whilst a panel was already open!");
+-    }
+-    if (CustomizationHandler.isCustomizing()) {
+-      throw new Error("Cannot open panel while in Customize mode!");
+-    }
+-
+-    if (event?.sourceEvent?.target.id === "appMenu-unified-extensions-button") {
+-      Glean.extensionsButton.openViaAppMenu.record({
+-        is_extensions_panel_empty: !this.hasExtensionsInPanel(),
+-        is_extensions_button_visible: !this._button.hidden,
+-      });
+-    }
+-
+-    await this.togglePanel(event, reason);
+-  },
+-
+-  /**
+-   * @returns {boolean} Whether we are showing the Extensions Panel, or another
+-   * (browserAction) panel anchored to the extensions button.
+-   */
+-  isPanelOpen() {
+-    return this._button?.open ?? false;
+-  },
+-
+-  updateContextMenu(menu, event) {
+-    // When the context menu is open, `onpopupshowing` is called when menu
+-    // items open sub-menus. We don't want to update the context menu in this
+-    // case.
+-    if (event.target.id !== "unified-extensions-context-menu") {
+-      return;
+-    }
+-
+-    const id = this._getExtensionId(menu);
+-    const widgetId = this._getWidgetId(menu);
+-    const forBrowserAction = !!widgetId;
+-
+-    const pinButton = menu.querySelector(
+-      ".unified-extensions-context-menu-pin-to-toolbar"
+-    );
+-    const removeButton = menu.querySelector(
+-      ".unified-extensions-context-menu-remove-extension"
+-    );
+-    const reportButton = menu.querySelector(
+-      ".unified-extensions-context-menu-report-extension"
+-    );
+-    const menuSeparator = menu.querySelector(
+-      ".unified-extensions-context-menu-management-separator"
+-    );
+-    const moveUp = menu.querySelector(
+-      ".unified-extensions-context-menu-move-widget-up"
+-    );
+-    const moveDown = menu.querySelector(
+-      ".unified-extensions-context-menu-move-widget-down"
+-    );
+-
+-    for (const element of [menuSeparator, pinButton, moveUp, moveDown]) {
+-      element.hidden = !forBrowserAction;
+-    }
+-
+-    reportButton.hidden = !gAddonAbuseReportEnabled;
+-    // We use this syntax instead of async/await to not block this method that
+-    // updates the context menu. This avoids the context menu to be out of sync
+-    // on macOS.
+-    AddonManager.getAddonByID(id).then(addon => {
+-      removeButton.disabled = !(
+-        addon.permissions & AddonManager.PERM_CAN_UNINSTALL
+-      );
+-    });
+-
+-    if (forBrowserAction) {
+-      let area = CustomizableUI.getPlacementOfWidget(widgetId).area;
+-      let inToolbar = area != CustomizableUI.AREA_ADDONS;
+-      pinButton.toggleAttribute("checked", inToolbar);
+-
+-      const placement = CustomizableUI.getPlacementOfWidget(widgetId);
+-      const notInPanel = placement?.area !== CustomizableUI.AREA_ADDONS;
+-      // We rely on the DOM nodes because CUI widgets will always exist but
+-      // not necessarily with DOM nodes created depending on the window. For
+-      // example, in PB mode, not all extensions will be listed in the panel
+-      // but the CUI widgets may be all created.
+-      if (
+-        notInPanel ||
+-        document.querySelector("#unified-extensions-area > :first-child")
+-          ?.id === widgetId
+-      ) {
+-        moveUp.hidden = true;
+-      }
+-
+-      if (
+-        notInPanel ||
+-        document.querySelector("#unified-extensions-area > :last-child")?.id ===
+-          widgetId
+-      ) {
+-        moveDown.hidden = true;
+-      }
+-    }
+-
+-    ExtensionsUI.originControlsMenu(menu, id);
+-
+-    const browserAction = this.browserActionFor(WebExtensionPolicy.getByID(id));
+-    if (browserAction) {
+-      browserAction.updateContextMenu(menu);
+-    }
+-  },
+-
+-  // This is registered on the top-level unified extensions context menu.
+-  onContextMenuCommand(menu, event) {
+-    // Do not close the extensions panel automatically when we move extension
+-    // widgets.
+-    const { classList } = event.target;
+-    if (
+-      classList.contains("unified-extensions-context-menu-move-widget-up") ||
+-      classList.contains("unified-extensions-context-menu-move-widget-down")
+-    ) {
+-      return;
+-    }
+-
+-    this.togglePanel();
+-  },
+-
+-  browserActionFor(policy) {
+-    // Ideally, we wouldn't do that because `browserActionFor()` will only be
+-    // defined in `global` when at least one extension has required loading the
+-    // `ext-browserAction` code.
+-    let method = lazy.ExtensionParent.apiManager.global.browserActionFor;
+-    return method?.(policy?.extension);
+-  },
+-
+-  async manageExtension(menu) {
+-    const id = this._getExtensionId(menu);
+-
+-    await BrowserAddonUI.manageAddon(id, "unifiedExtensions");
+-  },
+-
+-  async removeExtension(menu) {
+-    const id = this._getExtensionId(menu);
+-
+-    await BrowserAddonUI.removeAddon(id, "unifiedExtensions");
+-  },
+-
+-  async reportExtension(menu) {
+-    const id = this._getExtensionId(menu);
+-
+-    await BrowserAddonUI.reportAddon(id, "unified_context_menu");
+-  },
+-
+-  _getExtensionId(menu) {
+-    const { triggerNode } = menu;
+-    return triggerNode
+-      .closest(".unified-extensions-item")
+-      ?.querySelector("toolbarbutton")?.dataset.extensionid;
+-  },
+-
+-  _getWidgetId(menu) {
+-    const { triggerNode } = menu;
+-    return triggerNode.closest(".unified-extensions-item")?.id;
+-  },
+-
+-  async onPinToToolbarChange(menu, event) {
+-    let shouldPinToToolbar = event.target.hasAttribute("checked");
+-    // Revert the checkbox back to its original state. This is because the
+-    // addon context menu handlers are asynchronous, and there seems to be
+-    // a race where the checkbox state won't get set in time to show the
+-    // right state. So we err on the side of caution, and presume that future
+-    // attempts to open this context menu on an extension button will show
+-    // the same checked state that we started in.
+-    event.target.toggleAttribute("checked", !shouldPinToToolbar);
+-
+-    let widgetId = this._getWidgetId(menu);
+-    if (!widgetId) {
+-      return;
+-    }
+-
+-    // We artificially overflow extension widgets that are placed in collapsed
+-    // toolbars and CUI does not know about it. For end users, these widgets
+-    // appear in the list of overflowed extensions in the panel. When we unpin
+-    // and then pin one of these extensions to the toolbar, we need to first
+-    // move the DOM node back to where it was (i.e.  in the collapsed toolbar)
+-    // so that CUI can retrieve the DOM node and do the pinning correctly.
+-    if (shouldPinToToolbar) {
+-      this._maybeMoveWidgetNodeBack(widgetId);
+-    }
+-
+-    this.pinToToolbar(widgetId, shouldPinToToolbar);
+-  },
+-
+-  pinToToolbar(widgetId, shouldPinToToolbar) {
+-    let newArea = shouldPinToToolbar
+-      ? CustomizableUI.AREA_NAVBAR
+-      : CustomizableUI.AREA_ADDONS;
+-    let newPosition = shouldPinToToolbar ? undefined : 0;
+-
+-    CustomizableUI.addWidgetToArea(widgetId, newArea, newPosition);
+-    // addWidgetToArea() will trigger onWidgetAdded or onWidgetMoved as needed,
+-    // and our handlers will call updateAttention() as needed.
+-  },
+-
+-  async moveWidget(menu, direction) {
+-    // We'll move the widgets based on the DOM node positions. This is because
+-    // in PB mode (for example), we might not have the same extensions listed
+-    // in the panel but CUI does not know that. As far as CUI is concerned, all
+-    // extensions will likely have widgets.
+-    const node = menu.triggerNode.closest(".unified-extensions-item");
+-
+-    // Find the element that is before or after the current widget/node to
+-    // move. `element` might be `null`, e.g. if the current node is the first
+-    // one listed in the panel (though it shouldn't be possible to call this
+-    // method in this case).
+-    let element;
+-    if (direction === "up" && node.previousElementSibling) {
+-      element = node.previousElementSibling;
+-    } else if (direction === "down" && node.nextElementSibling) {
+-      element = node.nextElementSibling;
+-    }
+ 
+-    // Now we need to retrieve the position of the CUI placement.
+-    const placement = CustomizableUI.getPlacementOfWidget(element?.id);
+-    if (placement) {
+-      let newPosition = placement.position;
+-      // That, I am not sure why this is required but it looks like we need to
+-      // always add one to the current position if we want to move a widget
+-      // down in the list.
+-      if (direction === "down") {
+-        newPosition += 1;
+-      }
+-
+-      CustomizableUI.moveWidgetWithinArea(node.id, newPosition);
+-    }
+-  },
+-
+-  onWidgetAdded(aWidgetId, aArea) {
+-    if (CustomizableUI.isWebExtensionWidget(aWidgetId)) {
+-      this.updateAttention();
+-    }
+-
+-    // When we pin a widget to the toolbar from a narrow window, the widget
+-    // will be overflowed directly. In this case, we do not want to change the
+-    // class name since it is going to be changed by `onWidgetOverflow()`
+-    // below.
+-    if (CustomizableUI.getWidget(aWidgetId)?.forWindow(window)?.overflowed) {
+-      return;
+-    }
+-
+-    const inPanel =
+-      CustomizableUI.getAreaType(aArea) !== CustomizableUI.TYPE_TOOLBAR;
+-
+-    this._updateWidgetClassName(aWidgetId, inPanel);
+-  },
+-
+-  onWidgetMoved(aWidgetId) {
+-    if (CustomizableUI.isWebExtensionWidget(aWidgetId)) {
+-      this.updateAttention();
+-    }
+-  },
+-
+-  onWidgetOverflow(aNode) {
+-    // We register a CUI listener for each window so we make sure that we
+-    // handle the event for the right window here.
+-    if (window !== aNode.documentGlobal) {
+-      return;
+-    }
+-
+-    this._updateWidgetClassName(aNode.getAttribute("widget-id"), true);
+-  },
+-
+-  onWidgetUnderflow(aNode) {
+-    // We register a CUI listener for each window so we make sure that we
+-    // handle the event for the right window here.
+-    if (window !== aNode.documentGlobal) {
+-      return;
+-    }
+-
+-    this._updateWidgetClassName(aNode.getAttribute("widget-id"), false);
+-  },
+-
+-  onAreaNodeRegistered(aArea, aContainer) {
+-    // We register a CUI listener for each window so we make sure that we
+-    // handle the event for the right window here.
+-    if (window !== aContainer.documentGlobal) {
+-      return;
+-    }
+-
+-    const inPanel =
+-      CustomizableUI.getAreaType(aArea) !== CustomizableUI.TYPE_TOOLBAR;
+-
+-    for (const widgetId of CustomizableUI.getWidgetIdsInArea(aArea)) {
+-      this._updateWidgetClassName(widgetId, inPanel);
+-    }
+-  },
+-
+-  // This internal method is used to change some CSS classnames on the action
+-  // and menu buttons of an extension (CUI) widget. When the widget is placed
+-  // in the panel, the action and menu buttons should have the `.subviewbutton`
+-  // class and not the `.toolbarbutton-1` one. When NOT placed in the panel,
+-  // it is the other way around.
+-  _updateWidgetClassName(aWidgetId, inPanel) {
+-    if (!CustomizableUI.isWebExtensionWidget(aWidgetId)) {
+-      return;
+-    }
+-
+-    const node = CustomizableUI.getWidget(aWidgetId)?.forWindow(window)?.node;
+-    const actionButton = node?.querySelector(
+-      ".unified-extensions-item-action-button"
+-    );
+-    if (actionButton) {
+-      actionButton.classList.toggle("subviewbutton", inPanel);
+-      actionButton.classList.toggle("subviewbutton-iconic", inPanel);
+-      actionButton.classList.toggle("toolbarbutton-1", !inPanel);
+-    }
+-    const menuButton = node?.querySelector(
+-      ".unified-extensions-item-menu-button"
+-    );
+-    if (menuButton) {
+-      menuButton.classList.toggle("subviewbutton", inPanel);
+-      menuButton.classList.toggle("subviewbutton-iconic", inPanel);
+-      menuButton.classList.toggle("toolbarbutton-1", !inPanel);
+-    }
+-  },
+-
+-  _createBlocklistMessageBar(container) {
+-    if (!this.blocklistAttentionInfo) {
+-      return null;
+-    }
+-
+-    const { addons, extensionsCount, hasHardBlocked } =
+-      this.blocklistAttentionInfo;
+-    const type = hasHardBlocked ? "error" : "warning";
+-
+-    let messageBarFluentId;
+-    let extensionName;
+-    if (extensionsCount === 1) {
+-      extensionName = addons[0].name;
+-      messageBarFluentId = hasHardBlocked
+-        ? "unified-extensions-mb-blocklist-error-single"
+-        : "unified-extensions-mb-blocklist-warning-single2";
+-    } else {
+-      messageBarFluentId = hasHardBlocked
+-        ? "unified-extensions-mb-blocklist-error-multiple"
+-        : "unified-extensions-mb-blocklist-warning-multiple2";
+-    }
+-
+-    const messageBarBlocklist = this._makeMessageBar({
+-      dismissible: true,
+-      linkToAboutAddons: true,
+-      messageBarFluentId,
+-      messageBarFluentArgs: {
+-        extensionsCount,
+-        extensionName,
+-      },
+-      type,
+-    });
+-
+-    messageBarBlocklist.addEventListener(
+-      "message-bar:user-dismissed",
+-      () => {
+-        if (messageBarBlocklist === this._messageBarBlocklist) {
+-          this._messageBarBlocklist = null;
+-        }
+-        this.blocklistAttentionInfo?.dismiss();
+-      },
+-      { once: true }
+-    );
+-
+-    if (
+-      this._messageBarBlocklist &&
+-      container.contains(this._messageBarBlocklist)
+-    ) {
+-      container.replaceChild(messageBarBlocklist, this._messageBarBlocklist);
+-    } else if (container.contains(this._messageBarQuarantinedDomain)) {
+-      container.insertBefore(
+-        messageBarBlocklist,
+-        this._messageBarQuarantinedDomain
+-      );
+-    } else {
+-      container.appendChild(messageBarBlocklist);
+-    }
+-
+-    return messageBarBlocklist;
+-  },
+-
+-  _makeMessageBar({
+-    dismissible = false,
+-    messageBarFluentId,
+-    messageBarFluentArgs,
+-    supportPage = null,
+-    supportPageFluentId,
+-    linkToAboutAddons = false,
+-    type = "warning",
+-  }) {
+-    const messageBar = document.createElement("moz-message-bar");
+-    messageBar.setAttribute("type", type);
+-    messageBar.classList.add("unified-extensions-message-bar");
+-
+-    if (dismissible) {
+-      // NOTE: the moz-message-bar is currently expected to be called `dismissable`.
+-      messageBar.setAttribute("dismissable", dismissible);
+-    }
+-
+-    if (linkToAboutAddons) {
+-      const linkToAboutAddonsEl = document.createElement("a");
+-      linkToAboutAddonsEl.setAttribute(
+-        "class",
+-        "unified-extensions-link-to-aboutaddons"
+-      );
+-      linkToAboutAddonsEl.setAttribute("slot", "support-link");
+-      linkToAboutAddonsEl.addEventListener("click", () => {
+-        BrowserAddonUI.openAddonsMgr("addons://list/extension");
+-        this.togglePanel();
+-      });
+-      document.l10n.setAttributes(
+-        linkToAboutAddonsEl,
+-        "unified-extensions-mb-about-addons-link"
+-      );
+-      messageBar.append(linkToAboutAddonsEl);
+-    }
+-
+-    document.l10n.setAttributes(
+-      messageBar,
+-      messageBarFluentId,
+-      messageBarFluentArgs
+-    );
+-
+-    if (supportPage) {
+-      const supportUrl = document.createElement("a", {
+-        is: "moz-support-link",
+-      });
+-      supportUrl.setAttribute("support-page", supportPage);
+-      if (supportPageFluentId) {
+-        document.l10n.setAttributes(supportUrl, supportPageFluentId);
+-      }
+-      supportUrl.setAttribute("slot", "support-link");
+-
+-      messageBar.append(supportUrl);
+-    }
+-
+-    return messageBar;
+-  },
+-
+-  _createDiscoverButton() {
+-    const discoverButton = document.createElement("moz-button");
+-    discoverButton.id = "unified-extensions-discover-extensions";
+-    discoverButton.type = "primary";
+-    discoverButton.className = "subviewbutton panel-subview-footer-button";
+-    document.l10n.setAttributes(
+-      discoverButton,
+-      "unified-extensions-discover-extensions"
+-    );
+-
+-    discoverButton.addEventListener("click", () => {
+-      if (
+-        // The "Discover Extensions" button is only shown if the user has not
+-        // installed any extension. In that case, we direct to the discopane
+-        // in about:addons. If the discopane is disabled, open the default
+-        // view (Extensions list) instead. This view shows a link to AMO when
+-        // the user does not have any extensions installed.
+-        Services.prefs.getBoolPref("extensions.getAddons.showPane", true)
+-      ) {
+-        BrowserAddonUI.openAddonsMgr("addons://list/discover");
+-      } else {
+-        BrowserAddonUI.openAddonsMgr("addons://list/extension");
+-      }
+-      // The panel closes automatically when the `<moz-button>` is pressed since
+-      // the `closepanel` attribute was not set to `none`.
+-    });
+-
+-    return discoverButton;
+-  },
+-
+-  _shouldShowQuarantinedNotification() {
+-    const { currentURI, selectedTab } = window.gBrowser;
+-    // We should show the quarantined notification when the domain is in the
+-    // list of quarantined domains and we have at least one extension
+-    // quarantined. In addition, we check that we have extensions in the panel
+-    // until Bug 1778684 is resolved.
+-    return (
+-      WebExtensionPolicy.isQuarantinedURI(currentURI) &&
+-      this.hasExtensionsInPanel() &&
+-      this.getActivePolicies().some(
+-        policy => lazy.OriginControls.getState(policy, selectedTab).quarantined
+-      )
+-    );
+-  },
+-
+-  // Records telemetry when the button is about to temporarily be shown,
+-  // provided that the button is hidden at the time of invocation.
+-  //
+-  // `reason` is one of the labels in extensions_button.temporarily_unhidden
+-  // in browser/components/extensions/metrics.yaml.
+-  //
+-  // This is usually immediately before a updateButtonVisibility() call,
+-  // sometimes a bit earlier (if the updateButtonVisibility() call is indirect).
+-  recordButtonTelemetry(reason) {
+-    if (!this.buttonAlwaysVisible && this._button.hidden) {
+-      Glean.extensionsButton.temporarilyUnhidden[reason].add();
+-    }
+-  },
+-
+-  hideExtensionsButtonFromToolbar() {
+-    // All browser windows will observe this and call updateButtonVisibility().
+-    Services.prefs.setBoolPref(
+-      "extensions.unifiedExtensions.button.always_visible",
+-      false
+-    );
+-    ConfirmationHint.show(
+-      document.getElementById("PanelUI-menu-button"),
+-      "confirmation-hint-extensions-button-hidden"
+-    );
+-    Glean.extensionsButton.toggleVisibility.record({
+-      is_customizing: CustomizationHandler.isCustomizing(),
+-      is_extensions_panel_empty: !this.hasExtensionsInPanel(),
+-      // After setting the above pref to false, the button should hide
+-      // immediately. If this was not the case, then something caused the
+-      // button to be shown temporarily.
+-      is_temporarily_shown: !this._button.hidden,
+-      should_hide: true,
+-    });
+-  },
+-
+-  showExtensionsButtonInToolbar() {
+-    let wasShownBefore = !this.buttonAlwaysVisible && !this._button.hidden;
+-    // All browser windows will observe this and call updateButtonVisibility().
+-    Services.prefs.setBoolPref(
+-      "extensions.unifiedExtensions.button.always_visible",
+-      true
+-    );
+-    Glean.extensionsButton.toggleVisibility.record({
+-      is_customizing: CustomizationHandler.isCustomizing(),
+-      is_extensions_panel_empty: !this.hasExtensionsInPanel(),
+-      is_temporarily_shown: wasShownBefore,
+-      should_hide: false,
+-    });
+-  },
+-};
+-XPCOMUtils.defineLazyPreferenceGetter(
+-  gUnifiedExtensions,
+-  "buttonAlwaysVisible",
+-  "extensions.unifiedExtensions.button.always_visible",
+-  true,
+-  (prefName, oldValue, newValue) => {
+-    if (gUnifiedExtensions._initialized) {
+-      gUnifiedExtensions._updateButtonBarListeners();
+-      gUnifiedExtensions.updateButtonVisibility();
+-      Glean.extensionsButton.prefersHiddenButton.set(!newValue);
+-    }
+-  }
+-);
+-// With button.always_visible is false, we still show the button in specific
+-// cases when needed. The user is always empowered to dismiss the specific
+-// trigger that causes the button to be shown. The attention dot is the
+-// exception, where the button cannot easily be hidden. Users who willingly
+-// want to ignore the attention dot can set this preference to keep the button
+-// hidden even if attention is requested.
+-XPCOMUtils.defineLazyPreferenceGetter(
+-  gUnifiedExtensions,
+-  "buttonIgnoresAttention",
+-  "extensions.unifiedExtensions.button.ignore_attention",
+-  false,
+-  () => {
+-    if (
+-      gUnifiedExtensions._initialized &&
+-      !gUnifiedExtensions.buttonAlwaysVisible
+-    ) {
+-      gUnifiedExtensions.updateButtonVisibility();
+-    }
+-  }
+-);
+--- a/browser/base/content/nsContextMenu.sys.mjs
++++ b/browser/base/content/nsContextMenu.sys.mjs
+@@ -5,28 +5,21 @@
+ const lazy = {};
+ 
+ ChromeUtils.defineESModuleGetters(lazy, {
+-  AIWindow:
+-    "moz-src:///browser/components/aiwindow/ui/modules/AIWindow.sys.mjs",
+-  BrowserSearchTelemetry:
+-    "moz-src:///browser/components/search/BrowserSearchTelemetry.sys.mjs",
++  AIWindow: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   BrowserUtils: "resource://gre/modules/BrowserUtils.sys.mjs",
+   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
+   ContextualIdentityService:
+     "resource://gre/modules/ContextualIdentityService.sys.mjs",
+   DevToolsShim: "chrome://devtools-startup/content/DevToolsShim.sys.mjs",
+   E10SUtils: "resource://gre/modules/E10SUtils.sys.mjs",
+-  GenAI: "resource:///modules/GenAI.sys.mjs",
+-  LinkPreview: "moz-src:///browser/components/genai/LinkPreview.sys.mjs",
++  GenAI: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   LoginHelper: "resource://gre/modules/LoginHelper.sys.mjs",
+   LoginManagerContextMenu:
+     "resource://gre/modules/LoginManagerContextMenu.sys.mjs",
+   NetUtil: "resource://gre/modules/NetUtil.sys.mjs",
+   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
+   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
+-  ScreenshotsUtils:
+-    "moz-src:///browser/components/screenshots/ScreenshotsUtils.sys.mjs",
+   SearchService: "moz-src:///toolkit/components/search/SearchService.sys.mjs",
+-  SearchUIUtils: "moz-src:///browser/components/search/SearchUIUtils.sys.mjs",
+   SearchUtils: "moz-src:///toolkit/components/search/SearchUtils.sys.mjs",
+   ShortcutUtils: "resource://gre/modules/ShortcutUtils.sys.mjs",
+   TranslationsParent: "resource://gre/actors/TranslationsParent.sys.mjs",
+@@ -528,10 +521,8 @@
+       shouldShow && !isWindowPrivate && showContainers
+     );
+     this.showItem("context-openlinkincurrent", this.onPlainTextLink);
+-    this.showItem(
+-      "context-previewlink",
+-      lazy.LinkPreview.shouldShowContextMenu(this)
+-    );
++    // Toji: link previews went with the AI features.
++    this.showItem("context-previewlink", false);
+     let isHiddenTab = !!window.gBrowser?.getTabForBrowser(this.browser)?.hidden;
+     let isPinnedTab = !!window.gBrowser?.getTabForBrowser(this.browser)?.pinned;
+     this.showItem(
+@@ -905,7 +896,6 @@
+     }
+ 
+     this.showAndFormatSearchContextItem();
+-    this.showTranslateSelectionItem();
+     lazy.GenAI.buildAskChatMenu(document.getElementById("context-ask-chat"), {
+       browser: this.browser,
+       selectionInfo: this.selectionInfo,
+@@ -1357,7 +1347,7 @@
+ 
+   shouldShowTakeScreenshot() {
+     let shouldShow =
+-      lazy.ScreenshotsUtils.screenshotsEnabled &&
++      false &&
+       this.inTabBrowser &&
+       !this.onTextInput &&
+       !this.onLink &&
+@@ -2276,7 +2266,7 @@
+   previewLink(url = this.linkURL) {
+     // If we're in a view-source tab, remove the view-source: prefix
+     url = url.replace(/^view-source:/, "");
+-    lazy.LinkPreview.handleContextMenuClick(url, this);
++    lazy.LinkPreview?.handleContextMenuClick(url, this);
+   }
+ 
+   /**
+@@ -2327,7 +2317,7 @@
+         method,
+       });
+ 
+-      this.window.gURLBar.search("", { searchEngine });
++      // Toji: the engine is added; the shell's omnibox has no search mode to enter.
+     }
+   }
+ 
+@@ -2942,7 +2932,7 @@
+         }
+       );
+       this.#setNewFeatureBadge(menuitem, visualSearchUrl.isNew());
+-      lazy.BrowserSearchTelemetry.recordSapImpression(
++      lazy.BrowserSearchTelemetry?.recordSapImpression(
+         this.browser,
+         menuitem.engine,
+         "contextmenu_visual"
+@@ -2963,18 +2953,17 @@
+    *   be performed. A falsey value is equivalent to
+    *   `SearchUtils.URL_TYPE.SEARCH` and will perform a usual web search.
+    */
+-  loadSearch({ event, searchUrlType = null }) {
+-    let { engine, searchTerms, usePrivate, principal, policyContainer } =
+-      event.target;
+-    lazy.SearchUIUtils.loadSearchFromContext({
+-      event,
+-      engine,
+-      policyContainer,
+-      searchUrlType,
+-      usePrivateWindow: usePrivate,
+-      window: this.window,
+-      searchText: searchTerms,
+-      triggeringPrincipal: principal,
++  async loadSearch({ event, searchUrlType = null }) {
++    // Toji: Firefox's search UI is gone; the engine's submission opens in a tab.
++    let { engine, searchTerms, principal } = event.target;
++    let submission = engine.getSubmission(searchTerms, searchUrlType ?? null);
++    if (!submission) {
++      return;
++    }
++    this.window.openTrustedLinkIn(submission.uri.spec, "tab", {
++      postData: submission.postData,
++      triggeringPrincipal:
++        principal || Services.scriptSecurityManager.getSystemPrincipal(),
+     });
+   }
+ 
+--- a/browser/base/content/utilityOverlay.js
++++ b/browser/base/content/utilityOverlay.js
+@@ -12,8 +12,7 @@
+ 
+ ChromeUtils.defineESModuleGetters(this, {
+   AboutNewTab: "resource:///modules/AboutNewTab.sys.mjs",
+-  AIWindow:
+-    "moz-src:///browser/components/aiwindow/ui/modules/AIWindow.sys.mjs",
++  AIWindow: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   BrowserUtils: "resource://gre/modules/BrowserUtils.sys.mjs",
+   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
+   ContextualIdentityService:
+@@ -64,9 +63,6 @@
+         return "about:privatebrowsing";
+       }
+     }
+-    if (AIWindow.isAIWindowActive(window)) {
+-      return AIWindow.newTabURL;
+-    }
+     return AboutNewTab.newTabURL;
+   },
+ });
+--- a/browser/base/content/browser-context.js
++++ b/browser/base/content/browser-context.js
+@@ -209,9 +209,6 @@
+           });
+           break;
+         }
+-        case "context-translate-selection":
+-          gContextMenu.openSelectTranslationsPanel(event);
+-          break;
+         case "context-showonlythisframe":
+           gContextMenu.showOnlyThisFrame();
+           break;
+--- a/browser/base/content/browser-fullScreenAndPointerLock.js
++++ b/browser/base/content/browser-fullScreenAndPointerLock.js
+@@ -503,7 +503,9 @@
+     let translate = shiftSize > 0 ? `0 ${shiftSize}px` : "";
+     gNavToolbox.classList.toggle("fullscreen-floating-toolbox", shiftSize > 0);
+     gNavToolbox.style.translate = translate;
+-    gURLBar.style.translate = gURLBar.hasAttribute("breakout") ? translate : "";
++    if (gURLBar.style) {
++      gURLBar.style.translate = gURLBar.hasAttribute("breakout") ? translate : "";
++    }
+     let searchbar = document.getElementById("searchbar-new");
+     if (searchbar) {
+       searchbar.style.translate = searchbar.hasAttribute("breakout")

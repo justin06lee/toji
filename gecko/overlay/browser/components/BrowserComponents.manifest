@@ -1,0 +1,48 @@
+# Toji's browser components (gecko/overlay): the engine's startup and per-window
+# hooks, without Firefox's UI. See docs/gecko.md, "Firefox contributes nothing".
+
+category app-startup nsBrowserGlue @mozilla.org/browser/browserglue;1 application={ec8030f7-c20a-464f-9b0e-13a3a9e97384} application={aa3c5121-dab2-40e2-81ca-7ea25febc110}
+
+# Browser global components initializing before UI startup
+category browser-before-ui-startup resource:///modules/sessionstore/SessionStore.sys.mjs SessionStore.init
+category browser-before-ui-startup moz-src:///browser/modules/ObserverForwarder.sys.mjs ObserverForwarder.init
+
+# Browser window lifecycle consumers
+category browser-window-before-initial-xul-layout chrome://browser/content/browser-customtitlebar.js CustomTitlebar.init
+
+category browser-window-domcontentloaded-before-tabbrowser resource:///modules/BrowserDOMWindow.sys.mjs BrowserDOMWindow.setupInWindow
+category browser-window-domcontentloaded-tabbrowser chrome://browser/content/tabbrowser/tabbrowser.js Tabbrowser.create
+
+category browser-window-domcontentloaded resource:///modules/BrowserWindowTracker.sys.mjs BrowserWindowTracker.track
+
+category browser-window-location-change resource://gre/modules/PictureInPicture.sys.mjs PictureInPicture.onLocationChange
+
+category browser-window-unload-begin chrome://browser/content/browser-customtitlebar.js CustomTitlebar.uninit
+category browser-window-unload moz-src:///browser/components/tabbrowser/NewTabPagePreloading.sys.mjs NewTabPagePreloading.removePreloadedBrowser
+
+category browser-window-unload-tabbrowser chrome://browser/content/tabbrowser/tabbrowser.js Tabbrowser.destroy
+
+category browser-window-final-unload resource:///modules/BrowserDOMWindow.sys.mjs BrowserDOMWindow.teardownInWindow
+
+# App startup consumers
+category browser-first-window-ready resource:///modules/ContentCrashHandlers.sys.mjs TabCrashHandler.init
+category browser-first-window-ready resource:///modules/ProcessHangMonitor.sys.mjs ProcessHangMonitor.init
+category browser-first-window-ready moz-src:///toolkit/components/doh/DoHController.sys.mjs DoHController.init
+category browser-first-window-ready moz-src:///toolkit/profile/ProfilesDatastoreService.sys.mjs ProfilesDatastoreService.init
+category browser-first-window-ready moz-src:///browser/components/protections/ContentBlockingPrefs.sys.mjs ContentBlockingPrefs.init
+#ifdef MOZ_SANDBOX
+category browser-window-delayed-startup resource://gre/modules/SandboxUtils.sys.mjs SandboxUtils.maybeWarnAboutDisabledContentSandbox
+category browser-first-window-ready resource://gre/modules/SandboxUtils.sys.mjs SandboxUtils.observeContentSandboxPref
+#endif
+
+category browser-idle-startup resource://gre/modules/RFPHelper.sys.mjs RFPHelper.init
+category browser-idle-startup resource://gre/modules/Blocklist.sys.mjs Blocklist.loadBlocklistAsync
+category browser-idle-startup resource://gre/modules/psm/RemoteSecuritySettings.sys.mjs RemoteSecuritySettings.init
+category browser-idle-startup moz-src:///browser/components/tabbrowser/TabUnloader.sys.mjs TabUnloader.init
+category browser-idle-startup resource://gre/modules/AppServicesTracing.sys.mjs RustLogForwarder.init
+#if defined(XP_WIN) || defined(XP_MACOSX)
+category browser-idle-startup moz-src:///browser/components/shell/StartupOSIntegration.sys.mjs StartupOSIntegration.onStartupIdle
+#endif
+
+# App shutdown consumers
+category browser-quit-application-granted resource://gre/modules/RFPHelper.sys.mjs RFPHelper.uninit

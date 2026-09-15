@@ -1,0 +1,12 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# Toji (gecko/overlay): the content area. Firefox's sidebars are gone; Toji's
+# sidebar is the shell's.
+
+<hbox flex="1" id="browser">
+  <tabbox id="tabbrowser-tabbox" flex="1" tabcontainer="tabbrowser-tabs">
+    <tabpanels id="tabbrowser-tabpanels" flex="1" selectedIndex="0"/>
+  </tabbox>
+</hbox>

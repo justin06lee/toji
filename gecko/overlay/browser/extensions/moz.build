@@ -1,0 +1,13 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# Toji (gecko/overlay): the built-in add-ons that make sites work. The new-tab
+# page, form autofill, the VPN activator and search-hijack telemetry are gone.
+
+DIRS += [
+    "webcompat",
+    "pictureinpicture",
+]
+
+JAR_MANIFESTS += ["jar.mn"]

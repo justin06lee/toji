@@ -424,6 +424,64 @@ engine and what the open pages need. Two ways were weighed, with the ESR 153 sou
    `experience.ts` walks the whole window after a page loads and fails if any element
    outside the shell and the pages paints anything with a box on screen.
 
+### Deleted from the tree, not hidden (2026-09-14)
+
+The user's second decision: Firefox's UI must not exist in what Toji is built from,
+not merely go unshown. So the build deletes it. `gecko/strip.txt` lists the paths
+(globs allowed) that `gecko/build.ts` removes from the unpacked tree after the patches
+and before the overlay; the expansion of every pattern is remembered in
+`.work/stripped.json`, a pattern taken off the list has its files put back from the
+tarball, and a patch that touched a restored file is applied again. Overlay files that
+replaced Firefox's own are restored the same way when they leave the overlay. To change
+what the engine's remaining code does, edit it in the tree and run
+`bun gecko/scripts/mkpatch.ts NNNN-name path...`, which writes the patch from the
+tarball's pristine copies and marks it applied.
+
+**Gone** (the list is the source of truth; these are the groups): every page and panel
+Firefox drew — about:logins, onboarding, the messaging system (ASRouter, spotlights,
+callouts, infobars of its own), backups, Firefox View, the AI window and chat, VPN,
+the new tab page and its built-in add-on, profiles, protections, private-browsing pages,
+the reader-mode actors, screenshots, the search UI, the sidebar, synced tabs, tab notes,
+taskbar tabs, the Touch Bar, the translation panels, UITour, the URL bar, the toolbar
+customization framework, the downloads panel, the Library and bookmark dialogs, the
+migration wizard, about:policies; the window's own toolbars, the app menu, the identity
+and permission panels, the trust panel, Sync, thumbnails, page actions, page info; the
+built-in add-ons for form autofill, the new tab page, the VPN activator and search
+telemetry; the window modules behind them; Firefox's theme (what the engine's surfaces
+still need is listed in `gecko/overlay/browser/themes/shared/jar.inc.mn`); the strings
+of all of it; the browser's tests and the screenshot tool.
+
+**Toji's own in their place** (`gecko/overlay/browser/`): the app glue
+(`BrowserGlue.sys.mjs`: startup, shutdown, the categories, without onboarding, prompts,
+Sync, telemetry, studies), the actor registry (`DesktopActorRegistry.sys.mjs`: prompts,
+permissions, links, media, crashes, the context menu, PDF.js), the component manifest
+and the build manifests of every trimmed directory, the browser window itself
+(`browser.xhtml` and its includes: the menubar as the Electron app's, a hidden tab strip
+the tab model lives in, the notification deck, the content area, the popups a page needs,
+the commands and shortcuts the Electron app had), its initialization (`browser-init.js`),
+`AboutNewTab.sys.mjs` reduced to the new-tab address, and a stand-in `CustomizableUI`
+that answers "no such widget" to the WebExtension browserAction API. Two stand-ins carry
+the last references: `browser/toji/content/window/stubs.js` (window globals the tab
+model and full screen still name: `gURLBar`, `FirefoxViewHandler`, `SidebarController`…)
+and `browser/toji/modules/FirefoxStubs.sys.mjs` (modules the engine's code lazily
+imported: the messaging system, the URL bar's helpers, sponsor tracking, taskbar tabs,
+the AI window, tab notes, the home page). Patches 0005–0008 trim `browser.js`, the tab
+model, a dozen engine modules and the about: page table (C++, one file) accordingly;
+0009–0014 are what the first build of the stripped tree turned up (below).
+
+**Kept on purpose, and why**: `tabbrowser` (the tab model), session restore, the
+places helpers the engine uses, downloads' backend and the Save dialog, tab-modal
+prompts and permission requests, the page context menu (its items trimmed at runtime by
+`TojiFirefoxUI`, as before), the migrators (Toji's imports), the search service, the
+shell service, the WebExtension APIs uBlock Origin needs (browserAction against the
+stand-in; omnibox, pageAction, sidebarAction, search, topSites and urlOverrides are
+gone with their UI), Picture-in-Picture, webcompat, about:addons, PDF.js, devtools and
+the diagnostic pages. In toolkit only the VPN half is deleted: the translations and ML
+engines, Normandy, Nimbus, the messaging library, background tasks and the password
+manager stay as locked-off services — they are wired into C++, the extension APIs and
+printing (reader mode's parser), and none of them is UI; Mozilla's endpoints are still
+off through `toji.cfg`.
+
 ## Performance: nothing runs while a page sits still
 
 The rule (the user's, 2026-09-14): performance is an expectation, not a feature. Pages
@@ -893,3 +951,62 @@ walk-through of the built app found, and this round fixed:
 - Typing about:settings (or any about: address) searched for it.
 
 `experience.ts` (new, in `make check`) checks it; `shell.ts` still passes 32/32.
+
+### 2026-09-14 — the stripped tree builds, packages and passes the shell check
+
+The first build of the tree with Firefox's UI deleted (`gecko/strip.txt`, 296 paths)
+failed in five places, and the packaged app then quit at startup or opened a broken
+window in a dozen more; each is fixed in the tree and recorded as a patch or in the
+overlay's stand-ins:
+
+- **Build.** The Glean metrics index named YAML files of deleted features (0009, with
+  `Telemetry.cpp`'s use of the profiles metric); the langpack rule descended into the
+  deleted marketplace icons (0010); the theme manifest named an icon by a wrong path
+  (`incontent-icons/tab-crashed.svg`); the stubs module wasn't in `browser/toji/moz.build`;
+  and the overlay's `browser/components/moz.build` had dropped `nsIBrowserHandler.idl`, so
+  `Ci.nsIBrowserHandler` was undefined and every lookup of the browser handler service
+  (the context menu actor, the places startup) failed with `NS_ERROR_XPC_BAD_CONVERT_JS`.
+  The interface's stale `.xpt` from the original build had to be deleted for make to
+  regenerate it.
+- **Startup.** Kept engine modules still imported deleted ones: the enterprise policies
+  (QuickSuggest), the content handler (the AI window), webrtcUI (synced tabs' event
+  emitter, now toolkit's), the sanitizer, the new-tab preloader, the window's DOM glue
+  (taskbar tabs), places (content sharing), WebNavigation and the downloads view (the URL
+  bar's helpers), the link handler (OpenSearch), the shell service and toolkit's telemetry
+  policy (the messaging system), the extension APIs' browserAction and toolkit's telemetry
+  controller (usage telemetry), devtools' startup (the toolbar widget framework), the
+  prompt collection (profiles), the process actor (the new-tab cache). All point at
+  `FirefoxStubs.sys.mjs` now (0007, 0011–0014), whose exports carry every member the
+  callers name (checked by a scan of the tree, not by trial).
+- **The window.** `stubs.js` gained `ToolbarIconColor`, `DynamicShortcutTooltip`,
+  `ZoomUI`, `SelectableProfileService` and the permission panel's methods; the tab model
+  no longer looks for Firefox's container indicator or find-bar key (0006); the password
+  doorhanger (Toji's vault saves passwords) and its element callback are out of
+  `popup-notifications.inc.xhtml` and `browser.js` (0005, 0013); the window include no
+  longer links strings of deleted features; devtools, the menus extension API and
+  session restore (the hidden window's History menu) tolerate menus the window doesn't
+  have; the places startup no longer registers the import button; the context menu no
+  longer asks the deleted link-preview and search-telemetry modules. The window's
+  `privatebrowsingmode` attribute, which `PrivateBrowsingUI.sys.mjs` set before it went
+  with the menus it adjusted, is set by `browser-init.js` now (the tab model titles the
+  window by it and the shell reads it).
+- `experience.ts` (17 checks) and `shell.ts` (32) pass against the packaged app;
+  `shell.ts` accepts the History and Tools menus being absent rather than hidden, and
+  `experience.ts` waits for a Toji page's own title rather than reading the tab's text
+  the moment its address changes, and for a tab that slept through Tor mode to be
+  restored before navigating it (a load issued while session restore is waking the tab
+  is replaced by the restore, in Firefox too; the test saw the cookie page's request
+  hang out its timeout that way, about one run in three). `phase1.ts`' idle run now
+  expects the bundled blocker's filter-list hosts (it fetches them on first launch; the
+  list predated uBlock), and `toji.cfg` locks add-on update checks off: the blocker is
+  pinned by hash in `gecko/addons.json`, and `versioncheck-bg.addons.mozilla.org` was
+  the one Mozilla endpoint still contacted at idle.
+
+How a dead reference is found now, for the next time: unpack both `omni.ja` files and
+resolve every `chrome://browser/`, `resource:///modules/` and `moz-src:///browser/` URL
+in them through the chrome manifests (the scan lives in the session notes; it is ten
+lines of Python). What remains unresolved is the lazy imports of features that are off
+(the messaging system, Nimbus, background tasks, the password manager's about:logins,
+Relay, the profiler popup) and icons in toolkit CSS — reached only by code that never
+runs in Toji.
+

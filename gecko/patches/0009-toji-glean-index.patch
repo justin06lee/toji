@@ -1,0 +1,80 @@
+--- a/toolkit/components/glean/metrics_index.py
++++ b/toolkit/components/glean/metrics_index.py
+@@ -82,7 +82,6 @@
+     "toolkit/components/formautofill/metrics.yaml",
+     "toolkit/components/gecko-trace/generated-metrics.yaml",
+     "toolkit/components/glean/metrics.yaml",
+-    "toolkit/components/ipprotection/metrics.yaml",
+     "toolkit/components/mediasniffer/metrics.yaml",
+     "toolkit/components/messaging-system/metrics.yaml",
+     "toolkit/components/ml/metrics.yaml",
+@@ -115,38 +114,17 @@
+ # Order is lexicographical, enforced by t/c/glean/tests/pytest/test_yaml_indices.py
+ firefox_desktop_metrics = [
+     "browser/actors/metrics.yaml",
+-    "browser/components/aiwindow/metrics.yaml",
+-    "browser/components/asrouter/metrics.yaml",
+     "browser/components/attribution/metrics.yaml",
+-    "browser/components/backup/metrics.yaml",
+-    "browser/components/contentsharing/metrics.yaml",
+     "browser/components/contextualidentity/metrics.yaml",
+-    "browser/components/controlcenter/metrics.yaml",
+-    "browser/components/customkeys/metrics.yaml",
+     "browser/components/downloads/metrics.yaml",
+     "browser/components/extensions/metrics.yaml",
+-    "browser/components/firefoxview/metrics.yaml",
+-    "browser/components/genai/metrics.yaml",
+-    "browser/components/ipprotection/metrics.yaml",
+     "browser/components/metrics.yaml",
+     "browser/components/migration/metrics.yaml",
+-    "browser/components/newtab/metrics.yaml",
+     "browser/components/places/metrics.yaml",
+-    "browser/components/preferences/metrics.yaml",
+-    "browser/components/privatebrowsing/metrics.yaml",
+-    "browser/components/profiles/metrics.yaml",
+     "browser/components/protections/metrics.yaml",
+     "browser/components/protocolhandler/metrics.yaml",
+-    "browser/components/screenshots/metrics.yaml",
+-    "browser/components/search/metrics.yaml",
+     "browser/components/sessionstore/metrics.yaml",
+-    "browser/components/sidebar/metrics.yaml",
+     "browser/components/tabbrowser/metrics.yaml",
+-    "browser/components/tabnotes/metrics.yaml",
+-    "browser/components/taskbartabs/metrics.yaml",
+-    "browser/components/textrecognition/metrics.yaml",
+-    "browser/components/urlbar/metrics.yaml",
+-    "browser/extensions/search-detection/metrics.yaml",
+     "browser/modules/metrics.yaml",
+     "dom/media/platforms/wmf/metrics.yaml",
+     "services/fxaccounts/metrics.yaml",
+@@ -221,12 +199,6 @@
+ # Pings that are sent by Firefox Desktop.
+ # Order is lexicographical, enforced by t/c/glean/tests/pytest/test_yaml_indices.py
+ firefox_desktop_pings = [
+-    "browser/components/asrouter/pings.yaml",
+-    "browser/components/backup/pings.yaml",
+-    "browser/components/newtab/pings.yaml",
+-    "browser/components/profiles/pings.yaml",
+-    "browser/components/search/pings.yaml",
+-    "browser/components/urlbar/pings.yaml",
+     "browser/modules/pings.yaml",
+     "services/fxaccounts/pings.yaml",
+     "services/sync/pings.yaml",
+--- a/toolkit/components/telemetry/core/Telemetry.cpp
++++ b/toolkit/components/telemetry/core/Telemetry.cpp
+@@ -21,7 +21,6 @@
+ #include "js/PropertyAndElement.h"  // JS_DefineElement, JS_DefineProperty
+ #include "mozilla/dom/ToJSValue.h"
+ #include "mozilla/dom/Promise.h"
+-#include "mozilla/glean/ProfilesMetrics.h"
+ #include "mozilla/glean/TelemetryMetrics.h"
+ #include "mozilla/Atomics.h"
+ #include "mozilla/Attributes.h"
+@@ -326,7 +325,6 @@
+     }
+ 
+     glean::browser_timings::last_shutdown.Set(lastShutdownDuration);
+-    glean::profile_lock::failed_lock_count.Set(failedLockCount);
+ 
+     nsCOMPtr<nsIRunnable> e =
+         NewRunnableMethod("nsFetchTelemetryData::MainThread", this,

@@ -1,0 +1,123 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# Toji (gecko/overlay): the popups the engine still needs — a page's tooltips,
+# its context menu, form autocomplete (datalists), invalid-form and blocked-
+# popup notices, tab-modal prompts, permission prompts, the WebRTC sharing
+# warning, Picture-in-Picture's menus and history swipe arrows. Firefox's
+# panels, tab menus, sidebars, tooltips and toolbar menus are gone.
+
+<popupset id="mainPopupSet">
+  <script src="chrome://browser/content/main-popupset.js" />
+
+  <!-- Firefox's tab context menu: the tab model looks it up; the strip it
+       belonged to is never shown, so it stays empty. Toji's tab menu is the shell's. -->
+  <menupopup id="tabContextMenu"/>
+  <menupopup id="split-view-menu"/>
+
+  <!-- The link-hover status: the tab model's StatusPanel owns it; toji.css hides it. -->
+  <hbox id="statuspanel" inactive="true" hidden="true">
+    <label id="statuspanel-label" role="status" aria-live="off" flex="1" crop="end"/>
+  </hbox>
+
+  <tooltip id="aHTMLTooltip" page="true"/>
+  <tooltip id="remoteBrowserTooltip"/>
+
+  <!-- This node can be cloned by MozTabbrowserTabs.observes. -->
+  <menupopup id="new-tab-button-popup"/>
+
+  <!-- Form autocomplete in pages (a datalist, form history when on). -->
+  <panel is="autocomplete-richlistbox-popup"
+         type="autocomplete-richlistbox"
+         id="PopupAutoComplete"
+         role="group"
+         noautofocus="true"
+         hidden="true"
+         overflowpadding="4"
+         norolluponanchor="true"
+         nomaxresults="true"
+         locationspecific="true" />
+
+  <html:template id="invalidFormTemplate">
+    <!-- for invalid form error message -->
+    <panel id="invalid-form-popup" type="arrow" orient="vertical" noautofocus="true" level="parent" locationspecific="true">
+      <description/>
+    </panel>
+  </html:template>
+
+  <html:template id="dialogStackTemplate">
+    <stack class="dialogStack tab-dialog-box" hidden="true">
+      <vbox class="dialogTemplate dialogOverlay" topmost="true" hidden="true">
+        <hbox class="dialogBox">
+          <browser class="dialogFrame"
+                   autoscroll="false"
+                   disablehistory="true"/>
+        </hbox>
+      </vbox>
+    </stack>
+  </html:template>
+
+  <menupopup id="blockedPopupOptions">
+    <menuitem id="blockedPopupAllowSite"/>
+    <menuitem id="blockedPopupEdit"
+              data-l10n-id="edit-popup-settings2"/>
+    <menuitem id="blockedPopupDontShowMessage"
+              data-l10n-id="popups-infobar-dont-show-message2"
+              type="checkbox"/>
+    <menuseparator id="blockedRedirectSeparator"/>
+    <menuseparator id="blockedPopupsSeparator"/>
+  </menupopup>
+
+  <menupopup id="contentAreaContextMenu"
+# read by macOS cocoa code to enable the "services" menu here:
+             showservicesmenu="true">
+#include browser-context.inc.xhtml
+  </menupopup>
+
+  <menupopup id="pictureInPictureToggleContextMenu">
+    <menuitem id="context_HidePictureInPictureToggle"
+              data-l10n-id="picture-in-picture-hide-toggle"/>
+    <menuitem id="context_MovePictureInPictureToggle"
+              data-l10n-id="picture-in-picture-move-toggle-left"/>
+  </menupopup>
+
+#include popup-notifications.inc.xhtml
+
+#include swipe-navigation.inc.xhtml
+
+  <html:template id="sharing-tabs-warning-panel-template">
+    <panel id="sharing-tabs-warning-panel"
+           role="alert"
+           flip="slide"
+           type="arrow"
+           orient="vertical"
+           ignorekeys="true"
+           consumeoutsideclicks="never"
+           norolluponanchor="true">
+      <hbox type="window" align="start">
+        <image class="screen-icon popup-notification-icon"></image>
+        <vbox flex="1" pack="start">
+          <label>
+            <html:span id="sharing-warning-window-panel-header"
+                       role="heading"
+                       aria-level="1"
+                       data-l10n-id="sharing-warning-window"/>
+            <html:span id="sharing-warning-screen-panel-header"
+                       role="heading"
+                       aria-level="1"
+                       data-l10n-id="sharing-warning-screen"/>
+          </label>
+          <hbox align="center">
+            <button id="sharing-warning-proceed-to-tab" flex="1" data-l10n-id="sharing-warning-proceed-to-tab"/>
+          </hbox>
+          <hbox pack="start">
+            <checkbox id="sharing-warning-disable-for-session" data-l10n-id="sharing-warning-disable-for-session"/>
+          </hbox>
+        </vbox>
+      </hbox>
+    </panel>
+  </html:template>
+
+  #include ../../../toolkit/components/pictureinpicture/content/pictureInPicturePanel.inc.xhtml
+</popupset>
