@@ -11,6 +11,7 @@
 
 export const ASRouter = {
   initialized: false,
+  init() {},
   state: { messages: [], messageImpressions: {} },
   waitForInitialized: Promise.resolve(),
   sendTriggerMessage() {},
@@ -28,10 +29,19 @@ export const TaskbarTabsUtils = {
   getTaskbarTabIdFromWindow() {
     return null;
   },
+  isTaskbarTabWindow() {
+    return false;
+  },
 };
 
 export const TaskbarTabs = {
   getTaskbarTab() {
+    return Promise.reject(new Error("no taskbar tabs"));
+  },
+  findOrCreateTaskbarTab() {
+    return Promise.reject(new Error("no taskbar tabs"));
+  },
+  moveTabIntoTaskbarTab() {
     return Promise.reject(new Error("no taskbar tabs"));
   },
 };
@@ -44,6 +54,29 @@ export const UrlbarUtils = {
   },
   stripUnsafeProtocolOnPaste(text) {
     return String(text ?? "").replace(/^\s*(javascript|data):/i, "");
+  },
+  // Returns [trimmed, strippedPrefix], as the URL bar's helper did.
+  stripPrefixAndTrim(spec, options = {}) {
+    let str = String(spec ?? "");
+    let prefix = "";
+    const m = str.match(/^(https?:\/\/)/i);
+    if (m && ((options.stripHttp && m[1].toLowerCase() === "http://") || (options.stripHttps && m[1].toLowerCase() === "https://"))) {
+      prefix = m[1];
+      str = str.slice(prefix.length);
+    }
+    if (options.stripWww && /^www\./i.test(str)) {
+      prefix += str.slice(0, 4);
+      str = str.slice(4);
+    }
+    if (options.trimEmptyQuery) str = str.replace(/\?$/, "");
+    if (options.trimEmptyHash) str = str.replace(/#$/, "");
+    if (options.trimSlash) str = str.replace(/\/$/, "");
+    if (options.trimTrailingDot) str = str.replace(/\.$/, "");
+    return [str, prefix];
+  },
+  addToUrlbarHistory() {},
+  getURLBarForFocus(win) {
+    return win.gURLBar;
   },
 };
 
@@ -59,6 +92,9 @@ export const UrlbarPrefs = {
 export const UrlbarProviderOpenTabs = {
   registerOpenTab() {},
   unregisterOpenTab() {},
+  getOpenTabUrls() {
+    return new Map();
+  },
 };
 
 export class SmartTabGroupingManager {
@@ -73,6 +109,7 @@ export class SmartTabGroupingManager {
 export const GenAI = {
   buildTabMenu() {},
   buildAskChatMenu() {},
+  summarizeCurrentPage() {},
 };
 
 export const TabNotes = {
@@ -93,11 +130,28 @@ export const TabNotes = {
 export const ContentSharingUtils = {
   isEnabled: false,
   handleShareTabs() {},
+  async createShareableLinkFromBookmarkFolders() {
+    return null;
+  },
 };
 
 export const AIWindow = {
   isDefaultWindow: false,
+  isEnabled: false,
   newTabURL: "about:blank",
+  isAIWindowActiveAndEnabled() {
+    return false;
+  },
+  // The window opener passes its options through here and takes the args back.
+  handleAIWindowOptions({ args = null } = {}) {
+    return args;
+  },
+  toggleAIWindow() {},
+  recordOpenWindowTelemetry() {},
+  initialStartupURL: "about:blank",
+  shouldOpenAsSmartWindow() {
+    return false;
+  },
   isAIWindowActive() {
     return false;
   },
@@ -153,4 +207,72 @@ export const LaterRun = {
   getURL() {
     return "";
   },
+};
+
+export const AIWindowAccountAuth = {
+  hasToSConsent: false,
+};
+
+// The URL bar's suggestion service (the FirefoxSuggest enterprise policy waits on it).
+export const QuickSuggest = {
+  initPromise: Promise.resolve(),
+};
+
+export const ChatStore = {
+  async deleteConversationsByDateRange() {},
+  async deleteAllConversations() {},
+};
+
+// The search UI's OpenSearch discovery: a page's offered engine is ignored.
+export const OpenSearchManager = {
+  addEngine() {},
+};
+
+// Reader mode's actor: the tabs extension API registers for its button updates.
+export const AboutReaderParent = {
+  addMessageListener() {},
+  removeMessageListener() {},
+};
+
+// The toolbar customization framework's widget list and panel views (devtools
+// registers its toolbar button and the profiler popup through them).
+export const CustomizableWidgets = [];
+export const PanelMultiView = {
+  getViewNode() {
+    return null;
+  },
+  openPopup() {
+    return Promise.resolve(false);
+  },
+  hidePopup() {},
+};
+
+// Multiple profiles: Toji has its own containers instead.
+export const SelectableProfileService = {
+  initialized: false,
+  isEnabled: false,
+  currentProfile: { name: "" },
+};
+
+// The new tab page's startup cache (its message is never sent: about:home is Toji's).
+export const AboutHomeStartupCacheChild = {
+  init() {},
+};
+
+// Onboarding's messages (the terms-of-use notice toolkit's telemetry policy looks up).
+export const OnboardingMessageProvider = {
+  getPreonboardingMessages() {
+    return [];
+  },
+  async getMessages() {
+    return [];
+  },
+};
+
+// Firefox's usage telemetry: nothing is recorded.
+export const BrowserUsageTelemetry = {
+  Policy: {},
+  recordWidgetChange() {},
+  reportProfileCount() {},
+  async reportInstallationTelemetry() {},
 };

@@ -46,6 +46,12 @@ MOZ_SRC_FILES += [
     "ProfileDataUpgrader.sys.mjs",
 ]
 
+XPIDL_SOURCES += [
+    "nsIBrowserHandler.idl",
+]
+
+XPIDL_MODULE = "browsercompsbase"
+
 XPCOM_MANIFESTS += [
     "components.conf",
 ]

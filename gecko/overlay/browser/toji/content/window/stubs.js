@@ -23,7 +23,7 @@ var gURLBar = {
   inputField: null,
   controller: { addListener() {}, removeListener() {} },
   editor: { clearUndoRedo() {} },
-  view: { isOpen: false, close() {} },
+  view: { isOpen: false, close() {}, autoOpen() {} },
   style: {},
   searchMode: null,
   searchModeSwitcher: null,
@@ -200,7 +200,27 @@ var gIdentityHandler = {
   updateIdentity() {},
   observe() {},
 };
-var gPermissionPanel = { updateSharingIndicator() {}, onLocationChange() {} };
+var gPermissionPanel = {
+  _identityPermissionBox: null,
+  _permissionPopup: null,
+  _sharingState: null,
+  _initializePopup() {},
+  openPopup() {},
+  hidePopup() {},
+  refreshPermissionIcons() {},
+  updateSharingIndicator() {},
+  onLocationChange() {},
+};
+
+// The zoom indicator (browser/modules/ZoomUI, deleted): the default zoom is 1.
+var ZoomUI = {
+  init() {},
+  updateZoomUI() {},
+  onLocationChange() {},
+  async getGlobalValue() {
+    return 1;
+  },
+};
 
 var DownloadsButton = { init() {}, uninit() {}, initializeIndicator() {} };
 var gBrowserThumbnails = { init() {}, uninit() {} };
@@ -211,3 +231,25 @@ var SelectTranslationsPanel = { open() {}, getLangPairPromise() { return Promise
 var gProfiles = { init() {}, handleCommand() {}, onPopupShowing() {}, populateMoveTabMenu() {} };
 var ToolbarKeyboardNavigator = { init() {}, uninit() {} };
 var BrowserPageActions = { init() {}, onLocationChange() {} };
+
+// Firefox's theme helpers (browser/themes, deleted) and the toolbar tooltip
+// helper the hidden tab strip still asks for its new-tab button's label.
+var ToolbarIconColor = { init() {}, uninit() {}, inferFromText() {} };
+var DynamicShortcutTooltip = {
+  nodeToTooltipMap: {},
+  cache: new Map(),
+  init() {},
+  getText() {
+    return "";
+  },
+};
+
+// Multiple profiles (deleted): the window title carries no profile name.
+var SelectableProfileService = {
+  isEnabled: false,
+  initialized: false,
+  currentProfile: null,
+  getCachedProfileCount() {
+    return 0;
+  },
+};

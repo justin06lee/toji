@@ -39,7 +39,10 @@ const INTENDED: [RegExp, string][] = [
   // Widevine arrives from Google's component updater (update.googleapis.com,
   // then www.google.com/dl/...). A clean profile at idle contacts Google only for this.
   [/(^|\.)gvt1\.com$|^dl\.google\.com$|(^|\.)googleapis\.com$|^www\.google\.com$/, 'Widevine CDM download from Google (component updater)'],
-  [/^ciscobinary\.openh264\.org$/, 'OpenH264 codec download (WebRTC)']
+  [/^ciscobinary\.openh264\.org$/, 'OpenH264 codec download (WebRTC)'],
+  // The built-in blocker (uBlock Origin, bundled) fetches its filter lists on first
+  // launch and refreshes them after: its own hosts, the lists' publishers, the PSL.
+  [/^(ublockorigin\.(github\.io|pages\.dev)|cdn\.jsdelivr\.net|pgl\.yoyo\.org|malware-filter\.gitlab\.io|publicsuffix\.org|easylist\.to|secure\.fanboy\.co\.nz|raw\.githubusercontent\.com)$/, "uBlock Origin's filter lists"]
 ];
 
 function classify(host: string): string | null {

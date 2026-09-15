@@ -206,14 +206,15 @@ try {
   );
   say(audit.length === 0, 'nothing Firefox draws has a box on screen: the window is the shell and the page', JSON.stringify(audit));
   // Toji's pages are the ones whose assets come from chrome://toji/content/pages/.
-  const tojiPage = (url: string) =>
+  // The tab's title arrives after the page's script runs; wait for the page's own.
+  const tojiPage = (url: string, title: RegExp) =>
     until<string>(
-      `win.gBrowser.selectedBrowser.currentURI.spec === ${JSON.stringify(url)} && win.gBrowser.selectedBrowser.contentDocument?.documentElement?.innerHTML.includes("chrome://toji/content/pages/") && shell.querySelector("[data-testid=top-tab][data-active]")?.textContent`
+      `(() => { const t = shell.querySelector("[data-testid=top-tab][data-active]")?.textContent; return win.gBrowser.selectedBrowser.currentURI.spec === ${JSON.stringify(url)} && win.gBrowser.selectedBrowser.contentDocument?.documentElement?.innerHTML.includes("chrome://toji/content/pages/") && ${title}.test(t ?? "") && t; })()`
     );
   await typeOmnibox('about:preferences');
-  const prefs = await tojiPage('about:preferences');
+  const prefs = await tojiPage('about:preferences', /Settings/);
   await load('about:home');
-  const home = await tojiPage('about:home');
+  const home = await tojiPage('about:home', /New Tab/);
   say(/Settings/.test(prefs ?? '') && /New Tab/.test(home ?? ''), "Firefox's own pages are Toji's: about:preferences is Settings, about:home the start page", JSON.stringify({ prefs, home }));
 
   // 3. Shift+Enter on an address opens it.
@@ -313,6 +314,9 @@ try {
 
   // 6. Reset context.
   await exec(`host.select(host.state().tabs[0].id);`);
+  // The tab slept through Tor mode; session restore wakes it on selection, and a load
+  // issued before that lands is replaced by the restore (as it would be in Firefox).
+  await until(`!win.gBrowser.selectedTab.hasAttribute("pending") && win.gBrowser.selectedBrowser.currentURI.spec.endsWith("/alpha") && win.gBrowser.selectedBrowser.contentTitle === "Page alpha"`);
   await load(page('setcookie'));
   await until(`win.gBrowser.selectedBrowser.contentTitle.startsWith("cookie:")`);
   await load(page('cookie'));

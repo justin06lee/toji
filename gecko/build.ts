@@ -148,7 +148,8 @@ async function applyPatches() {
 //
 // gecko/strip.txt lists paths (relative to the tree; globs allowed) that are
 // deleted from the source tree before the build, so Firefox's own UI never
-// exists in what Toji is built from. The expansion of each pattern is recorded
+// exists in what Toji is built from; "!path" lines are files under those that
+// stay (test support files other manifests still name). The expansion of each pattern is recorded
 // in .work/stripped.json; a pattern removed from the list has its files put
 // back from the tarball (bsdtar extracts a directory member with everything
 // under it), and any applied patch touching a restored path is re-applied.
@@ -158,13 +159,31 @@ const STRIPPED = join(WORK, 'stripped.json');
 const TARBALL_INDEX = join(CACHE, `firefox-${version.version}.source.files`);
 const TREE_PREFIX = `firefox-${version.version.replace(/esr$/, '')}/`;
 
-function readStripList(): string[] {
+function readStripEntries(): string[] {
   if (!existsSync(STRIP_LIST)) return [];
   return readFileSync(STRIP_LIST, 'utf8')
     .split('\n')
     .map((l) => l.replace(/#.*$/, '').trim())
     .filter(Boolean)
     .map((l) => l.replace(/\/+$/, ''));
+}
+
+function readStripList(): string[] {
+  return readStripEntries().filter((l) => !l.startsWith('!'));
+}
+
+// "!path" lines: files inside a stripped directory that stay, because the
+// build system still reads them (a test manifest elsewhere names them as
+// support files, and manifests are checked even with tests disabled).
+function readKeepList(): string[] {
+  return readStripEntries()
+    .filter((l) => l.startsWith('!'))
+    .map((l) => l.slice(1));
+}
+
+async function stripKeep() {
+  const missing = readKeepList().filter((p) => !existsSync(join(SRC, p)));
+  if (missing.length) await restoreFromTarball(missing);
 }
 
 function readStripped(): Record<string, string[]> {
@@ -403,6 +422,7 @@ async function prepare() {
   await stripRestore();
   await applyPatches();
   stripDelete();
+  await stripKeep();
   await generate();
   await copyOverlay();
 }

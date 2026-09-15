@@ -1,6 +1,17 @@
 --- a/browser/components/tabbrowser/content/tabbrowser.js
 +++ b/browser/components/tabbrowser/content/tabbrowser.js
-@@ -182,8 +182,9 @@
+@@ -53,6 +53,10 @@
+     }
+ 
+     let hbox = document.getElementById("userContext-icons");
++    // Toji: the window has no container indicator of Firefox's; the shell shows the container.
++    if (!hbox) {
++      return;
++    }
+ 
+     let userContextId = gBrowser.selectedBrowser.getAttribute("usercontextid");
+     if (!userContextId) {
+@@ -182,8 +186,9 @@
  
      init() {
        this.tabContainer = document.getElementById("tabbrowser-tabs");
@@ -12,7 +23,7 @@
        this.tabbox = document.getElementById("tabbrowser-tabbox");
        this.tabpanels = document.getElementById("tabbrowser-tabpanels");
        this.pinnedTabsContainer = document.getElementById(
-@@ -192,26 +193,22 @@
+@@ -192,26 +197,22 @@
        this.splitViewCommandSet = document.getElementById("splitViewCommands");
  
        ChromeUtils.defineESModuleGetters(this, {
@@ -46,7 +57,7 @@
          FaviconUtils: "moz-src:///toolkit/modules/FaviconUtils.sys.mjs",
          KeyboardLockUtils: "resource://gre/modules/KeyboardLockUtils.sys.mjs",
        });
-@@ -219,7 +216,6 @@
+@@ -219,7 +220,6 @@
          return new Localization(
            [
              "browser/tabbrowser.ftl",
@@ -54,7 +65,18 @@
              "branding/brand.ftl",
            ],
            true
-@@ -3801,7 +3797,7 @@
+@@ -1012,6 +1012,10 @@
+       let { sharedData } = Services.ppmm;
+       if (!sharedData.has("Findbar:Shortcut")) {
+         let keyEl = document.getElementById("key_find");
++        // Toji: no find bar shortcut of Firefox's in the window.
++        if (!keyEl) {
++          return;
++        }
+         let mods = keyEl
+           .getAttribute("modifiers")
+           .replace(
+@@ -3801,7 +3805,7 @@
        }
  
        if (!color) {
@@ -63,7 +85,7 @@
        }
  
        if (!id) {
-@@ -3880,8 +3876,8 @@
+@@ -3880,8 +3884,8 @@
          telemetrySource: this.TabMetrics.METRIC_SOURCE.UNKNOWN,
        }
      ) {
@@ -74,7 +96,7 @@
        }
  
        if (!options.skipPermitUnload) {
-@@ -8269,7 +8265,7 @@
+@@ -8269,7 +8273,7 @@
      }
  
      on_TabGroupCreateByUser(aEvent) {
@@ -83,7 +105,7 @@
      }
  
      on_TabGrouped(aEvent) {
-@@ -10917,7 +10913,7 @@
+@@ -10917,7 +10921,7 @@
      // When using the tab context menu to create a group from the all tabs
      // panel, make sure we close that panel so that it doesn't obscure the tab
      // group creation panel.
@@ -92,7 +114,7 @@
    },
  
    moveSplitViewToNewGroup() {
-@@ -10949,7 +10945,7 @@
+@@ -10949,7 +10953,7 @@
      // When using the tab context menu to create a group from the all tabs
      // panel, make sure we close that panel so that it doesn't obscure the tab
      // group creation panel.
@@ -101,7 +123,7 @@
    },
  
    /**
-@@ -11078,6 +11074,6 @@
+@@ -11078,6 +11082,6 @@
  };
  
  ChromeUtils.defineESModuleGetters(TabContextMenu, {

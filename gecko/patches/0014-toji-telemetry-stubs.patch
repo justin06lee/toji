@@ -1,0 +1,43 @@
+--- a/toolkit/components/telemetry/app/TelemetryReportingPolicy.sys.mjs
++++ b/toolkit/components/telemetry/app/TelemetryReportingPolicy.sys.mjs
+@@ -16,7 +16,7 @@
+   TelemetrySend: "resource://gre/modules/TelemetrySend.sys.mjs",
+   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
+   OnboardingMessageProvider:
+-    "resource:///modules/asrouter/OnboardingMessageProvider.sys.mjs",
++    "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   WinTaskbarJumpList: "resource:///modules/WindowsJumpLists.sys.mjs",
+ });
+ 
+--- a/browser/components/extensions/parent/ext-browserAction.js
++++ b/browser/components/extensions/parent/ext-browserAction.js
+@@ -5,7 +5,7 @@
+ "use strict";
+ 
+ ChromeUtils.defineESModuleGetters(this, {
+-  BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.sys.mjs",
++  BrowserUsageTelemetry: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   CustomizableUI:
+     "moz-src:///browser/components/customizableui/CustomizableUI.sys.mjs",
+   ExtensionTelemetry: "resource://gre/modules/ExtensionTelemetry.sys.mjs",
+--- a/toolkit/components/telemetry/app/TelemetryControllerParent.sys.mjs
++++ b/toolkit/components/telemetry/app/TelemetryControllerParent.sys.mjs
+@@ -60,7 +60,7 @@
+ ) {
+   ChromeUtils.defineESModuleGetters(lazy, {
+     // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
+-    BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.sys.mjs",
++    BrowserUsageTelemetry: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   });
+ }
+ 
+--- a/browser/components/places/PlacesComponents.manifest
++++ b/browser/components/places/PlacesComponents.manifest
+@@ -2,7 +2,6 @@
+ category initial-migration-did-import-default-bookmarks moz-src:///browser/components/places/PlacesBrowserStartup.sys.mjs PlacesBrowserStartup.didImportDefaultBookmarks
+ 
+ # Add import button on first startup
+-category browser-idle-startup moz-src:///browser/components/places/PlacesBrowserStartup.sys.mjs PlacesBrowserStartup.maybeAddImportButton
+ 
+ category browser-first-window-ready moz-src:///browser/components/places/PlacesBrowserStartup.sys.mjs PlacesBrowserStartup.onFirstWindowReady
+ category browser-quit-application-granted moz-src:///browser/components/places/PlacesBrowserStartup.sys.mjs PlacesBrowserStartup.handleShutdown

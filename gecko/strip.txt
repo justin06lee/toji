@@ -327,11 +327,12 @@ browser/locales-preview
 # Mozilla VPN's in-browser half
 toolkit/components/ipprotection
 
-# Tests of what stays: never built into the app, and half of them exercise what
-# is gone. The browser's C++ tests stay with their moz.build files.
-browser/components/tests
-browser/base/content/test
-browser/components/originattributes
-browser/components/resistfingerprinting
-browser/components/safebrowsing
-browser/tools/mozscreenshots
+# Tests are never part of the app, and other test manifests (gfx's, for one)
+# name files under them, which the build system checks even with tests
+# disabled: the ones under kept directories stay; the deleted components'
+# went with them.
+
+# Test support files that manifests elsewhere in the tree still name (the
+# build system checks them even with tests disabled): kept, nothing else.
+!browser/components/preferences/tests/head.js
+!browser/components/profiles/tests/browser/head.js

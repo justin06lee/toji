@@ -1,0 +1,22 @@
+--- a/browser/components/enterprisepolicies/Policies.sys.mjs
++++ b/browser/components/enterprisepolicies/Policies.sys.mjs
+@@ -33,7 +33,7 @@
+   FileUtils: "resource://gre/modules/FileUtils.sys.mjs",
+   ProxyPolicies: "resource:///modules/policies/ProxyPolicies.sys.mjs",
+   SearchService: "moz-src:///toolkit/components/search/SearchService.sys.mjs",
+-  QuickSuggest: "moz-src:///browser/components/urlbar/QuickSuggest.sys.mjs",
++  QuickSuggest: "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   WebsiteFilter: "resource:///modules/policies/WebsiteFilter.sys.mjs",
+ });
+ 
+--- a/browser/modules/webrtcUI.sys.mjs
++++ b/browser/modules/webrtcUI.sys.mjs
+@@ -2,7 +2,7 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+-import { EventEmitter } from "resource:///modules/syncedtabs/EventEmitter.sys.mjs";
++import { EventEmitter } from "resource://gre/modules/EventEmitter.sys.mjs";
+ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
+ import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
+ 

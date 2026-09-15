@@ -200,6 +200,16 @@ var gBrowserInit = {
   },
 
   onLoad() {
+    // The window's private-browsing mark. PrivateBrowsingUI.sys.mjs, which set it,
+    // is deleted with the menus it adjusted; the tab model titles the window by it
+    // and the shell reads it.
+    if (PrivateBrowsingUtils.isWindowPrivate(window)) {
+      document.documentElement.setAttribute(
+        "privatebrowsingmode",
+        PrivateBrowsingUtils.permanentPrivateBrowsing ? "permanent" : "temporary"
+      );
+    }
+
     gBrowser.addEventListener("DOMUpdateBlockedPopups", e =>
       PopupAndRedirectBlockerObserver.handleEvent(e)
     );

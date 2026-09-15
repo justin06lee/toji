@@ -47,7 +47,7 @@
   skin/classic/browser/notification-icons/xr-blocked.svg       (../shared/notification-icons/xr-blocked.svg)
   skin/classic/browser/notification-icons/xr.svg               (../shared/notification-icons/xr.svg)
   skin/classic/browser/notification-icons/midi.svg             (../shared/notification-icons/midi.svg)
-  skin/classic/browser/tab-crashed.svg                         (../shared/tab-crashed.svg)
+  skin/classic/browser/tab-crashed.svg                         (../shared/incontent-icons/tab-crashed.svg)
   skin/classic/browser/tabbrowser/content-area.css             (../shared/tabbrowser/content-area.css)
   skin/classic/browser/tabbrowser/crashed.svg                  (../shared/tabbrowser/crashed.svg)
   skin/classic/browser/tabbrowser/fullscreen-and-pointerlock.css (../shared/tabbrowser/fullscreen-and-pointerlock.css)

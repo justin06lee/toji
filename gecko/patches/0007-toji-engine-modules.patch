@@ -95,7 +95,21 @@
    JsonSchema: "resource://gre/modules/JsonSchema.sys.mjs",
    PrivacyFilter: "resource://gre/modules/sessionstore/PrivacyFilter.sys.mjs",
    sessionStoreLogger: "resource:///modules/sessionstore/SessionLogger.sys.mjs",
-@@ -5599,7 +5598,7 @@
+@@ -2721,8 +2720,11 @@
+           // Fake a popupshowing event so shortcuts work:
+           let window = Services.appShell.hiddenDOMWindow;
+           let historyMenu = window.document.getElementById("history-menu");
+-          let evt = new window.CustomEvent("popupshowing", { bubbles: true });
+-          historyMenu.menupopup.dispatchEvent(evt);
++          // Toji: the hidden window has no History menu.
++          if (historyMenu?.menupopup) {
++            let evt = new window.CustomEvent("popupshowing", { bubbles: true });
++            historyMenu.menupopup.dispatchEvent(evt);
++          }
+         }
+       } else if (!shouldStore) {
+         if (
+@@ -5599,7 +5601,7 @@
        delete winData.hidden;
      }
  
@@ -104,7 +118,7 @@
      if (sidebarUIState) {
        winData.sidebar = structuredClone(sidebarUIState);
      }
-@@ -6866,8 +6865,8 @@
+@@ -6866,8 +6868,8 @@
      if (!aSidebar || isPopup) {
        return;
      }
@@ -146,18 +160,21 @@
    }
 --- a/browser/components/extensions/parent/ext-menus.js
 +++ b/browser/components/extensions/parent/ext-menus.js
-@@ -1054,20 +1054,8 @@
+@@ -1052,22 +1052,10 @@
+   async onWindowOpen(window) {
+     for (const id of menuTracker.menuIds) {
        const menu = window.document.getElementById(id);
-       menu.addEventListener("popupshowing", menuTracker);
+-      menu.addEventListener("popupshowing", menuTracker);
++      menu?.addEventListener("popupshowing", menuTracker);
      }
--
+ 
 -    const sidebarHeader = window.document.getElementById(
 -      "sidebar-switcher-target"
 -    );
 -    sidebarHeader.addEventListener("SidebarShown", menuTracker.onSidebarShown);
 -
 -    await window.SidebarController.promiseInitialized;
- 
+-
 -    if (
 -      !window.closed &&
 -      window.SidebarController.currentID === "viewBookmarksSidebar"
@@ -240,7 +257,17 @@
  class CaptivePortalObserver {
 --- a/browser/components/BrowserContentHandler.sys.mjs
 +++ b/browser/components/BrowserContentHandler.sys.mjs
-@@ -17,15 +17,12 @@
+@@ -9,23 +9,20 @@
+ 
+ ChromeUtils.defineESModuleGetters(lazy, {
+   AIWindow:
+-    "moz-src:///browser/components/aiwindow/ui/modules/AIWindow.sys.mjs",
++    "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   AIWindowAccountAuth:
+-    "moz-src:///browser/components/aiwindow/ui/modules/AIWindowAccountAuth.sys.mjs",
++    "resource:///modules/toji/FirefoxStubs.sys.mjs",
+   AsyncShutdown: "resource://gre/modules/AsyncShutdown.sys.mjs",
+   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
    BrowserUtils: "resource://gre/modules/BrowserUtils.sys.mjs",
    FirstStartup: "resource://gre/modules/FirstStartup.sys.mjs",
    HeadlessShell: "moz-src:///browser/components/shell/HeadlessShell.sys.mjs",

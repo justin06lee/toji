@@ -256,11 +256,10 @@
    "A11yUtils",
    "chrome://browser/content/browser-a11yUtils.js"
  );
-@@ -292,16 +148,6 @@
-   this,
+@@ -293,16 +149,6 @@
    "gSharedTabWarning",
    "chrome://browser/content/browser-webrtc.js"
--);
+ );
 -XPCOMUtils.defineLazyScriptGetter(
 -  this,
 -  "gPageStyleMenu",
@@ -270,9 +269,10 @@
 -  this,
 -  "gProfiles",
 -  "chrome://browser/content/browser-profiles.js"
- );
+-);
  
  // lazy service getters
+ 
 @@ -359,56 +205,11 @@
    );
  });
@@ -287,7 +287,7 @@
  ChromeUtils.defineLazyGetter(this, "gNavToolbox", () => {
    return document.getElementById("navigator-toolbox");
  });
--
+ 
 -ChromeUtils.defineLazyGetter(this, "gURLBar", () => {
 -  let urlbar = document.getElementById("urlbar");
 -
@@ -324,7 +324,7 @@
 -  };
 -  urlbar.addEventListener("beforefocus", beforeFocusOrSelect);
 -  urlbar.addEventListener("beforeselect", beforeFocusOrSelect);
- 
+-
 -  return urlbar;
 -});
  
@@ -357,7 +357,23 @@
    "gAddonAbuseReportEnabled",
    "extensions.abuseReport.enabled",
    false
-@@ -710,13 +491,7 @@
+@@ -627,15 +408,6 @@
+   );
+ });
+ 
+-customElements.setElementCreationCallback(
+-  "login-doorhanger-username-field",
+-  () => {
+-    ChromeUtils.importESModule(
+-      "chrome://browser/content/passwordmgr/login-doorhanger-username-field.mjs",
+-      { global: "current" }
+-    );
+-  }
+-);
+ 
+ var gBrowser;
+ var gContextMenu = null; // nsContextMenu instance
+@@ -710,13 +482,7 @@
    }
  }
  
@@ -372,7 +388,7 @@
  
  var gInitialPages = [
    "about:blank",
-@@ -749,13 +524,7 @@
+@@ -749,13 +515,7 @@
  }
  
  function updateBookmarkToolbarVisibility() {
@@ -387,7 +403,7 @@
  }
  
  // This is a stringbundle-like interface to gBrowserBundle, formerly a getter for
-@@ -768,46 +537,8 @@
+@@ -768,45 +528,7 @@
      return gBrowserBundle.formatStringFromName(key, array);
    },
  };
@@ -399,11 +415,11 @@
 -    "identity.fxaccounts.enabled",
 -    false
 -  );
- 
+-
 -  const mainWindowEl = document.documentElement;
 -  const fxaPanelEl = PanelMultiView.getViewNode(document, "PanelUI-fxa");
 -  const taskbarTab = mainWindowEl.hasAttribute("taskbartab");
- 
+-
 -  // To minimize the toolbar button flickering or appearing/disappearing during startup,
 -  // we use this pref to anticipate the likely FxA status.
 -  const statusGuess = !!Services.prefs.getStringPref(
@@ -414,7 +430,7 @@
 -    "fxastatus",
 -    statusGuess ? "signed_in" : "not_configured"
 -  );
--
+ 
 -  fxaPanelEl.addEventListener("ViewShowing", gSync.updateSendToDeviceTitle);
 -
 -  if (enable && syncEnabled && !taskbarTab) {
@@ -430,24 +446,24 @@
 -    mainWindowEl.removeAttribute("fxatoolbarmenu");
 -  }
 -}
--
+ 
  function UpdateBackForwardCommands(aWebNavigation) {
    var backCommand = document.getElementById("Browser:Back");
-   var forwardCommand = document.getElementById("Browser:Forward");
-@@ -1261,12 +992,6 @@
+@@ -1260,13 +982,7 @@
+       if (XULBrowserWindow.stopCommand.hasAttribute("disabled")) {
          BrowserCommands.stop();
        }
-       break;
+-      break;
 -    case "Search":
 -      SearchUIUtils.webSearch(window);
--      break;
+       break;
 -    case "Bookmarks":
 -      SidebarController.toggle("viewBookmarksSidebar");
 -      break;
      case "Home":
        BrowserCommands.home();
        break;
-@@ -1428,58 +1153,7 @@
+@@ -1428,57 +1144,6 @@
    return url;
  }
  
@@ -455,7 +471,7 @@
 -  var splitter = document.getElementById("urlbar-search-splitter");
 -  var urlbar = document.getElementById("urlbar-container");
 -  var searchbar = document.getElementById("search-container");
- 
+-
 -  if (document.documentElement.hasAttribute("customizing")) {
 -    if (splitter) {
 -      splitter.remove();
@@ -502,11 +518,10 @@
 -    splitter.remove();
 -  }
 -}
--
+ 
  function UpdatePopupNotificationsVisibility() {
    // Only need to update PopupNotifications if it has already been initialized
-   // for this window (i.e. its getter no longer exists).
-@@ -1490,10 +1164,6 @@
+@@ -1490,10 +1155,6 @@
      PopupNotifications.anchorVisibilityChange();
    }
  
@@ -517,7 +532,7 @@
  }
  
  function PageProxyClickHandler(aEvent) {
-@@ -1836,7 +1506,7 @@
+@@ -1836,7 +1497,7 @@
      if (!Services.policies.isAllowed("profileImport")) {
        document
          .getElementById("cmd_file_importFromAnotherBrowser")
@@ -526,7 +541,7 @@
      }
    },
  
-@@ -2003,7 +1673,6 @@
+@@ -2003,7 +1664,6 @@
      }
  
      this.overLink = url;
@@ -534,7 +549,7 @@
    },
  
    onEnterDOMFullscreen() {
-@@ -2079,10 +1748,6 @@
+@@ -2079,10 +1739,6 @@
        aStateFlags & nsIWebProgressListener.STATE_START &&
        aStateFlags & nsIWebProgressListener.STATE_IS_NETWORK
      ) {
@@ -545,7 +560,7 @@
        this.isBusy = true;
  
        if (
-@@ -2367,20 +2032,8 @@
+@@ -2367,20 +2023,8 @@
        } else {
          element.setAttribute("disabled", "true");
        }
@@ -556,17 +571,17 @@
 -    } else {
 -      this._menuItemForTranslations.removeAttribute("disabled");
      }
- 
+-
 -    const shouldShowTranslationsMenuItems =
 -      TranslationsParent.AIFeature.isEnabled &&
 -      TranslationsParent.getIsTranslationsEngineSupported();
--
+ 
 -    this._menuItemForTranslations.hidden = !shouldShowTranslationsMenuItems;
 -    this._moreToolsTranslateMenuItem.hidden = !shouldShowTranslationsMenuItems;
    },
  
    /**
-@@ -2462,9 +2115,7 @@
+@@ -2462,9 +2106,7 @@
      return principal.URI;
    },
  
@@ -577,7 +592,7 @@
  
    onStatusChange(aWebProgress, aRequest, aStatus, aMessage) {
      this.status = aMessage;
-@@ -2607,291 +2258,9 @@
+@@ -2607,291 +2249,9 @@
    "browser.newtabpage.enabled",
    true
  );
@@ -714,7 +729,7 @@
 -    if (!this._initialized) {
 -      return;
 -    }
--
+ 
 -    this._cancelTransition();
 -    this.stop.removeEventListener("click", this);
 -    this.stopReloadContainer.removeEventListener("animationend", this);
@@ -750,7 +765,7 @@
 -    // still run if the page has been loading until long after the tab switch.
 -    this.timeWhenSwitchedToStop = window.performance.now();
 -  },
- 
+-
 -  switchToStop(aRequest, aWebProgress) {
 -    if (
 -      !this.ensureInitialized() ||
@@ -869,7 +884,7 @@
  var TabsProgressListener = {
    onStateChange(aBrowser, aWebProgress, aRequest, aStateFlags, aStatus) {
      // Collect telemetry data about tab load times.
-@@ -2959,15 +2328,6 @@
+@@ -2959,15 +2319,6 @@
      // Filter out location changes caused by anchor navigation
      // or history.push/pop/replaceState.
      if (aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT) {
@@ -885,7 +900,7 @@
        return;
      }
  
-@@ -2996,11 +2356,7 @@
+@@ -2996,11 +2347,7 @@
      if (!iconURI) {
        return;
      }
@@ -898,10 +913,13 @@
    },
  };
  
-@@ -3014,336 +2370,19 @@
-   }
- }
- 
+@@ -3011,339 +2358,22 @@
+   let autoHide = popup.querySelector(".fullscreen-context-autohide");
+   if (autoHide) {
+     FullScreen.updateAutohideMenuitem(autoHide);
+-  }
+-}
+-
 -function onViewToolbarCommand(aEvent) {
 -  let node = aEvent.originalTarget;
 -  let menuId;
@@ -919,10 +937,10 @@
 -    menuId = node.parentNode.id;
 -    toolbarId = node.getAttribute("toolbarId");
 -    isVisible = node.hasAttribute("checked");
--  }
+   }
 -  CustomizableUI.setToolbarVisibility(toolbarId, isVisible);
 -  BrowserUsageTelemetry.recordToolbarVisibility(toolbarId, isVisible, menuId);
--}
+ }
  
 -function setToolbarVisibility(
 -  toolbar,
@@ -990,7 +1008,7 @@
 -      }
 -    }
 -  }
--
+ 
 -  if (toolbar.hasAttribute(hidingAttribute) != isVisible) {
 -    // If this call will not result in a visibility change, return early
 -    // since dispatching toolbarvisibilitychange will cause views to get rebuilt.
@@ -1096,10 +1114,10 @@
 -    if (!ok) {
 -      return;
 -    }
- 
+-
 -    this.update();
 -  },
- 
+-
 -  getCurrentDensity() {
 -    // Automatically override the uidensity to touch in Windows tablet mode
 -    // (either Win10 or Win11).
@@ -1177,7 +1195,7 @@
 -    "reader-mode-button-icon": "reader-mode-button.tooltip",
 -    "vertical-tabs-newtab-button": "newTabButton.tooltip",
 -  },
--
+ 
 -  nodeToShortcutMap: {
 -    "bookmarks-menu-button": "manBookmarkKb",
 -    "context-reload": "key_reload",
@@ -1198,7 +1216,7 @@
 -    "reader-mode-button-icon": "key_toggleReaderMode",
 -    "vertical-tabs-newtab-button": "key_newNavigatorTab",
 -  },
--
+ 
 -  getText(nodeId) {
 -    if (!this.cache.has(nodeId) && nodeId in this.nodeToTooltipMap) {
 -      let strId = this.nodeToTooltipMap[nodeId];
@@ -1235,7 +1253,7 @@
  /*
   * - [ Dependencies ] ---------------------------------------------------------
   *  utilityOverlay.js:
-@@ -3841,12 +2880,7 @@
+@@ -3841,12 +2871,7 @@
      const remoteControlComponent = this.getRemoteControlComponent();
      if (remoteControlComponent) {
        mainWindow.setAttribute("remotecontrol", "true");
@@ -1249,7 +1267,7 @@
      } else {
        mainWindow.removeAttribute("remotecontrol");
      }
-@@ -4092,70 +3126,6 @@
+@@ -4092,70 +3117,6 @@
    },
  };
  
@@ -1320,7 +1338,7 @@
  
  /**
   * The TabDialogBox supports opening window dialogs as SubDialogs on the tab and content
-@@ -4678,295 +3648,8 @@
+@@ -4678,295 +3639,8 @@
    gDialogBox = null;
  }
  
@@ -3093,7 +3111,20 @@
    SearchUtils: "moz-src:///toolkit/components/search/SearchUtils.sys.mjs",
    ShortcutUtils: "resource://gre/modules/ShortcutUtils.sys.mjs",
    TranslationsParent: "resource://gre/actors/TranslationsParent.sys.mjs",
-@@ -905,7 +898,6 @@
+@@ -528,10 +521,8 @@
+       shouldShow && !isWindowPrivate && showContainers
+     );
+     this.showItem("context-openlinkincurrent", this.onPlainTextLink);
+-    this.showItem(
+-      "context-previewlink",
+-      lazy.LinkPreview.shouldShowContextMenu(this)
+-    );
++    // Toji: link previews went with the AI features.
++    this.showItem("context-previewlink", false);
+     let isHiddenTab = !!window.gBrowser?.getTabForBrowser(this.browser)?.hidden;
+     let isPinnedTab = !!window.gBrowser?.getTabForBrowser(this.browser)?.pinned;
+     this.showItem(
+@@ -905,7 +896,6 @@
      }
  
      this.showAndFormatSearchContextItem();
@@ -3101,7 +3132,7 @@
      lazy.GenAI.buildAskChatMenu(document.getElementById("context-ask-chat"), {
        browser: this.browser,
        selectionInfo: this.selectionInfo,
-@@ -1357,7 +1349,7 @@
+@@ -1357,7 +1347,7 @@
  
    shouldShowTakeScreenshot() {
      let shouldShow =
@@ -3110,7 +3141,16 @@
        this.inTabBrowser &&
        !this.onTextInput &&
        !this.onLink &&
-@@ -2327,7 +2319,7 @@
+@@ -2276,7 +2266,7 @@
+   previewLink(url = this.linkURL) {
+     // If we're in a view-source tab, remove the view-source: prefix
+     url = url.replace(/^view-source:/, "");
+-    lazy.LinkPreview.handleContextMenuClick(url, this);
++    lazy.LinkPreview?.handleContextMenuClick(url, this);
+   }
+ 
+   /**
+@@ -2327,7 +2317,7 @@
          method,
        });
  
@@ -3119,7 +3159,16 @@
      }
    }
  
-@@ -2963,18 +2955,17 @@
+@@ -2942,7 +2932,7 @@
+         }
+       );
+       this.#setNewFeatureBadge(menuitem, visualSearchUrl.isNew());
+-      lazy.BrowserSearchTelemetry.recordSapImpression(
++      lazy.BrowserSearchTelemetry?.recordSapImpression(
+         this.browser,
+         menuitem.engine,
+         "contextmenu_visual"
+@@ -2963,18 +2953,17 @@
     *   be performed. A falsey value is equivalent to
     *   `SearchUtils.URL_TYPE.SEARCH` and will perform a usual web search.
     */
